@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   maximize: () => ipcRenderer.invoke('win:maximize'),
   toggleFullscreen: () => ipcRenderer.invoke('win:toggleFullscreen'),
   toggleAlwaysOnTop: () => ipcRenderer.invoke('win:toggleAlwaysOnTop'),
+  enterPip: (opts) => ipcRenderer.invoke('win:enterPip', opts),
+  leavePip: (opts) => ipcRenderer.invoke('win:leavePip', opts),
   close: () => ipcRenderer.invoke('win:close'),
   getWindowState: () => ipcRenderer.invoke('win:getState'),
 
@@ -36,6 +38,7 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),
   onWindowState: (cb) => ipcRenderer.on('win:state', (_e, state) => cb(state)),
+  onPipExitRequested: (cb) => ipcRenderer.on('pip:exitRequested', () => cb()),
   onAiCommand: (cb) => ipcRenderer.on('ai:command', (_e, cmd) => cb(cmd)),
   onInitialMedia: (cb) => ipcRenderer.on('media:initial', (_e, data) => cb(data))
 });

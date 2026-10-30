@@ -91,6 +91,10 @@
     aiPort: 4500,
     hoveringTopBar: false,
     hoveringBottomBar: false,
+    hoveringLeftSidebar: false,
+    hoveringRightDrawer: false,
+    dialogOpen: false,
+    lastPauseAt: 0,
 
     // Optional detected reference demo video on Desktop
     demoVideoPath: null
@@ -804,6 +808,15 @@
     el.mediaTitle.textContent = item.title || item.name;
     document.title = `${item.title || item.name} — VLCopyCAT`;
 
+    if ('mediaSession' in navigator && typeof MediaMetadata !== 'undefined') {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: item.title || item.name,
+          artist: item.folderName || 'VLCopyCAT'
+        });
+      } catch {}
+    }
+
     if (item.folderName) {
       el.folderCrumbText.textContent = item.folderName;
       el.btnFolderCrumb.title = item.folderPath;
@@ -1341,35 +1354,60 @@
 
   // ==================== DIALOG ACTIONS ====================
   async function openFileDialog(multi = false) {
-    const bundle = await api.openFiles(multi);
-    if (bundle) ingestOpenedBundle(bundle, true);
+    state.dialogOpen = true;
+    syncSidebarAutoCollapse();
+    try {
+      const bundle = await api.openFiles(multi);
+      if (bundle) ingestOpenedBundle(bundle, true);
+    } finally {
+      state.dialogOpen = false;
+      syncSidebarAutoCollapse();
+    }
   }
 
   async function openFolderDialog() {
-    const folder = await api.openFolder();
-    if (!folder) return;
-    state.libraryFolder = folder;
-    el.libFolderLabel.textContent = folder.folderName || 'Folder';
-    el.folderCrumbText.textContent = folder.folderName || 'Folder';
-    el.librarySidebar.classList.remove('collapsed');
-    el.btnSidebar.classList.add('active');
-    updateChromeSolidity();
-    renderSidebarShortcuts();
-    renderLibraryList();
-    if (folder.items?.length) {
-      state.queue = folder.items.slice();
-      loadMediaItemAtIndex(0, true);
-    } else if (!folder.subfolders?.length) {
-      showToast('Folder contains no media files');
+    state.dialogOpen = true;
+    syncSidebarAutoCollapse();
+    try {
+      const folder = await api.openFolder();
+      if (!folder) return;
+      state.libraryFolder = folder;
+      el.libFolderLabel.textContent = folder.folderName || 'Folder';
+      el.folderCrumbText.textContent = folder.folderName || 'Folder';
+      el.librarySidebar.classList.remove('collapsed');
+      el.btnSidebar.classList.add('active');
+      updateChromeSolidity();
+      renderSidebarShortcuts();
+      renderLibraryList();
+      if (folder.items?.length) {
+        state.queue = folder.items.slice();
+        loadMediaItemAtIndex(0, true);
+      } else if (!folder.subfolders?.length) {
+        showToast('Folder contains no media files');
+      }
+    } finally {
+      state.dialogOpen = false;
+      syncSidebarAutoCollapse();
     }
   }
 
   async function openSubtitleDialog() {
-    const sub = await api.openSubtitle();
-    if (sub) loadSubtitleData(sub, true);
+    state.dialogOpen = true;
+    syncSidebarAutoCollapse();
+    try {
+      const sub = await api.openSubtitle();
+      if (sub) loadSubtitleData(sub, true);
+    } finally {
+      state.dialogOpen = false;
+      syncSidebarAutoCollapse();
+    }
   }
 
-  // ==================== POPOVER, SOLIDITY & FULLSCREEN IDLE ====================
+  // ==================== POPOVER, SOLIDITY, SIDEBAR AUTO-CLOSE & FULLSCREEN IDLE ====================
+  let fsIdleTimer = null;
+  let leftSidebarIdleTimer = null;
+  let rightDrawerIdleTimer = null;
+
   function updateChromeSolidity() {
     const hasMedia = Boolean(getCurrentItem());
     el.app.classList.toggle('has-media', hasMedia);
@@ -1389,6 +1427,86 @@
       state.hoveringTopBar;
 
     el.app.classList.toggle('solid-chrome', shouldBeSolid);
+    syncSidebarAutoCollapse();
+  }
+
+  function finishSidebarAutoCollapse() {
+    updateChromeSolidity();
+    applyVideoAppearance();
+
+    const anyPanelOpen =
+      !el.librarySidebar.classList.contains('collapsed') ||
+      !el.rightDrawer.classList.contains('collapsed') ||
+      el.bottomPopover.classList.contains('open') ||
+      el.headerMenu.classList.contains('open') ||
+      el.settingsBackdrop.classList.contains('open');
+
+    if (
+      state.isFullscreen &&
+      state.autoHideFs &&
+      state.playing &&
+      !anyPanelOpen &&
+      !state.hoveringTopBar &&
+      !state.hoveringBottomBar
+    ) {
+      clearTimeout(fsIdleTimer);
+      el.app.classList.add('fs-idle');
+    } else {
+      resetFullscreenIdle();
+    }
+  }
+
+  function syncSidebarAutoCollapse() {
+    clearTimeout(leftSidebarIdleTimer);
+    clearTimeout(rightDrawerIdleTimer);
+
+    const leftOpen = !el.librarySidebar.classList.contains('collapsed');
+    const rightOpen = !el.rightDrawer.classList.contains('collapsed');
+    const searchFocused = document.activeElement === el.libSearchInput;
+
+    // Auto-collapse open left library sidebar if mouse doesn't hover over it for 5s while playing
+    if (
+      leftOpen &&
+      state.playing &&
+      !state.hoveringLeftSidebar &&
+      !searchFocused &&
+      !state.dialogOpen
+    ) {
+      leftSidebarIdleTimer = setTimeout(() => {
+        if (
+          !el.librarySidebar.classList.contains('collapsed') &&
+          state.playing &&
+          !state.hoveringLeftSidebar &&
+          document.activeElement !== el.libSearchInput &&
+          !state.dialogOpen
+        ) {
+          el.librarySidebar.classList.add('collapsed');
+          el.btnSidebar.classList.remove('active');
+          finishSidebarAutoCollapse();
+        }
+      }, 5000);
+    }
+
+    // Auto-collapse open right queue/bookmarks drawer if mouse doesn't hover over it for 5s while playing
+    if (
+      rightOpen &&
+      state.playing &&
+      !state.hoveringRightDrawer &&
+      !state.dialogOpen
+    ) {
+      rightDrawerIdleTimer = setTimeout(() => {
+        if (
+          !el.rightDrawer.classList.contains('collapsed') &&
+          state.playing &&
+          !state.hoveringRightDrawer &&
+          !state.dialogOpen
+        ) {
+          el.rightDrawer.classList.add('collapsed');
+          el.btnQueueDrawer.classList.remove('active');
+          finishSidebarAutoCollapse();
+        }
+      }, 5000);
+    }
   }
 
   function openPopoverTab(tabName) {
@@ -1422,7 +1540,6 @@
     updateChromeSolidity();
   }
 
-  let fsIdleTimer = null;
   function resetFullscreenIdle() {
     el.app.classList.remove('fs-idle');
     clearTimeout(fsIdleTimer);
@@ -1552,7 +1669,7 @@
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
-      } else if (getCurrentItem() && !getCurrentItem().isAudio && el.video.readyState >= 2) {
+      } else if (getCurrentItem() && !getCurrentItem().isAudio && el.video.readyState >= 1) {
         await el.video.requestPictureInPicture();
       } else {
         const pinned = await api.toggleAlwaysOnTop();
@@ -1633,7 +1750,14 @@
       if (curFolder && !alreadyPinned) {
         targetFolder = curFolder;
       } else {
-        targetFolder = await api.openFolder();
+        state.dialogOpen = true;
+        syncSidebarAutoCollapse();
+        try {
+          targetFolder = await api.openFolder();
+        } finally {
+          state.dialogOpen = false;
+          syncSidebarAutoCollapse();
+        }
       }
       if (!targetFolder || !targetFolder.folderPath) return;
 
@@ -1707,12 +1831,18 @@
         el.aiSampleCmd.textContent =
           `Invoke-RestMethod -Method Post -Uri http://127.0.0.1:${ws.aiPort}/api/control -ContentType 'application/json' -Body '{"action":"setAccent","value":"cyan"}'`;
       }
-      el.btnPip.classList.toggle('active', state.alwaysOnTop);
+      el.btnPip.classList.toggle('active', Boolean(document.pictureInPictureElement) || state.alwaysOnTop);
       state.hoveringTopBar = false;
       syncSwitchesUI();
       updateChromeSolidity();
       applyVideoAppearance();
       resetFullscreenIdle();
+    });
+
+    api.onPipExitRequested(() => {
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(() => {});
+      }
     });
 
     api.onInitialMedia((data) => {
@@ -1723,7 +1853,7 @@
 
     api.onAiCommand(handleAiCommand);
 
-    // 6. Top bar, hover tracking & menu actions
+    // 6. Top bar, sidebar & bottom bar hover tracking
     el.topBar.addEventListener('mouseenter', () => {
       state.hoveringTopBar = true;
       updateChromeSolidity();
@@ -1741,6 +1871,34 @@
     el.bottomBar.addEventListener('mouseleave', () => {
       state.hoveringBottomBar = false;
       resetFullscreenIdle();
+    });
+
+    el.librarySidebar.addEventListener('mouseenter', () => {
+      state.hoveringLeftSidebar = true;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.librarySidebar.addEventListener('mouseleave', () => {
+      state.hoveringLeftSidebar = false;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.librarySidebar.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'margin-left') applyVideoAppearance();
+    });
+
+    el.rightDrawer.addEventListener('mouseenter', () => {
+      state.hoveringRightDrawer = true;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.rightDrawer.addEventListener('mouseleave', () => {
+      state.hoveringRightDrawer = false;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.rightDrawer.addEventListener('transitionend', (e) => {
+      if (e.propertyName === 'margin-right') applyVideoAppearance();
     });
 
     el.btnCone.addEventListener('click', () => toggleSettingsModal());
@@ -1813,6 +1971,8 @@
       state.libraryFilter = el.libSearchInput.value;
       renderLibraryList();
     });
+    el.libSearchInput.addEventListener('focus', syncSidebarAutoCollapse);
+    el.libSearchInput.addEventListener('blur', syncSidebarAutoCollapse);
     el.btnLibOpenFolder.addEventListener('click', openFolderDialog);
     el.btnLibOpenFiles.addEventListener('click', () => openFileDialog(true));
     el.btnEmptyOpenFile.addEventListener('click', () => openFileDialog(false));
@@ -1859,7 +2019,7 @@
       pushPlayerStatus();
     });
 
-    // 9. Transport, Video Events & Automatic Codec Fallback
+    // 9. Transport, Video Events, Popup Mini Player & Automatic Codec Fallback
     el.btnPlay.addEventListener('click', togglePlay);
     el.btnPrev.addEventListener('click', playPrev);
     el.btnNext.addEventListener('click', playNext);
@@ -1871,20 +2031,51 @@
 
     el.video.addEventListener('play', () => {
       updateTransportUI();
+      syncSidebarAutoCollapse();
       resetFullscreenIdle();
       pushPlayerStatus();
     });
     el.video.addEventListener('pause', () => {
+      state.lastPauseAt = Date.now();
       updateTransportUI();
+      syncSidebarAutoCollapse();
       resetFullscreenIdle();
       pushPlayerStatus();
     });
     el.video.addEventListener('loadedmetadata', () => {
+      applyVideoAppearance();
       updateTimelineUI();
       renderSubtitleBlocksOnSeekbar();
       pushPlayerStatus();
     });
     el.video.addEventListener('timeupdate', updateTimelineUI);
+
+    // Popup Mini Player (PiP): enlarge slightly & auto-minimize main app on open, restore on return
+    el.video.addEventListener('enterpictureinpicture', () => {
+      el.btnPip.classList.add('active');
+      const vw = el.video.videoWidth || 16;
+      const vh = el.video.videoHeight || 9;
+      const aspect = vh > 0 ? vw / vh : 16 / 9;
+      api.enterPip({ aspect });
+    });
+
+    el.video.addEventListener('leavepictureinpicture', () => {
+      el.btnPip.classList.toggle('active', state.alwaysOnTop);
+      const closedViaX = el.video.paused && Date.now() - state.lastPauseAt < 180;
+      api.leavePip({ restore: !closedViaX });
+    });
+
+    // MediaSession integration for Popup Mini Player & hardware media keys
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler('play', () => playMedia());
+        navigator.mediaSession.setActionHandler('pause', () => pauseMedia());
+        navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
+        navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
+        navigator.mediaSession.setActionHandler('seekbackward', () => seekByDelta(-10));
+        navigator.mediaSession.setActionHandler('seekforward', () => seekByDelta(10));
+      } catch {}
+    }
 
     // Automatic reactive fallback if any native container/codec or Hi10P stream fails
     el.video.addEventListener('error', () => {
@@ -2321,6 +2512,8 @@
     window.addEventListener('blur', () => {
       state.hoveringTopBar = false;
       state.hoveringBottomBar = false;
+      state.hoveringLeftSidebar = false;
+      state.hoveringRightDrawer = false;
       updateChromeSolidity();
     });
 

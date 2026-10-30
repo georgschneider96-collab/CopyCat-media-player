@@ -2,8 +2,10 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
+
+const PIP_HELPER_PATH = path.join(__dirname, 'bin', 'pip-helper.exe');
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.webm', '.mov', '.avi', '.m4v', '.ogv',
@@ -25,6 +27,9 @@ let mainWindow = null;
 let aiServerPort = 4500;
 let activeStreamProc = null;
 let activeThumbProc = null;
+let isInPipMode = false;
+let wasFullscreenBeforePip = false;
+let restoringFromPipLeave = false;
 
 let latestPlayerStatus = {
   app: 'VLCopyCAT',
@@ -260,6 +265,51 @@ function broadcastWindowState() {
   });
 }
 
+function getMainHwndString() {
+  if (!mainWindow || mainWindow.isDestroyed()) return '0';
+  try {
+    const buf = mainWindow.getNativeWindowHandle();
+    if (buf.length >= 8) return buf.readBigUInt64LE(0).toString();
+    if (buf.length >= 4) return String(buf.readUInt32LE(0));
+  } catch {}
+  return '0';
+}
+
+let lastPipBounds = null;
+
+function resizePipWindow(aspect = 16 / 9) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32' || !fs.existsSync(PIP_HELPER_PATH)) {
+      resolve(false);
+      return;
+    }
+    const args = [
+      String(process.pid),
+      getMainHwndString(),
+      Number(aspect || 1.7778).toFixed(4),
+      '0.28'
+    ];
+    execFile(PIP_HELPER_PATH, args, { windowsHide: true, timeout: 1500 }, (err, stdout) => {
+      const out = String(stdout || '').trim();
+      if (!err && out.startsWith('OK ')) {
+        lastPipBounds = out.slice(3);
+        resolve(true);
+      } else {
+        lastPipBounds = out || (err ? err.message : 'ERR');
+        resolve(false);
+      }
+    });
+  });
+}
+
+function restoreMainWindowWin32() {
+  if (process.platform !== 'win32' || !fs.existsSync(PIP_HELPER_PATH)) return;
+  const hwnd = getMainHwndString();
+  if (hwnd && hwnd !== '0') {
+    execFile(PIP_HELPER_PATH, ['--restore', hwnd], { windowsHide: true, timeout: 1000 }, () => {});
+  }
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -274,7 +324,8 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: true
+      webSecurity: true,
+      backgroundThrottling: false
     }
   });
 
@@ -301,6 +352,18 @@ function createMainWindow() {
   mainWindow.on('unmaximize', broadcastWindowState);
   mainWindow.on('enter-full-screen', broadcastWindowState);
   mainWindow.on('leave-full-screen', broadcastWindowState);
+  mainWindow.on('minimize', broadcastWindowState);
+  mainWindow.on('restore', () => {
+    broadcastWindowState();
+    if (isInPipMode && !restoringFromPipLeave && !mainWindow.isDestroyed()) {
+      isInPipMode = false;
+      mainWindow.webContents.send('pip:exitRequested');
+      if (wasFullscreenBeforePip) {
+        wasFullscreenBeforePip = false;
+        mainWindow.setFullScreen(true);
+      }
+    }
+  });
 }
 
 function handleFfmpegStreamRequest(urlObj, req, res) {
@@ -472,7 +535,12 @@ function startAiControlServer(port = 4500) {
     }
 
     if (req.method === 'GET' && pathname === '/api/status') {
-      return sendJson(200, latestPlayerStatus);
+      return sendJson(200, {
+        ...latestPlayerStatus,
+        minimized: mainWindow?.isMinimized() || false,
+        pipActive: isInPipMode,
+        pipBounds: isInPipMode ? lastPipBounds : null
+      });
     }
 
     if (req.method === 'POST' && pathname === '/api/control') {
@@ -503,7 +571,11 @@ function startAiControlServer(port = 4500) {
           }
 
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ai:command', payload);
+            if (payload.action === 'togglePip') {
+              mainWindow.webContents.executeJavaScript('document.getElementById("btn-pip")?.click()', true).catch(() => {});
+            } else {
+              mainWindow.webContents.send('ai:command', payload);
+            }
           }
           return sendJson(200, { ok: true, dispatched: payload.action });
         } catch (err) {
@@ -548,6 +620,62 @@ ipcMain.handle('win:toggleAlwaysOnTop', () => {
   broadcastWindowState();
   return next;
 });
+ipcMain.handle('win:enterPip', async (_evt, opts = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  isInPipMode = true;
+  const aspect = Number(opts?.aspect) > 0.1 ? Number(opts.aspect) : 16 / 9;
+
+  if (mainWindow.isFullScreen()) {
+    wasFullscreenBeforePip = true;
+    mainWindow.setFullScreen(false);
+  } else {
+    wasFullscreenBeforePip = false;
+  }
+
+  if (!mainWindow.isMinimized()) {
+    mainWindow.minimize();
+  }
+
+  await resizePipWindow(aspect);
+
+  setTimeout(() => {
+    if (isInPipMode) resizePipWindow(aspect);
+  }, 120);
+
+  broadcastWindowState();
+  return true;
+});
+
+ipcMain.handle('win:leavePip', (_evt, opts = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const wasActive = isInPipMode;
+  isInPipMode = false;
+  lastPipBounds = null;
+  const shouldRestore = opts?.restore !== false;
+  if (wasActive && shouldRestore) {
+    restoringFromPipLeave = true;
+    try {
+      restoreMainWindowWin32();
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      if (wasFullscreenBeforePip) {
+        wasFullscreenBeforePip = false;
+        mainWindow.setFullScreen(true);
+      }
+    } finally {
+      setTimeout(() => {
+        restoringFromPipLeave = false;
+        broadcastWindowState();
+      }, 220);
+    }
+  } else {
+    wasFullscreenBeforePip = false;
+  }
+  broadcastWindowState();
+  return true;
+});
+
 ipcMain.handle('win:close', () => mainWindow?.close());
 ipcMain.handle('win:getState', () => ({
   maximized: mainWindow?.isMaximized() || false,
