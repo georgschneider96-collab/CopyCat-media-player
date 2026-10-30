@@ -173,15 +173,21 @@ html, body {
 /* Left Collapsible Library Sidebar (14_library_open.png) */
 .library-sidebar {
   width: 290px;
+  min-width: 290px;
+  max-width: 290px;
+  flex-shrink: 0;
+  overflow: hidden;
   background: #111111;
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   z-index: 25;
-  transition: margin-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: margin-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.22s ease;
 }
 .library-sidebar.collapsed {
   margin-left: -290px;
+  border-right-color: transparent;
+  pointer-events: none;
 }
 
 .lib-header {
@@ -192,21 +198,81 @@ html, body {
   gap: 8px;
 }
 
-.lib-quick-tabs {
+.lib-shortcuts-bar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.lib-shortcuts-actions {
+  display: flex;
+  align-items: center;
   gap: 4px;
 }
+
+.lib-mini-link {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.lib-mini-link:hover {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lib-quick-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
 .lib-tab-pill {
-  flex: 1;
-  padding: 5px 6px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px 8px;
   border-radius: 5px;
   border: 1px solid #222;
   background: #171717;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  text-align: center;
+  text-align: left;
   transition: all 0.14s ease;
+}
+.lib-tab-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.lib-tab-pill-remove {
+  opacity: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 0 2px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+.lib-tab-pill:hover .lib-tab-pill-remove {
+  opacity: 0.85;
+}
+.lib-tab-pill-remove:hover {
+  opacity: 1 !important;
+  color: #F43F5E;
 }
 .lib-tab-pill:hover {
   color: var(--text-primary);
@@ -494,15 +560,21 @@ html, body {
 /* Right Queue & Bookmarks Drawer */
 .right-drawer {
   width: 280px;
+  min-width: 280px;
+  max-width: 280px;
+  flex-shrink: 0;
+  overflow: hidden;
   background: #111111;
   border-left: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   z-index: 25;
-  transition: margin-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: margin-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.22s ease;
 }
 .right-drawer.collapsed {
   margin-right: -280px;
+  border-left-color: transparent;
+  pointer-events: none;
 }
 .drawer-tabs {
   display: flex;

@@ -34,8 +34,9 @@
   const state = {
     queue: [],
     queueIndex: -1,
-    libraryFolder: null,     // { folderPath, folderName, items }
+    libraryFolder: null,     // { folderPath, parentPath, folderName, subfolders, items }
     libraryFilter: '',
+    sidebarShortcuts: null,  // [{ label, path }] — customizable user shortcuts
     bookmarks: [],           // { id, title, filePath, time }
     drawerTab: 'queue',      // 'queue' | 'bookmarks'
 
@@ -125,6 +126,8 @@
     menuSettings: $('menu-settings'),
 
     librarySidebar: $('library-sidebar'),
+    btnPinShortcut: $('btn-pin-shortcut'),
+    btnResetShortcuts: $('btn-reset-shortcuts'),
     libQuickTabs: $('lib-quick-tabs'),
     libSearchIcon: $('lib-search-icon'),
     libSearchInput: $('lib-search-input'),
@@ -551,7 +554,8 @@
       subTimelineBlocks: state.subTimelineBlocks,
       subSizePx: state.subSizePx,
       eqPreset: state.eqPreset,
-      showRemainingTime: state.showRemainingTime
+      showRemainingTime: state.showRemainingTime,
+      sidebarShortcuts: state.sidebarShortcuts
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -573,6 +577,7 @@
       if (typeof d.subSizePx === 'number') state.subSizePx = d.subSizePx;
       if (typeof d.eqPreset === 'string') state.eqPreset = d.eqPreset;
       if (typeof d.showRemainingTime === 'boolean') state.showRemainingTime = d.showRemainingTime;
+      if (Array.isArray(d.sidebarShortcuts)) state.sidebarShortcuts = d.sidebarShortcuts;
 
       if (d.accentKey === 'custom' && d.customAccentHex) {
         applyAccent(d.customAccentHex, false);
@@ -864,32 +869,112 @@
       loadMediaItemAtIndex(0, autoPlay);
     }
 
+    renderSidebarShortcuts();
     renderLibraryList();
     renderRightDrawer();
+  }
+
+  async function navigateLibraryToFolder(folderPath) {
+    if (!folderPath) return;
+    const scanned = await api.scanFolder(folderPath);
+    if (!scanned) return;
+    state.libraryFolder = scanned;
+    el.libFolderLabel.textContent = scanned.folderName || 'Folder';
+    el.libFolderLabel.title = scanned.folderPath || '';
+    renderSidebarShortcuts();
+    renderLibraryList();
+  }
+
+  function renderSidebarShortcuts() {
+    el.libQuickTabs.innerHTML = '';
+    const list = state.sidebarShortcuts || [];
+    const activePath = (state.libraryFolder?.folderPath || '').toLowerCase();
+
+    list.forEach((sc, idx) => {
+      const pill = document.createElement('div');
+      const isMatch = activePath && sc.path && activePath === sc.path.toLowerCase();
+      pill.className = 'lib-tab-pill' + (isMatch ? ' active' : '');
+      pill.title = `${sc.path}\n(Click to open • Click × to remove)`;
+
+      const lbl = document.createElement('span');
+      lbl.className = 'lib-tab-pill-label';
+      lbl.textContent = sc.label;
+
+      const rm = document.createElement('span');
+      rm.className = 'lib-tab-pill-remove';
+      rm.textContent = '×';
+      rm.title = `Remove "${sc.label}" shortcut`;
+      rm.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.sidebarShortcuts.splice(idx, 1);
+        savePreferences();
+        renderSidebarShortcuts();
+        showToast(`Removed shortcut: ${sc.label}`);
+      });
+
+      pill.appendChild(lbl);
+      pill.appendChild(rm);
+      pill.addEventListener('click', () => navigateLibraryToFolder(sc.path));
+      el.libQuickTabs.appendChild(pill);
+    });
   }
 
   function renderLibraryList() {
     el.libList.innerHTML = '';
     const folderItems = state.libraryFolder?.items || [];
+    const subfolders = state.libraryFolder?.subfolders || [];
+    const parentPath = state.libraryFolder?.parentPath || null;
     const q = state.libraryFilter.trim().toLowerCase();
-    const filtered = q
+
+    const filteredDirs = q
+      ? subfolders.filter((d) => d.name.toLowerCase().includes(q))
+      : subfolders;
+    const filteredFiles = q
       ? folderItems.filter((it) => it.name.toLowerCase().includes(q))
       : folderItems;
 
-    if (!filtered.length) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'padding:22px 12px;text-align:center;color:var(--text-muted);font-size:12px;';
-      empty.textContent = folderItems.length
-        ? 'No matching media in this folder.'
-        : 'Select a quick folder above or click "+ Folder" to browse.';
-      el.libList.appendChild(empty);
-      return;
-    }
-
-    const currentPath = getCurrentItem()?.filePath;
     const frag = document.createDocumentFragment();
 
-    filtered.forEach((item) => {
+    // Parent folder ".." row when browsing a folder
+    if (state.libraryFolder && parentPath && !q) {
+      const upRow = document.createElement('div');
+      upRow.className = 'lib-item';
+      upRow.title = `Up to ${parentPath}`;
+      const badge = document.createElement('div');
+      badge.className = 'lib-item-badge';
+      badge.textContent = '↑';
+      const name = document.createElement('div');
+      name.className = 'lib-item-name';
+      name.textContent = '.. (Parent Folder)';
+      upRow.appendChild(badge);
+      upRow.appendChild(name);
+      upRow.addEventListener('click', () => navigateLibraryToFolder(parentPath));
+      frag.appendChild(upRow);
+    }
+
+    // Subfolder rows so you can step straight into folders like Love Chunibyo / Filme
+    filteredDirs.forEach((dir) => {
+      const row = document.createElement('div');
+      row.className = 'lib-item';
+      row.title = dir.folderPath;
+
+      const badge = document.createElement('div');
+      badge.className = 'lib-item-badge';
+      badge.style.color = 'var(--accent)';
+      badge.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7C3 5.9 3.9 5 5 5H9.2L11.2 7H19C20.1 7 21 7.9 21 9V17C21 18.1 20.1 19 19 19H5C3.9 19 3 18.1 3 17V7Z"/></svg>`;
+
+      const name = document.createElement('div');
+      name.className = 'lib-item-name';
+      name.textContent = dir.name;
+
+      row.appendChild(badge);
+      row.appendChild(name);
+      row.addEventListener('click', () => navigateLibraryToFolder(dir.folderPath));
+      frag.appendChild(row);
+    });
+
+    const currentPath = getCurrentItem()?.filePath;
+    filteredFiles.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'lib-item' + (item.filePath === currentPath ? ' playing' : '');
       row.title = item.name;
@@ -912,6 +997,15 @@
 
       frag.appendChild(row);
     });
+
+    if (!filteredDirs.length && !filteredFiles.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:22px 12px;text-align:center;color:var(--text-muted);font-size:12px;';
+      empty.textContent = state.libraryFolder
+        ? 'No matching media or subfolders here.'
+        : 'Select a shortcut above or click "+ Folder" to browse.';
+      frag.appendChild(empty);
+    }
 
     el.libList.appendChild(frag);
   }
@@ -1245,11 +1339,12 @@
     el.folderCrumbText.textContent = folder.folderName || 'Folder';
     el.librarySidebar.classList.remove('collapsed');
     el.btnSidebar.classList.add('active');
+    renderSidebarShortcuts();
     renderLibraryList();
     if (folder.items?.length) {
       state.queue = folder.items.slice();
       loadMediaItemAtIndex(0, true);
-    } else {
+    } else if (!folder.subfolders?.length) {
       showToast('Folder contains no media files');
     }
   }
@@ -1477,28 +1572,55 @@
       state.hasFfmpeg = Boolean(initWs.hasFfmpeg);
     }
 
-    // 4. Populate Quick Folders in Left Sidebar + detect reference video on Desktop
-    const quickFolders = await api.getQuickFolders();
-    quickFolders.forEach((qf) => {
-      const pill = document.createElement('button');
-      pill.type = 'button';
-      pill.className = 'lib-tab-pill';
-      pill.textContent = qf.label;
-      pill.title = qf.path;
-      pill.addEventListener('click', async () => {
-        document.querySelectorAll('.lib-tab-pill').forEach((p) => p.classList.remove('active'));
-        pill.classList.add('active');
-        const scanned = await api.scanFolder(qf.path);
-        if (scanned) {
-          state.libraryFolder = scanned;
-          el.libFolderLabel.textContent = scanned.folderName;
-          renderLibraryList();
-        }
+    // 4. Populate Customizable Shortcuts in Left Sidebar + detect reference video on Desktop
+    const defaultQuickFolders = await api.getQuickFolders();
+    if (!Array.isArray(state.sidebarShortcuts)) {
+      state.sidebarShortcuts = defaultQuickFolders.map((q) => ({ label: q.label, path: q.path }));
+    }
+    renderSidebarShortcuts();
+
+    el.btnPinShortcut.addEventListener('click', async () => {
+      const curFolder = state.libraryFolder;
+      const alreadyPinned = curFolder && state.sidebarShortcuts.some(
+        (s) => s.path.toLowerCase() === curFolder.folderPath.toLowerCase()
+      );
+
+      let targetFolder = null;
+      if (curFolder && !alreadyPinned) {
+        targetFolder = curFolder;
+      } else {
+        targetFolder = await api.openFolder();
+      }
+      if (!targetFolder || !targetFolder.folderPath) return;
+
+      const exists = state.sidebarShortcuts.some(
+        (s) => s.path.toLowerCase() === targetFolder.folderPath.toLowerCase()
+      );
+      if (exists) {
+        showToast(`"${targetFolder.folderName}" is already pinned`);
+        return;
+      }
+
+      state.sidebarShortcuts.push({
+        label: targetFolder.folderName || targetFolder.folderPath,
+        path: targetFolder.folderPath
       });
-      el.libQuickTabs.appendChild(pill);
+      state.libraryFolder = targetFolder;
+      el.libFolderLabel.textContent = targetFolder.folderName || 'Folder';
+      savePreferences();
+      renderSidebarShortcuts();
+      renderLibraryList();
+      showToast(`Pinned shortcut: ${targetFolder.folderName}`);
     });
 
-    const desktopEntry = quickFolders.find((q) => q.label === 'Desktop');
+    el.btnResetShortcuts.addEventListener('click', () => {
+      state.sidebarShortcuts = defaultQuickFolders.map((q) => ({ label: q.label, path: q.path }));
+      savePreferences();
+      renderSidebarShortcuts();
+      showToast('Sidebar shortcuts reset to default');
+    });
+
+    const desktopEntry = defaultQuickFolders.find((q) => q.label === 'Desktop');
     if (desktopEntry) {
       const desktopScan = await api.scanFolder(desktopEntry.path);
       const demo = desktopScan?.items?.find((it) =>

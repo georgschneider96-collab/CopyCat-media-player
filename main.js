@@ -223,18 +223,29 @@ function scanMediaFolder(folderPath) {
   try {
     const resolvedDir = path.resolve(folderPath);
     const entries = fs.readdirSync(resolvedDir, { withFileTypes: true });
+    const subfolders = entries
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && !d.name.startsWith('$'))
+      .map((d) => d.name)
+      .sort(naturalCompare)
+      .map((name) => ({
+        name,
+        folderPath: path.join(resolvedDir, name)
+      }));
     const files = entries
       .filter((d) => d.isFile() && MEDIA_EXTENSIONS.has(path.extname(d.name).toLowerCase()))
       .map((d) => d.name)
       .sort(naturalCompare)
       .map((name) => buildMediaItem(path.join(resolvedDir, name)));
+    const parentDir = path.dirname(resolvedDir);
     return {
       folderPath: resolvedDir,
+      parentPath: parentDir !== resolvedDir ? parentDir : null,
       folderName: path.basename(resolvedDir) || resolvedDir,
+      subfolders,
       items: files
     };
   } catch (err) {
-    return { folderPath, folderName: path.basename(folderPath || ''), items: [], error: err.message };
+    return { folderPath, parentPath: null, folderName: path.basename(folderPath || ''), subfolders: [], items: [], error: err.message };
   }
 }
 
@@ -641,20 +652,16 @@ ipcMain.handle('fs:readSubtitle', (_evt, subPath) => {
 });
 
 ipcMain.handle('fs:getQuickFolders', () => {
-  const desktop = app.getPath('desktop');
   const videos = app.getPath('videos');
+  const desktop = app.getPath('desktop');
   const downloads = app.getPath('downloads');
   const music = app.getPath('music');
-  const list = [
-    { label: 'Desktop', path: desktop },
+  return [
     { label: 'Videos', path: videos },
+    { label: 'Desktop', path: desktop },
     { label: 'Downloads', path: downloads },
     { label: 'Music', path: music }
   ];
-  if (fs.existsSync('E:\\Videos')) {
-    list.splice(1, 0, { label: 'E:\\Videos', path: 'E:\\Videos' });
-  }
-  return list;
 });
 
 ipcMain.handle('fs:saveSnapshot', (_evt, { dataUrl, baseName }) => {
