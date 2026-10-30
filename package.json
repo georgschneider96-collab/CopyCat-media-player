@@ -1,0 +1,21 @@
+{
+  "name": "vlcopycat",
+  "version": "1.0.0",
+  "description": "VLCopyCAT — Modern Desktop Media Player inspired by Juxtopposed's VLC Redesign, with built-in Local AI Control API",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [
+    "vlc",
+    "media-player",
+    "video-player",
+    "electron",
+    "juxtopposed",
+    "ai-accessible"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}

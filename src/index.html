@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file: media:;" />
+  <title>VLCopyCAT</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="icons.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- ==================== CONSOLIDATED TOP HEADER BAR ==================== -->
+    <header class="top-bar" id="top-bar">
+      <div class="top-left">
+        <button class="icon-btn cone-btn" id="btn-cone" title="VLCopyCAT — Theme & Preferences (Ctrl+P)"></button>
+        <button class="icon-btn" id="btn-menu" title="Media Menu"></button>
+        <button class="icon-btn" id="btn-sidebar" title="Toggle Folder Library Sidebar"></button>
+        <div class="v-divider"></div>
+        <button class="folder-crumb-btn" id="btn-folder-crumb" title="Open Media Folder (Ctrl+F)">
+          <span id="icon-folder-crumb"></span>
+          <span id="folder-crumb-text">Open Folder</span>
+        </button>
+      </div>
+
+      <div class="top-center" id="media-title">VLCopyCAT</div>
+
+      <div class="top-right">
+        <button class="icon-btn" id="btn-pip" title="Picture-in-Picture"></button>
+        <div class="v-divider"></div>
+        <button class="icon-btn win-btn" id="btn-minimize" title="Minimize"></button>
+        <button class="icon-btn win-btn" id="btn-maximize" title="Maximize / Restore"></button>
+        <button class="icon-btn win-btn" id="btn-fullscreen" title="Toggle Fullscreen (F)"></button>
+        <button class="icon-btn win-btn close-btn" id="btn-close" title="Close"></button>
+      </div>
+    </header>
+
+    <!-- ==================== HEADER FLOATING MENU ==================== -->
+    <div class="floating-menu" id="header-menu">
+      <button class="menu-item" id="menu-open-file">
+        <span>Open Media File...</span>
+        <span class="menu-shortcut">Ctrl+O</span>
+      </button>
+      <button class="menu-item" id="menu-open-multi">
+        <span>Open Multiple Files...</span>
+        <span class="menu-shortcut">Ctrl+Shift+O</span>
+      </button>
+      <button class="menu-item" id="menu-open-folder">
+        <span>Open Media Folder...</span>
+        <span class="menu-shortcut">Ctrl+F</span>
+      </button>
+      <button class="menu-item" id="menu-open-sub">
+        <span>Load Subtitle (.srt / .vtt)...</span>
+        <span class="menu-shortcut"></span>
+      </button>
+      <div class="menu-sep"></div>
+      <button class="menu-item" id="menu-play-demo" style="display: none;">
+        <span>Play VLC Redesign Reference Video</span>
+        <span class="menu-shortcut">Demo</span>
+      </button>
+      <button class="menu-item" id="menu-snapshot">
+        <span>Take Video Snapshot</span>
+        <span class="menu-shortcut">Shift+S</span>
+      </button>
+      <button class="menu-item" id="menu-reveal">
+        <span>Reveal Current File in Explorer</span>
+        <span class="menu-shortcut"></span>
+      </button>
+      <div class="menu-sep"></div>
+      <button class="menu-item" id="menu-always-top">
+        <span id="menu-always-top-label">Pin Window Always on Top</span>
+        <span class="menu-shortcut"></span>
+      </button>
+      <button class="menu-item" id="menu-settings">
+        <span>Global Preferences &amp; Themes...</span>
+        <span class="menu-shortcut">Ctrl+P</span>
+      </button>
+    </div>
+
+    <!-- ==================== MIDDLE WORKSPACE ==================== -->
+    <main class="main-body">
+      <!-- Left Collapsible Folder Library Sidebar -->
+      <aside class="library-sidebar collapsed" id="library-sidebar">
+        <div class="lib-header">
+          <div class="lib-quick-tabs" id="lib-quick-tabs"></div>
+          <div class="lib-search-row">
+            <span id="lib-search-icon"></span>
+            <input type="text" id="lib-search-input" placeholder="Search folder media..." autocomplete="off" />
+          </div>
+          <div class="lib-toolbar">
+            <span id="lib-folder-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">No folder loaded</span>
+            <div style="display:flex;gap:4px;">
+              <button class="lib-add-btn" id="btn-lib-open-folder" title="Browse Folder">+ Folder</button>
+              <button class="lib-add-btn" id="btn-lib-open-files" title="Add Files">+ Files</button>
+            </div>
+          </div>
+        </div>
+        <div class="lib-list" id="lib-list"></div>
+      </aside>
+
+      <!-- Center Video & Visualizer Stage -->
+      <section class="video-stage" id="video-stage">
+        <video id="main-video" preload="metadata"></video>
+        <canvas id="visualizer-canvas"></canvas>
+
+        <!-- Empty Welcome Screen -->
+        <div class="empty-state" id="empty-state">
+          <div class="empty-cone" id="empty-cone"></div>
+          <div class="empty-title">Drop media anywhere to play</div>
+          <div class="empty-sub">
+            Modern dark media player inspired by Juxtopposed's 25-year VLC redesign — featuring 200% cone audio boost, live timeline thumbnails, and a Local AI Control Bridge.
+          </div>
+          <div class="empty-actions">
+            <button class="primary-pill-btn" id="btn-empty-open-file">Open Media File</button>
+            <button class="ghost-pill-btn" id="btn-empty-open-folder">Open Folder</button>
+            <button class="ghost-pill-btn" id="btn-empty-demo" style="display: none;">Play VLC Redesign Video</button>
+          </div>
+        </div>
+
+        <!-- Subtitle Overlay -->
+        <div class="subtitle-overlay" id="subtitle-overlay"></div>
+
+        <!-- On-Screen HUD Toast -->
+        <div class="osd-toast" id="osd-toast"></div>
+
+        <!-- Drag & Drop Overlay -->
+        <div class="drop-overlay" id="drop-overlay">Drop media or subtitle file to play</div>
+      </section>
+
+      <!-- Right Queue & Bookmarks Drawer -->
+      <aside class="right-drawer collapsed" id="right-drawer">
+        <div class="drawer-tabs">
+          <button class="drawer-tab active" data-drawer-tab="queue" id="tab-drawer-queue">Queue (0)</button>
+          <button class="drawer-tab" data-drawer-tab="bookmarks" id="tab-drawer-bookmarks">Bookmarks (0)</button>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+        <div class="drawer-footer">
+          <button class="lib-add-btn" id="btn-drawer-add">+ Add Media</button>
+          <button class="lib-add-btn" id="btn-drawer-bookmark">+ Bookmark (B)</button>
+          <button class="lib-add-btn" id="btn-drawer-clear">Clear</button>
+        </div>
+      </aside>
+    </main>
+
+    <!-- ==================== BOTTOM SINGLE-ROW CONTROL BAR ==================== -->
+    <footer class="bottom-bar" id="bottom-bar">
+      <div class="transport-group">
+        <button class="icon-btn" id="btn-prev" title="Previous Track (P)"></button>
+        <button class="play-pill-btn" id="btn-play" title="Play / Pause (Space)"></button>
+        <button class="icon-btn" id="btn-next" title="Next Track (N)"></button>
+      </div>
+
+      <div class="time-label" id="time-elapsed" title="Elapsed Time">00:00</div>
+
+      <div class="seekbar-shell">
+        <div class="sub-sync-mini" id="sub-sync-mini">
+          <button class="mini-accent-btn" id="btn-sub-earlier" title="Subtitles -50ms">-</button>
+          <button class="mini-accent-btn" id="btn-sub-later" title="Subtitles +50ms">+</button>
+        </div>
+
+        <div class="seekbar-track" id="seekbar-track">
+          <div class="seekbar-fill-clip">
+            <div class="seekbar-fill" id="seekbar-fill"></div>
+          </div>
+          <div class="seekbar-sub-blocks" id="seekbar-sub-blocks"></div>
+          <div class="seekbar-thumb" id="seekbar-thumb"></div>
+
+          <div class="seek-hover-card" id="seek-hover-card">
+            <canvas id="hover-preview-canvas" width="168" height="94"></canvas>
+            <div class="hover-time-text" id="hover-time-text">00:00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="time-label" id="time-total" title="Click to toggle Remaining / Total Duration">00:00</div>
+
+      <div class="volume-group">
+        <button class="icon-btn" id="btn-mute" title="Mute / Unmute (M)"></button>
+        <div class="vol-cone-slider" id="vol-cone-slider" title="Cone Volume Boost: 100% (Up to 200%)">
+          <div class="vol-cone-shell">
+            <div class="vol-cone-fill" id="vol-cone-fill"></div>
+            <div class="vol-100-tick" title="100% Unity Volume"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-actions-group">
+        <button class="icon-btn" id="btn-audio-pop" title="Audio &amp; Equalizer"></button>
+        <button class="icon-btn" id="btn-sub-pop" title="Subtitles &amp; Sync"></button>
+        <button class="icon-btn" id="btn-gear-pop" title="Playback &amp; Video Controls"></button>
+        <button class="icon-btn" id="btn-queue-drawer" title="Toggle Queue &amp; Bookmarks"></button>
+      </div>
+    </footer>
+
+    <!-- ==================== 4-TAB BOTTOM SETTINGS POPOVER ==================== -->
+    <div class="bottom-popover" id="bottom-popover">
+      <div class="pop-tabs">
+        <button class="pop-tab active" data-pop-tab="playback">Playback</button>
+        <button class="pop-tab" data-pop-tab="video">Video</button>
+        <button class="pop-tab" data-pop-tab="audio">Audio</button>
+        <button class="pop-tab" data-pop-tab="subtitles">Subtitles</button>
+      </div>
+
+      <!-- Tab 1: Playback -->
+      <div class="pop-panel active" data-pop-panel="playback">
+        <div class="pop-row">
+          <span class="pop-label">Playback Speed</span>
+          <span id="lbl-speed" style="font-weight:600;color:var(--accent);">1.00x</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-speed" min="0.25" max="2" step="0.05" value="1" />
+        <div style="display:flex;gap:5px;">
+          <button class="lib-add-btn speed-chip" data-speed="0.5" style="flex:1;">0.5x</button>
+          <button class="lib-add-btn speed-chip" data-speed="1" style="flex:1;">1.0x</button>
+          <button class="lib-add-btn speed-chip" data-speed="1.25" style="flex:1;">1.25x</button>
+          <button class="lib-add-btn speed-chip" data-speed="1.5" style="flex:1;">1.5x</button>
+          <button class="lib-add-btn speed-chip" data-speed="2" style="flex:1;">2.0x</button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Loop Current Track</span>
+          <button class="jux-switch" id="sw-loop" type="button"></button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Subtitle Blocks on Timeline</span>
+          <button class="jux-switch on" id="sw-sub-timeline" type="button"></button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Capture Frame Snapshot</span>
+          <button class="lib-add-btn" id="btn-pop-snapshot">Snapshot (Shift+S)</button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Video -->
+      <div class="pop-panel" data-pop-panel="video">
+        <div class="pop-row">
+          <span class="pop-label">Aspect / Fit</span>
+          <select class="jux-select" id="sel-video-fit">
+            <option value="contain">Contain (Original)</option>
+            <option value="cover">Cover (Crop Widescreen)</option>
+            <option value="fill">Stretch to Window</option>
+            <option value="16:9">Force 16:9</option>
+            <option value="4:3">Force 4:3</option>
+            <option value="21:9">Force 21:9 Ultrawide</option>
+          </select>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Brightness</span>
+          <span id="lbl-brightness" style="font-size:11.5px;color:var(--text-muted);">100%</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-brightness" min="50" max="150" step="1" value="100" />
+
+        <div class="pop-row">
+          <span class="pop-label">Contrast</span>
+          <span id="lbl-contrast" style="font-size:11.5px;color:var(--text-muted);">100%</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-contrast" min="50" max="150" step="1" value="100" />
+
+        <div class="pop-row">
+          <span class="pop-label">Saturation</span>
+          <span id="lbl-saturation" style="font-size:11.5px;color:var(--text-muted);">100%</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-saturation" min="0" max="200" step="1" value="100" />
+
+        <button class="lib-add-btn" id="btn-reset-video" style="align-self:flex-end;">Reset Video Filters</button>
+      </div>
+
+      <!-- Tab 3: Audio -->
+      <div class="pop-panel" data-pop-panel="audio">
+        <div class="pop-row">
+          <span class="pop-label">Cone Volume Boost</span>
+          <span id="lbl-volume-pop" style="font-weight:600;color:var(--accent);">100%</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-volume-pop" min="0" max="200" step="1" value="100" />
+
+        <div class="pop-row">
+          <span class="pop-label">Equalizer Profile</span>
+          <select class="jux-select" id="sel-eq-preset">
+            <option value="flat">Flat (Studio)</option>
+            <option value="bass">Bass Boost</option>
+            <option value="cinema">Cinema Wide</option>
+            <option value="vocal">Vocal Clarity</option>
+            <option value="night">Night Softener</option>
+          </select>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Audio Waveform Visualizer</span>
+          <button class="jux-switch" id="sw-visualizer" type="button"></button>
+        </div>
+      </div>
+
+      <!-- Tab 4: Subtitles -->
+      <div class="pop-panel" data-pop-panel="subtitles">
+        <div class="pop-row">
+          <span class="pop-label">Show Subtitles</span>
+          <button class="jux-switch on" id="sw-sub-enabled" type="button"></button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label" id="lbl-sub-track" style="max-width:175px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No subtitle loaded</span>
+          <button class="lib-add-btn" id="btn-load-sub">Load .SRT / .VTT</button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Subtitle Size</span>
+          <span id="lbl-sub-size" style="font-size:11.5px;color:var(--text-muted);">22px</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-sub-size" min="14" max="38" step="1" value="22" />
+
+        <div class="pop-row">
+          <span class="pop-label">Sync Offset</span>
+          <span id="lbl-sub-offset" style="font-size:11.5px;color:var(--accent);">0 ms</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="lib-add-btn" id="btn-sub-minus100" style="flex:1;">-100 ms</button>
+          <button class="lib-add-btn" id="btn-sub-reset" style="flex:1;">Reset</button>
+          <button class="lib-add-btn" id="btn-sub-plus100" style="flex:1;">+100 ms</button>
+        </div>
+      </div>
+
+      <button class="pop-footer-btn" id="btn-open-global-prefs">Show Global Preferences (Ctrl+P)</button>
+    </div>
+
+    <!-- ==================== GLOBAL SETTINGS MODAL (Ctrl+P) ==================== -->
+    <div class="modal-backdrop" id="settings-backdrop">
+      <div class="settings-modal" role="dialog" aria-modal="true">
+        <nav class="settings-nav">
+          <div class="settings-group-lbl">Preferences</div>
+          <button class="settings-nav-btn active" data-settings-tab="interface">
+            <span class="nav-dot"></span>
+            <span>Interface &amp; Theme</span>
+          </button>
+          <button class="settings-nav-btn" data-settings-tab="general">
+            <span class="nav-dot"></span>
+            <span>Playback &amp; Files</span>
+          </button>
+          <button class="settings-nav-btn" data-settings-tab="shortcuts">
+            <span class="nav-dot"></span>
+            <span>Keyboard Shortcuts</span>
+          </button>
+          <div class="settings-group-lbl" style="margin-top:8px;">Developer &amp; AI</div>
+          <button class="settings-nav-btn" data-settings-tab="ai">
+            <span class="nav-dot"></span>
+            <span>AI Control Bridge</span>
+          </button>
+        </nav>
+
+        <div class="settings-main">
+          <div class="settings-header">
+            <h2 id="settings-title">Interface &amp; Theme</h2>
+            <button class="icon-btn" id="btn-close-settings" title="Close (Esc)"></button>
+          </div>
+
+          <div class="settings-content">
+            <!-- Panel: Interface & Theme -->
+            <div class="settings-panel" data-settings-panel="interface" style="display:flex;flex-direction:column;gap:18px;">
+              <div>
+                <div class="settings-section-title">Cone Accent Color</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                  Choose from Juxtopposed's 9 signature cone palettes or pick any custom hex color.
+                </div>
+                <div class="accent-swatches" id="accent-swatches"></div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+                  <label for="inp-custom-accent" style="font-size:12px;color:var(--text-secondary);">Custom Hex Accent:</label>
+                  <input type="color" id="inp-custom-accent" value="#E07A16" style="width:34px;height:26px;background:transparent;border:1px solid #333;border-radius:5px;cursor:pointer;" />
+                  <span id="lbl-active-accent" style="font-size:12px;color:var(--text-muted);font-family:Consolas,monospace;">#E07A16</span>
+                </div>
+              </div>
+
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Live Timeline Hover Preview</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Render instant frame thumbnails above the seekbar on hover</div>
+                </div>
+                <button class="jux-switch on" id="sw-hover-thumb" type="button"></button>
+              </div>
+
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Auto-Hide Controls in Fullscreen</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Fade out top and bottom bars when mouse is idle during playback</div>
+                </div>
+                <button class="jux-switch on" id="sw-autohide-fs" type="button"></button>
+              </div>
+
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Always on Top</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Keep VLCopyCAT floating above other desktop windows</div>
+                </div>
+                <button class="jux-switch" id="sw-always-on-top" type="button"></button>
+              </div>
+            </div>
+
+            <!-- Panel: General & Playback -->
+            <div class="settings-panel" data-settings-panel="general" style="display:none;flex-direction:column;gap:18px;">
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Auto-Populate Folder Queue</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">When opening a file, load sibling media files from the same folder</div>
+                </div>
+                <button class="jux-switch on" id="sw-autoload-folder" type="button"></button>
+              </div>
+
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Auto-Detect Subtitles</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Automatically load matching .srt or .vtt subtitle files next to videos</div>
+                </div>
+                <button class="jux-switch on" id="sw-autoload-sub" type="button"></button>
+              </div>
+
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Remember Volume &amp; Theme</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Persist accent palette, volume level, and UI preferences across launches</div>
+                </div>
+                <button class="jux-switch on" id="sw-remember-state" type="button"></button>
+              </div>
+            </div>
+
+            <!-- Panel: Keyboard Shortcuts -->
+            <div class="settings-panel" data-settings-panel="shortcuts" style="display:none;flex-direction:column;gap:10px;">
+              <div class="settings-section-title">Built-in Hotkeys</div>
+              <div class="code-box" style="display:grid;grid-template-columns:150px 1fr;row-gap:6px;column-gap:12px;">
+                <span style="color:var(--accent);">Space / K</span><span>Play or Pause</span>
+                <span style="color:var(--accent);">F / Double-Click</span><span>Toggle Fullscreen</span>
+                <span style="color:var(--accent);">Left / Right</span><span>Seek -5s / +5s (Shift for 15s)</span>
+                <span style="color:var(--accent);">Up / Down</span><span>Volume +5% / -5% (up to 200%)</span>
+                <span style="color:var(--accent);">M</span><span>Mute / Unmute</span>
+                <span style="color:var(--accent);">[ / ]</span><span>Playback Speed -0.1x / +0.1x</span>
+                <span style="color:var(--accent);">P / N</span><span>Previous / Next in Queue</span>
+                <span style="color:var(--accent);">B</span><span>Bookmark Current Timestamp</span>
+                <span style="color:var(--accent);">Shift + S</span><span>Save PNG Snapshot to Pictures</span>
+                <span style="color:var(--accent);">Ctrl + O / Ctrl + F</span><span>Open File / Open Folder</span>
+                <span style="color:var(--accent);">Ctrl + P</span><span>Toggle Global Preferences</span>
+              </div>
+            </div>
+
+            <!-- Panel: AI Control Bridge -->
+            <div class="settings-panel" data-settings-panel="ai" style="display:none;flex-direction:column;gap:14px;">
+              <div>
+                <div class="settings-section-title">Local AI Assistant Bridge</div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
+                  Any AI coding assistant (Antigravity, Claude, Cursor, Windsurf, Copilot, Codex) can read <strong style="color:var(--text-primary);">AI_CONTEXT.md</strong> in your project folder or control VLCopyCAT live over HTTP:
+                </div>
+              </div>
+
+              <div class="code-box" id="ai-endpoint-box">
+                Endpoint: http://127.0.0.1:4500
+                Status:   GET  http://127.0.0.1:4500/api/status
+                Control:  POST http://127.0.0.1:4500/api/control
+              </div>
+
+              <div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">PowerShell Live Control Example:</div>
+                <div class="code-box" id="ai-sample-cmd">Invoke-RestMethod -Method Post -Uri http://127.0.0.1:4500/api/control -ContentType 'application/json' -Body '{"action":"setAccent","value":"cyan"}'</div>
+              </div>
+
+              <div style="display:flex;gap:8px;">
+                <button class="lib-add-btn" id="btn-copy-ai-cmd">Copy Sample Command</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
