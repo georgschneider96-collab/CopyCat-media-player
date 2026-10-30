@@ -43,16 +43,19 @@ html, body {
 }
 
 #app {
-  display: flex;
-  flex-direction: column;
   width: 100vw;
   height: 100vh;
   position: relative;
-  background: var(--bg-void);
+  overflow: hidden;
+  background: #000000;
 }
 
 /* ==================== TOP HEADER BAR ==================== */
 .top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   height: var(--header-h);
   min-height: var(--header-h);
   background: var(--bg-bar);
@@ -63,7 +66,7 @@ html, body {
   padding: 0 8px 0 10px;
   -webkit-app-region: drag;
   z-index: 40;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.18s ease, border-color 0.18s ease, backdrop-filter 0.18s ease;
 }
 
 .top-left, .top-right {
@@ -163,10 +166,12 @@ html, body {
 
 /* ==================== WORKSPACE MIDDLE AREA ==================== */
 .main-body {
-  flex: 1;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   display: flex;
   min-height: 0;
-  position: relative;
   overflow: hidden;
 }
 
@@ -177,6 +182,8 @@ html, body {
   max-width: 290px;
   flex-shrink: 0;
   overflow: hidden;
+  padding-top: var(--header-h);
+  padding-bottom: var(--bottom-h);
   background: #111111;
   border-right: 1px solid var(--border-subtle);
   display: flex;
@@ -391,6 +398,9 @@ html, body {
   background: var(--bg-void);
   overflow: hidden;
 }
+#app.has-media .video-stage {
+  background: #000000;
+}
 
 #main-video {
   width: 100%;
@@ -490,7 +500,7 @@ html, body {
 /* Subtitle Overlay on Stage */
 .subtitle-overlay {
   position: absolute;
-  bottom: 34px;
+  bottom: calc(var(--bottom-h) + 18px);
   left: 50%;
   transform: translateX(-50%);
   max-width: 82%;
@@ -506,6 +516,7 @@ html, body {
   background: rgba(10, 10, 10, 0.72);
   backdrop-filter: blur(6px);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  transition: bottom 0.25s ease;
   display: none;
 }
 .subtitle-overlay.visible {
@@ -515,7 +526,7 @@ html, body {
 /* On-Screen HUD Toast (Volume, Speed, Snapshot, AI Command) */
 .osd-toast {
   position: absolute;
-  top: 20px;
+  top: calc(var(--header-h) + 14px);
   right: 22px;
   padding: 8px 14px;
   border-radius: 8px;
@@ -539,7 +550,7 @@ html, body {
 /* Drag & Drop Overlay */
 .drop-overlay {
   position: absolute;
-  inset: 12px;
+  inset: calc(var(--header-h) + 12px) 12px calc(var(--bottom-h) + 12px) 12px;
   border: 2px dashed var(--accent);
   border-radius: 14px;
   background: rgba(var(--accent-rgb), 0.1);
@@ -564,6 +575,8 @@ html, body {
   max-width: 280px;
   flex-shrink: 0;
   overflow: hidden;
+  padding-top: var(--header-h);
+  padding-bottom: var(--bottom-h);
   background: #111111;
   border-left: 1px solid var(--border-subtle);
   display: flex;
@@ -613,6 +626,10 @@ html, body {
 
 /* ==================== BOTTOM SINGLE-ROW CONTROL BAR ==================== */
 .bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   height: var(--bottom-h);
   min-height: var(--bottom-h);
   background: var(--bg-bar);
@@ -622,8 +639,7 @@ html, body {
   gap: 10px;
   padding: 0 12px;
   z-index: 40;
-  position: relative;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.18s ease, border-color 0.18s ease, backdrop-filter 0.18s ease;
 }
 
 .transport-group {
@@ -1195,17 +1211,47 @@ html, body {
   line-height: 1.5;
 }
 
+/* Translucent Overlay Bars During Video Playback (Solid only on Top/Sidebar/Queue actions) */
+#app.has-media:not(.solid-chrome) .top-bar {
+  background: rgba(16, 16, 16, 0.56);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+#app.has-media:not(.solid-chrome) .bottom-bar {
+  background: rgba(16, 16, 16, 0.56);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top-color: rgba(255, 255, 255, 0.07);
+}
+#app.has-media:not(.solid-chrome) .seekbar-track {
+  background: rgba(8, 8, 8, 0.62);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+#app.has-media:not(.solid-chrome) .vol-cone-shell {
+  background: rgba(8, 8, 8, 0.65);
+}
+#app.has-media:not(.solid-chrome) .play-pill-btn.is-playing {
+  background: rgba(34, 34, 34, 0.72);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
 /* Fullscreen Auto-Hide Idle Mode */
 #app.fs-idle {
   cursor: none;
 }
 #app.fs-idle .top-bar {
   opacity: 0;
+  transform: translateY(-100%);
   pointer-events: none;
 }
 #app.fs-idle .bottom-bar {
   opacity: 0;
+  transform: translateY(100%);
   pointer-events: none;
+}
+#app.fs-idle .subtitle-overlay {
+  bottom: 28px;
 }
 
 /* Scrollbar styling */

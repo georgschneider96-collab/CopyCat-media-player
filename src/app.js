@@ -85,10 +85,12 @@
     autoLoadSub: true,
     rememberState: true,
 
-    // Window state
+    // Window & chrome interaction state
     isFullscreen: false,
     isMaximized: false,
     aiPort: 4500,
+    hoveringTopBar: false,
+    hoveringBottomBar: false,
 
     // Optional detected reference demo video on Desktop
     demoVideoPath: null
@@ -796,6 +798,8 @@
 
     el.video.classList.toggle('loaded', !item.isAudio);
     el.emptyState.classList.add('hidden');
+    updateChromeSolidity();
+    applyVideoAppearance();
 
     el.mediaTitle.textContent = item.title || item.name;
     document.title = `${item.title || item.name} — VLCopyCAT`;
@@ -1198,19 +1202,28 @@
     el.lblSaturation.textContent = `${state.saturation}%`;
 
     const fit = state.videoFit;
-    el.video.style.width = '100%';
-    el.video.style.height = '100%';
+    el.video.style.maxWidth = '';
+    el.video.style.maxHeight = '';
     el.video.style.aspectRatio = '';
 
     if (fit === 'contain' || fit === 'cover' || fit === 'fill') {
+      el.video.style.width = '100%';
+      el.video.style.height = '100%';
       el.video.style.objectFit = fit;
     } else {
+      const [rw, rh] = fit.split(':').map(Number);
+      const targetRatio = rw && rh ? rw / rh : 16 / 9;
+      const stageRect = el.videoStage.getBoundingClientRect();
+      const stageRatio = stageRect.height > 0 ? stageRect.width / stageRect.height : targetRatio;
       el.video.style.objectFit = 'fill';
-      el.video.style.width = 'auto';
-      el.video.style.height = 'auto';
-      el.video.style.maxWidth = '100%';
-      el.video.style.maxHeight = '100%';
-      el.video.style.aspectRatio = fit.replace(':', ' / ');
+      el.video.style.aspectRatio = `${rw} / ${rh}`;
+      if (stageRatio >= targetRatio) {
+        el.video.style.height = '100%';
+        el.video.style.width = 'auto';
+      } else {
+        el.video.style.width = '100%';
+        el.video.style.height = 'auto';
+      }
     }
   }
 
@@ -1238,6 +1251,7 @@
     state.playing = !el.video.paused && !el.video.ended && Boolean(getCurrentItem());
     el.btnPlay.innerHTML = state.playing ? ICONS.pause : ICONS.play;
     el.btnPlay.classList.toggle('is-playing', state.playing);
+    updateChromeSolidity();
   }
 
   function updateTimelineUI() {
@@ -1339,6 +1353,7 @@
     el.folderCrumbText.textContent = folder.folderName || 'Folder';
     el.librarySidebar.classList.remove('collapsed');
     el.btnSidebar.classList.add('active');
+    updateChromeSolidity();
     renderSidebarShortcuts();
     renderLibraryList();
     if (folder.items?.length) {
@@ -1354,9 +1369,31 @@
     if (sub) loadSubtitleData(sub, true);
   }
 
-  // ==================== POPOVER & MODAL HELPERS ====================
+  // ==================== POPOVER, SOLIDITY & FULLSCREEN IDLE ====================
+  function updateChromeSolidity() {
+    const hasMedia = Boolean(getCurrentItem());
+    el.app.classList.toggle('has-media', hasMedia);
+
+    const leftSidebarOpen = !el.librarySidebar.classList.contains('collapsed');
+    const rightQueueOpen = !el.rightDrawer.classList.contains('collapsed');
+    const topMenuOpen = el.headerMenu.classList.contains('open');
+    const settingsOpen = el.settingsBackdrop.classList.contains('open');
+
+    // Translucent during playback & bottom-bar interactions; solid only for top bar & sidebars/queue
+    const shouldBeSolid =
+      !hasMedia ||
+      leftSidebarOpen ||
+      rightQueueOpen ||
+      topMenuOpen ||
+      settingsOpen ||
+      state.hoveringTopBar;
+
+    el.app.classList.toggle('solid-chrome', shouldBeSolid);
+  }
+
   function openPopoverTab(tabName) {
     el.headerMenu.classList.remove('open');
+    updateChromeSolidity();
     const isAlreadyOpenOnSame =
       el.bottomPopover.classList.contains('open') &&
       document.querySelector(`.pop-tab[data-pop-tab="${tabName}"]`)?.classList.contains('active');
@@ -1382,25 +1419,32 @@
       ? forceOpen
       : !el.settingsBackdrop.classList.contains('open');
     el.settingsBackdrop.classList.toggle('open', shouldOpen);
+    updateChromeSolidity();
   }
 
-  // ==================== FULLSCREEN AUTO-HIDE IDLE ====================
   let fsIdleTimer = null;
   function resetFullscreenIdle() {
     el.app.classList.remove('fs-idle');
     clearTimeout(fsIdleTimer);
     if (state.isFullscreen && state.autoHideFs && state.playing) {
       fsIdleTimer = setTimeout(() => {
+        const anyPanelOpen =
+          !el.librarySidebar.classList.contains('collapsed') ||
+          !el.rightDrawer.classList.contains('collapsed') ||
+          el.bottomPopover.classList.contains('open') ||
+          el.headerMenu.classList.contains('open') ||
+          el.settingsBackdrop.classList.contains('open');
+
         if (
           state.isFullscreen &&
           state.playing &&
-          !el.bottomPopover.classList.contains('open') &&
-          !el.headerMenu.classList.contains('open') &&
-          !el.settingsBackdrop.classList.contains('open')
+          !anyPanelOpen &&
+          !state.hoveringTopBar &&
+          !state.hoveringBottomBar
         ) {
           el.app.classList.add('fs-idle');
         }
-      }, 2600);
+      }, 2400);
     }
   }
 
@@ -1664,7 +1708,10 @@
           `Invoke-RestMethod -Method Post -Uri http://127.0.0.1:${ws.aiPort}/api/control -ContentType 'application/json' -Body '{"action":"setAccent","value":"cyan"}'`;
       }
       el.btnPip.classList.toggle('active', state.alwaysOnTop);
+      state.hoveringTopBar = false;
       syncSwitchesUI();
+      updateChromeSolidity();
+      applyVideoAppearance();
       resetFullscreenIdle();
     });
 
@@ -1676,23 +1723,45 @@
 
     api.onAiCommand(handleAiCommand);
 
-    // 6. Top bar & menu actions
+    // 6. Top bar, hover tracking & menu actions
+    el.topBar.addEventListener('mouseenter', () => {
+      state.hoveringTopBar = true;
+      updateChromeSolidity();
+      resetFullscreenIdle();
+    });
+    el.topBar.addEventListener('mouseleave', () => {
+      state.hoveringTopBar = false;
+      updateChromeSolidity();
+      resetFullscreenIdle();
+    });
+    el.bottomBar.addEventListener('mouseenter', () => {
+      state.hoveringBottomBar = true;
+      resetFullscreenIdle();
+    });
+    el.bottomBar.addEventListener('mouseleave', () => {
+      state.hoveringBottomBar = false;
+      resetFullscreenIdle();
+    });
+
     el.btnCone.addEventListener('click', () => toggleSettingsModal());
     el.btnMenu.addEventListener('click', (e) => {
       e.stopPropagation();
       el.bottomPopover.classList.remove('open');
       el.headerMenu.classList.toggle('open');
+      updateChromeSolidity();
     });
 
     el.btnSidebar.addEventListener('click', () => {
       const collapsed = el.librarySidebar.classList.toggle('collapsed');
       el.btnSidebar.classList.toggle('active', !collapsed);
+      updateChromeSolidity();
     });
 
     el.btnFolderCrumb.addEventListener('click', () => {
       if (state.libraryFolder) {
         const collapsed = el.librarySidebar.classList.toggle('collapsed');
         el.btnSidebar.classList.toggle('active', !collapsed);
+        updateChromeSolidity();
       } else {
         openFolderDialog();
       }
@@ -1700,32 +1769,39 @@
 
     el.menuOpenFile.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       openFileDialog(false);
     });
     el.menuOpenMulti.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       openFileDialog(true);
     });
     el.menuOpenFolder.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       openFolderDialog();
     });
     el.menuOpenSub.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       openSubtitleDialog();
     });
     el.menuSnapshot.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       captureSnapshot();
     });
     el.menuReveal.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       const cur = getCurrentItem();
       if (cur) api.revealInExplorer(cur.filePath);
       else showToast('No media file currently open');
     });
     el.menuAlwaysTop.addEventListener('click', async () => {
       el.headerMenu.classList.remove('open');
+      updateChromeSolidity();
       state.alwaysOnTop = await api.toggleAlwaysOnTop();
       syncSwitchesUI();
       showToast(state.alwaysOnTop ? 'Pinned Always on Top' : 'Unpinned Always on Top');
@@ -1746,6 +1822,7 @@
     el.btnQueueDrawer.addEventListener('click', () => {
       const collapsed = el.rightDrawer.classList.toggle('collapsed');
       el.btnQueueDrawer.classList.toggle('active', !collapsed);
+      updateChromeSolidity();
     });
     document.querySelectorAll('[data-drawer-tab]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1773,6 +1850,7 @@
         updateVisualizerVisibility();
         updateTransportUI();
         updateTimelineUI();
+        updateChromeSolidity();
       } else {
         state.bookmarks = [];
       }
@@ -1843,6 +1921,7 @@
       if (el.headerMenu.classList.contains('open') || el.bottomPopover.classList.contains('open')) {
         el.headerMenu.classList.remove('open');
         el.bottomPopover.classList.remove('open');
+        updateChromeSolidity();
         return;
       }
       if (e.target.closest('.empty-state')) return;
@@ -2192,7 +2271,10 @@
     // Close floating menus when clicking outside
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#header-menu') && !e.target.closest('#btn-menu')) {
-        el.headerMenu.classList.remove('open');
+        if (el.headerMenu.classList.contains('open')) {
+          el.headerMenu.classList.remove('open');
+          updateChromeSolidity();
+        }
       }
       if (
         !e.target.closest('#bottom-popover') &&
@@ -2235,6 +2317,12 @@
 
     // 15. Keyboard Shortcuts & Fullscreen Mouse Activity
     window.addEventListener('mousemove', resetFullscreenIdle);
+    window.addEventListener('resize', applyVideoAppearance);
+    window.addEventListener('blur', () => {
+      state.hoveringTopBar = false;
+      state.hoveringBottomBar = false;
+      updateChromeSolidity();
+    });
 
     window.addEventListener('keydown', (e) => {
       resetFullscreenIdle();
@@ -2286,6 +2374,7 @@
           } else if (el.bottomPopover.classList.contains('open') || el.headerMenu.classList.contains('open')) {
             el.bottomPopover.classList.remove('open');
             el.headerMenu.classList.remove('open');
+            updateChromeSolidity();
           } else if (state.isFullscreen) {
             api.toggleFullscreen();
           }
@@ -2347,6 +2436,7 @@
     setInterval(pushPlayerStatus, 1000);
     renderLibraryList();
     renderRightDrawer();
+    updateChromeSolidity();
     pushPlayerStatus();
   }
 
