@@ -2,17 +2,30 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { spawn, spawnSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.webm', '.mov', '.avi', '.m4v', '.ogv',
+  '.ts', '.m2ts', '.flv', '.wmv', '.mpg', '.mpeg', '.vob', '.3gp',
+  '.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'
+]);
+
+const AUDIO_EXTENSIONS = new Set([
   '.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'
 ]);
 
 const SUB_EXTENSIONS = ['.srt', '.vtt'];
 
+const ISO_BMFF_ATOMS = new Set([
+  'ftyp', 'moov', 'mdat', 'free', 'wide', 'skip', 'pnot', 'styp'
+]);
+
 let mainWindow = null;
 let aiServerPort = 4500;
+let activeStreamProc = null;
+let activeThumbProc = null;
+
 let latestPlayerStatus = {
   app: 'VLCopyCAT',
   playing: false,
@@ -24,8 +37,138 @@ let latestPlayerStatus = {
   muted: false,
   speed: 1,
   accent: 'orange',
-  queueLength: 0
+  queueLength: 0,
+  streamEngine: 'native'
 };
+
+// Locate FFmpeg & FFprobe for VLC-grade universal container/codec support
+function resolveMediaTool(toolName) {
+  const exe = process.platform === 'win32' ? `${toolName}.exe` : toolName;
+  const candidates = [
+    path.join('C:\\YTDownload', exe),
+    path.join(__dirname, 'bin', exe),
+    path.join(process.resourcesPath || '', 'bin', exe)
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  try {
+    const check = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [toolName], {
+      encoding: 'utf8',
+      windowsHide: true
+    });
+    if (check.status === 0 && check.stdout) {
+      const first = check.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      if (first && fs.existsSync(first)) return first;
+    }
+  } catch {}
+  return null;
+}
+
+const FFMPEG_PATH = resolveMediaTool('ffmpeg');
+const FFPROBE_PATH = resolveMediaTool('ffprobe');
+
+function killActiveStreamProc() {
+  if (activeStreamProc) {
+    try {
+      activeStreamProc.kill('SIGKILL');
+    } catch {}
+    activeStreamProc = null;
+  }
+}
+
+function killActiveThumbProc() {
+  if (activeThumbProc) {
+    try {
+      activeThumbProc.kill('SIGKILL');
+    } catch {}
+    activeThumbProc = null;
+  }
+}
+
+// Fast 0.05ms header byte sniffer to catch MPEG-TS disguised as .mp4 and non-Chromium containers
+function detectNeedsStream(filePath, ext) {
+  if (!FFMPEG_PATH) return false;
+  if (AUDIO_EXTENSIONS.has(ext)) return false;
+
+  if (['.ts', '.m2ts', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.vob'].includes(ext)) {
+    return true;
+  }
+
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(196);
+    const bytesRead = fs.readSync(fd, buf, 0, 196, 0);
+    if (bytesRead < 12) return false;
+
+    // MPEG-TS sync byte 0x47 at offset 0 and offset 188 (common in HLS downloads saved as .mp4)
+    if (buf[0] === 0x47 && (bytesRead < 189 || buf[188] === 0x47)) {
+      return true;
+    }
+
+    // AVI ('RIFF'), FLV ('FLV')
+    const head3 = buf.subarray(0, 3).toString('ascii');
+    const head4 = buf.subarray(0, 4).toString('ascii');
+    if (head4 === 'RIFF' || head3 === 'FLV') {
+      return true;
+    }
+
+    // Verify ISO Base Media File Format atom for .mp4 / .m4v / .mov
+    if (['.mp4', '.m4v', '.mov', '.3gp'].includes(ext)) {
+      const atom = buf.subarray(4, 8).toString('ascii');
+      if (!ISO_BMFF_ATOMS.has(atom)) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+  return false;
+}
+
+function probeMediaFile(filePath) {
+  return new Promise((resolve) => {
+    if (!FFPROBE_PATH || !filePath || !fs.existsSync(filePath)) {
+      return resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null });
+    }
+    const args = [
+      '-v', 'error',
+      '-show_entries', 'format=format_name,duration',
+      '-show_entries', 'stream=index,codec_type,codec_name,width,height',
+      '-of', 'json',
+      filePath
+    ];
+    const proc = spawn(FFPROBE_PATH, args, { windowsHide: true });
+    let out = '';
+    proc.stdout.on('data', (chunk) => { out += chunk.toString(); });
+    proc.on('error', () => resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null }));
+    proc.on('close', () => {
+      try {
+        const parsed = JSON.parse(out || '{}');
+        const streams = parsed.streams || [];
+        const vStream = streams.find((s) => s.codec_type === 'video');
+        const aStream = streams.find((s) => s.codec_type === 'audio');
+        const duration = Number(parsed.format?.duration) || 0;
+        resolve({
+          ok: true,
+          formatName: parsed.format?.format_name || '',
+          duration,
+          videoCodec: vStream?.codec_name || null,
+          audioCodec: aStream?.codec_name || null,
+          width: vStream?.width || 0,
+          height: vStream?.height || 0
+        });
+      } catch {
+        resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null });
+      }
+    });
+  });
+}
 
 function naturalCompare(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
@@ -58,9 +201,10 @@ function findAutoSubtitle(mediaFilePath) {
 function buildMediaItem(filePath) {
   const resolved = path.resolve(filePath);
   const ext = path.extname(resolved).toLowerCase();
-  const isAudio = ['.mp3', '.flac', '.wav', '.ogg', '.m4a', '.aac', '.opus'].includes(ext);
+  const isAudio = AUDIO_EXTENSIONS.has(ext);
   const folderPath = path.dirname(resolved);
   const autoSubPath = findAutoSubtitle(resolved);
+  const needsStream = detectNeedsStream(resolved, ext);
   return {
     filePath: resolved,
     fileUrl: pathToFileURL(resolved).href,
@@ -68,6 +212,7 @@ function buildMediaItem(filePath) {
     title: path.basename(resolved, path.extname(resolved)),
     ext,
     isAudio,
+    needsStream,
     folderPath,
     folderName: path.basename(folderPath) || folderPath,
     autoSubPath
@@ -99,7 +244,8 @@ function broadcastWindowState() {
     maximized: mainWindow.isMaximized(),
     fullscreen: mainWindow.isFullScreen(),
     alwaysOnTop: mainWindow.isAlwaysOnTop(),
-    aiPort: aiServerPort
+    aiPort: aiServerPort,
+    hasFfmpeg: Boolean(FFMPEG_PATH)
   });
 }
 
@@ -146,6 +292,120 @@ function createMainWindow() {
   mainWindow.on('leave-full-screen', broadcastWindowState);
 }
 
+function handleFfmpegStreamRequest(urlObj, req, res) {
+  const filePath = urlObj.searchParams.get('path') || '';
+  const startSec = Math.max(0, Number(urlObj.searchParams.get('start')) || 0);
+  const vcodec = (urlObj.searchParams.get('vcodec') || '').toLowerCase();
+  const forceTranscodeVideo = urlObj.searchParams.get('transcode') === '1';
+
+  if (!FFMPEG_PATH || !filePath || !fs.existsSync(filePath)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Media file or FFmpeg binary not found');
+    return;
+  }
+
+  killActiveStreamProc();
+
+  const canCopyVideo = !forceTranscodeVideo && vcodec === 'h264';
+  const args = ['-hide_banner', '-loglevel', 'error'];
+
+  if (startSec > 0.05) {
+    args.push('-ss', startSec.toFixed(3));
+  }
+
+  args.push('-i', filePath);
+  args.push('-map', '0:v:0?', '-map', '0:a:0?');
+
+  if (canCopyVideo) {
+    args.push('-c:v', 'copy');
+  } else {
+    args.push(
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '20',
+      '-pix_fmt', 'yuv420p'
+    );
+  }
+
+  args.push(
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-ac', '2',
+    '-sn',
+    '-dn',
+    '-f', 'mp4',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    'pipe:1'
+  );
+
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store'
+  });
+
+  const proc = spawn(FFMPEG_PATH, args, { windowsHide: true });
+  activeStreamProc = proc;
+
+  proc.stdout.pipe(res);
+
+  const cleanup = () => {
+    if (activeStreamProc === proc) activeStreamProc = null;
+    try { proc.kill('SIGKILL'); } catch {}
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  proc.on('error', cleanup);
+}
+
+function handleFfmpegThumbRequest(urlObj, req, res) {
+  const filePath = urlObj.searchParams.get('path') || '';
+  const timeSec = Math.max(0, Number(urlObj.searchParams.get('t')) || 0);
+
+  if (!FFMPEG_PATH || !filePath || !fs.existsSync(filePath)) {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+
+  killActiveThumbProc();
+
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-ss', timeSec.toFixed(2),
+    '-i', filePath,
+    '-frames:v', '1',
+    '-vf', 'scale=320:-2',
+    '-q:v', '5',
+    '-f', 'image2pipe',
+    '-vcodec', 'mjpeg',
+    'pipe:1'
+  ];
+
+  res.writeHead(200, {
+    'Content-Type': 'image/jpeg',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'max-age=30'
+  });
+
+  const proc = spawn(FFMPEG_PATH, args, { windowsHide: true });
+  activeThumbProc = proc;
+  proc.stdout.pipe(res);
+
+  const cleanup = () => {
+    if (activeThumbProc === proc) activeThumbProc = null;
+    try { proc.kill('SIGKILL'); } catch {}
+  };
+
+  req.on('close', cleanup);
+  proc.on('close', () => {
+    if (activeThumbProc === proc) activeThumbProc = null;
+  });
+  proc.on('error', cleanup);
+}
+
 function startAiControlServer(port = 4500) {
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -158,18 +418,31 @@ function startAiControlServer(port = 4500) {
       return;
     }
 
+    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${aiServerPort}`);
+    const pathname = urlObj.pathname;
+
     const sendJson = (status, obj) => {
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(obj, null, 2));
     };
 
-    if (req.method === 'GET' && (req.url === '/' || req.url === '/api')) {
+    // Universal FFmpeg Live Stream & Thumbnail Endpoints
+    if (req.method === 'GET' && pathname === '/api/stream') {
+      return handleFfmpegStreamRequest(urlObj, req, res);
+    }
+    if (req.method === 'GET' && pathname === '/api/thumb') {
+      return handleFfmpegThumbRequest(urlObj, req, res);
+    }
+
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/api')) {
       return sendJson(200, {
         name: 'VLCopyCAT Local AI Control Bridge',
-        version: '1.0.0',
+        version: '1.1.0',
         port: aiServerPort,
+        ffmpegEnabled: Boolean(FFMPEG_PATH),
         endpoints: {
           'GET /api/status': 'Inspect live playback state, title, timestamps, volume, speed, and theme',
+          'GET /api/stream': 'Zero-disk FFmpeg fragmented MP4 live stream for MPEG-TS, MKV, AVI, AC3, HEVC, etc.',
           'POST /api/control': {
             description: 'Control VLCopyCAT from any AI assistant or local script',
             actions: [
@@ -187,11 +460,11 @@ function startAiControlServer(port = 4500) {
       });
     }
 
-    if (req.method === 'GET' && req.url === '/api/status') {
+    if (req.method === 'GET' && pathname === '/api/status') {
       return sendJson(200, latestPlayerStatus);
     }
 
-    if (req.method === 'POST' && req.url === '/api/control') {
+    if (req.method === 'POST' && pathname === '/api/control') {
       let raw = '';
       req.on('data', (chunk) => {
         raw += chunk;
@@ -269,8 +542,15 @@ ipcMain.handle('win:getState', () => ({
   maximized: mainWindow?.isMaximized() || false,
   fullscreen: mainWindow?.isFullScreen() || false,
   alwaysOnTop: mainWindow?.isAlwaysOnTop() || false,
-  aiPort: aiServerPort
+  aiPort: aiServerPort,
+  hasFfmpeg: Boolean(FFMPEG_PATH)
 }));
+
+ipcMain.handle('media:probe', (_evt, filePath) => probeMediaFile(filePath));
+ipcMain.handle('media:stopStream', () => {
+  killActiveStreamProc();
+  killActiveThumbProc();
+});
 
 ipcMain.handle('dialog:openFiles', async (_evt, multi = false) => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -365,12 +645,16 @@ ipcMain.handle('fs:getQuickFolders', () => {
   const videos = app.getPath('videos');
   const downloads = app.getPath('downloads');
   const music = app.getPath('music');
-  return [
-    { label: 'Videos', path: videos },
+  const list = [
     { label: 'Desktop', path: desktop },
+    { label: 'Videos', path: videos },
     { label: 'Downloads', path: downloads },
     { label: 'Music', path: music }
   ];
+  if (fs.existsSync('E:\\Videos')) {
+    list.splice(1, 0, { label: 'E:\\Videos', path: 'E:\\Videos' });
+  }
+  return list;
 });
 
 ipcMain.handle('fs:saveSnapshot', (_evt, { dataUrl, baseName }) => {
@@ -403,6 +687,13 @@ app.whenReady().then(() => {
   createMainWindow();
 });
 
+app.on('before-quit', () => {
+  killActiveStreamProc();
+  killActiveThumbProc();
+});
+
 app.on('window-all-closed', () => {
+  killActiveStreamProc();
+  killActiveThumbProc();
   if (process.platform !== 'darwin') app.quit();
 });

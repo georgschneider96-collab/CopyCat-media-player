@@ -1,5 +1,5 @@
 // VLCopyCAT Renderer Application
-// Implements Juxtopposed's 25-Year VLC Redesign UI + WebAudio 200% Cone Boost + Local AI Bridge
+// Implements Juxtopposed's 25-Year VLC Redesign UI + Universal FFmpeg Live Stream Engine + 200% Cone Boost + Local AI Bridge
 
 (() => {
   'use strict';
@@ -45,6 +45,16 @@
     speed: 1.0,
     loop: false,
     showRemainingTime: true,
+
+    // Universal FFmpeg Live Stream state (for MPEG-TS .mp4, MKV, AVI, AC3, Hi10P, etc.)
+    hasFfmpeg: true,
+    streamMode: false,
+    streamOffset: 0,
+    streamDuration: 0,
+    streamVideoCodec: '',
+    streamForceTranscode: false,
+    fallbackAttempted: false,
+    scrubPreviewTime: null,
 
     // Video filters & aspect
     videoFit: 'contain',
@@ -218,6 +228,25 @@
     btnCopyAiCmd: $('btn-copy-ai-cmd')
   };
 
+  // ==================== UNIFIED TIME HELPERS ====================
+  function getDuration() {
+    if (state.streamMode) {
+      return state.streamDuration > 0 ? state.streamDuration : 0;
+    }
+    return Number.isFinite(el.video.duration) && el.video.duration > 0 ? el.video.duration : 0;
+  }
+
+  function getCurrentTime() {
+    if (state.scrubPreviewTime !== null) {
+      return state.scrubPreviewTime;
+    }
+    if (state.streamMode) {
+      const t = state.streamOffset + (el.video.currentTime || 0);
+      return state.streamDuration > 0 ? Math.min(state.streamDuration, t) : t;
+    }
+    return el.video.currentTime || 0;
+  }
+
   // ==================== AUDIO ENGINE (200% CONE BOOST + EQ + ANALYSER) ====================
   let audioCtx = null;
   let gainNode = null;
@@ -303,17 +332,24 @@
     el.lblVolumePop.textContent = state.muted ? `Muted (${clamped}%)` : `${clamped}%`;
   }
 
-  // ==================== OFF-SCREEN THUMBNAIL VIDEO ====================
+  // ==================== HOVER THUMBNAIL ENGINE (NATIVE + FFMPEG STREAM) ====================
   const thumbVideo = document.createElement('video');
   thumbVideo.muted = true;
   thumbVideo.preload = 'auto';
   thumbVideo.playsInline = true;
   let thumbSeeking = false;
   let pendingThumbTime = null;
+
+  const streamThumbImg = new Image();
+  streamThumbImg.crossOrigin = 'anonymous';
+  let streamThumbLoading = false;
+  let pendingStreamThumbSec = null;
+  let lastStreamThumbSec = -999;
+
   const hoverCtx = el.hoverPreviewCanvas.getContext('2d');
 
   thumbVideo.addEventListener('seeked', () => {
-    drawThumbFrame();
+    drawFittedSourceToHover(thumbVideo, thumbVideo.videoWidth, thumbVideo.videoHeight);
     if (pendingThumbTime !== null && Math.abs(pendingThumbTime - thumbVideo.currentTime) > 0.15) {
       const nextT = pendingThumbTime;
       pendingThumbTime = null;
@@ -328,12 +364,50 @@
     }
   });
 
+  streamThumbImg.addEventListener('load', () => {
+    drawFittedSourceToHover(streamThumbImg, streamThumbImg.naturalWidth, streamThumbImg.naturalHeight);
+    if (pendingStreamThumbSec !== null && Math.abs(pendingStreamThumbSec - lastStreamThumbSec) >= 1.0) {
+      const nextSec = pendingStreamThumbSec;
+      pendingStreamThumbSec = null;
+      triggerStreamThumbFetch(nextSec);
+    } else {
+      pendingStreamThumbSec = null;
+      streamThumbLoading = false;
+    }
+  });
+
+  streamThumbImg.addEventListener('error', () => {
+    streamThumbLoading = false;
+    pendingStreamThumbSec = null;
+  });
+
+  function triggerStreamThumbFetch(sec) {
+    const item = getCurrentItem();
+    if (!item) return;
+    streamThumbLoading = true;
+    lastStreamThumbSec = sec;
+    streamThumbImg.src =
+      `http://127.0.0.1:${state.aiPort}/api/thumb?path=${encodeURIComponent(item.filePath)}&t=${sec.toFixed(1)}`;
+  }
+
   function requestThumbAt(seconds) {
     const currentItem = getCurrentItem();
     if (!currentItem || currentItem.isAudio || !state.showHoverThumb) {
       drawPlaceholderThumb(currentItem?.isAudio ? 'AUDIO TRACK' : 'PREVIEW');
       return;
     }
+
+    if (state.streamMode) {
+      const rounded = Math.round(seconds * 2) / 2;
+      if (Math.abs(rounded - lastStreamThumbSec) < 0.5) return;
+      if (!streamThumbLoading) {
+        triggerStreamThumbFetch(rounded);
+      } else {
+        pendingStreamThumbSec = rounded;
+      }
+      return;
+    }
+
     if (!thumbVideo.src || thumbVideo.readyState < 1) {
       drawPlaceholderThumb('LOADING...');
       return;
@@ -351,22 +425,19 @@
     }
   }
 
-  function drawThumbFrame() {
+  function drawFittedSourceToHover(source, sw, sh) {
     const cw = el.hoverPreviewCanvas.width;
     const ch = el.hoverPreviewCanvas.height;
     hoverCtx.fillStyle = '#090909';
     hoverCtx.fillRect(0, 0, cw, ch);
+    if (!sw || !sh) return;
 
-    const vw = thumbVideo.videoWidth;
-    const vh = thumbVideo.videoHeight;
-    if (!vw || !vh) return;
-
-    const scale = Math.min(cw / vw, ch / vh);
-    const dw = vw * scale;
-    const dh = vh * scale;
+    const scale = Math.min(cw / sw, ch / sh);
+    const dw = sw * scale;
+    const dh = sh * scale;
     const dx = (cw - dw) / 2;
     const dy = (ch - dh) / 2;
-    hoverCtx.drawImage(thumbVideo, dx, dy, dw, dh);
+    hoverCtx.drawImage(source, dx, dy, dw, dh);
   }
 
   function drawPlaceholderThumb(label) {
@@ -609,7 +680,7 @@
 
   function renderSubtitleBlocksOnSeekbar() {
     el.seekbarSubBlocks.innerHTML = '';
-    const dur = el.video.duration;
+    const dur = getDuration();
     const hasSubs = state.subCues.length > 0 && state.subEnabled;
     el.subSyncMini.classList.toggle('visible', hasSubs);
 
@@ -618,7 +689,6 @@
     }
 
     const frag = document.createDocumentFragment();
-    // Cap rendered DOM segments by merging close cues if massive subtitle file
     const step = Math.max(1, Math.ceil(state.subCues.length / 260));
     for (let i = 0; i < state.subCues.length; i += step) {
       const cue = state.subCues[i];
@@ -639,7 +709,7 @@
       el.subtitleOverlay.classList.remove('visible');
       return;
     }
-    const t = el.video.currentTime - state.subOffsetMs / 1000;
+    const t = getCurrentTime() - state.subOffsetMs / 1000;
     const active = state.subCues.find((c) => t >= c.start && t <= c.end);
     if (active) {
       el.subtitleOverlay.textContent = active.text;
@@ -649,25 +719,78 @@
     }
   }
 
+  // ==================== UNIVERSAL FFMPEG LIVE STREAM ENGINE ====================
+  function buildStreamUrl(filePath, startSec) {
+    const params = new URLSearchParams({
+      path: filePath,
+      start: startSec.toFixed(2),
+      vcodec: state.streamVideoCodec || '',
+      transcode: state.streamForceTranscode ? '1' : '0'
+    });
+    return `http://127.0.0.1:${state.aiPort}/api/stream?${params.toString()}`;
+  }
+
+  async function startFfmpegStreamPlayback(item, startSec = 0, autoPlay = true, forceTranscode = false) {
+    const probe = await api.probeMedia(item.filePath);
+    state.streamMode = true;
+    state.streamOffset = startSec;
+    state.streamDuration = probe?.duration || 0;
+    state.streamVideoCodec = probe?.videoCodec || '';
+    state.streamForceTranscode = forceTranscode;
+    lastStreamThumbSec = -999;
+
+    thumbVideo.removeAttribute('src');
+    el.video.crossOrigin = 'anonymous';
+    el.video.loop = false; // Handled manually on 'ended' so loop starts at 0:00
+    el.video.src = buildStreamUrl(item.filePath, startSec);
+    el.video.playbackRate = state.speed;
+
+    updateTimelineUI();
+    renderSubtitleBlocksOnSeekbar();
+
+    if (autoPlay) {
+      playMedia();
+    } else {
+      updateTransportUI();
+    }
+    pushPlayerStatus();
+  }
+
+  function reloadStreamAt(targetSec, shouldPlay) {
+    const item = getCurrentItem();
+    if (!item || !state.streamMode) return;
+    const dur = getDuration();
+    const clamped = dur > 0 ? Math.max(0, Math.min(dur - 0.25, targetSec)) : Math.max(0, targetSec);
+    state.streamOffset = clamped;
+    el.video.crossOrigin = 'anonymous';
+    el.video.src = buildStreamUrl(item.filePath, clamped);
+    el.video.playbackRate = state.speed;
+    updateTimelineUI();
+    if (shouldPlay) {
+      playMedia();
+    }
+  }
+
   // ==================== MEDIA LOADING, QUEUE & LIBRARY ====================
   async function loadMediaItemAtIndex(idx, autoPlay = true) {
     if (idx < 0 || idx >= state.queue.length) return;
     state.queueIndex = idx;
     const item = state.queue[idx];
 
+    await api.stopStream();
     clearSubtitles();
 
-    el.video.src = item.fileUrl;
-    el.video.playbackRate = state.speed;
-    el.video.loop = state.loop;
+    state.streamMode = false;
+    state.streamOffset = 0;
+    state.streamDuration = 0;
+    state.streamVideoCodec = '';
+    state.streamForceTranscode = false;
+    state.fallbackAttempted = false;
+    state.scrubPreviewTime = null;
+    lastStreamThumbSec = -999;
+
     el.video.classList.toggle('loaded', !item.isAudio);
     el.emptyState.classList.add('hidden');
-
-    if (!item.isAudio) {
-      thumbVideo.src = item.fileUrl;
-    } else {
-      thumbVideo.removeAttribute('src');
-    }
 
     el.mediaTitle.textContent = item.title || item.name;
     document.title = `${item.title || item.name} — VLCopyCAT`;
@@ -686,6 +809,24 @@
     updateVisualizerVisibility();
     renderLibraryList();
     renderRightDrawer();
+
+    // Proactively use FFmpeg Live Stream for MPEG-TS disguised as .mp4, AVI, TS, FLV, etc.
+    if (item.needsStream && state.hasFfmpeg) {
+      await startFfmpegStreamPlayback(item, 0, autoPlay, false);
+      return;
+    }
+
+    // Standard native playback path (ISO MP4, WebM, Audio)
+    el.video.removeAttribute('crossorigin');
+    el.video.src = item.fileUrl;
+    el.video.playbackRate = state.speed;
+    el.video.loop = state.loop;
+
+    if (!item.isAudio) {
+      thumbVideo.src = item.fileUrl;
+    } else {
+      thumbVideo.removeAttribute('src');
+    }
 
     if (autoPlay) {
       playMedia();
@@ -840,9 +981,9 @@
             }
           }
           setTimeout(() => {
-            el.video.currentTime = bm.time;
+            seekToSeconds(bm.time, true);
             showToast(`Jumped to bookmark ${formatTime(bm.time)}`);
-          }, 120);
+          }, 150);
         });
         frag.appendChild(row);
       });
@@ -853,7 +994,7 @@
   function addBookmark() {
     const item = getCurrentItem();
     if (!item) return;
-    const t = el.video.currentTime || 0;
+    const t = getCurrentTime();
     state.bookmarks.push({
       id: Date.now(),
       title: item.title || item.name,
@@ -886,8 +1027,8 @@
 
   function playPrev() {
     if (!state.queue.length) return;
-    if (el.video.currentTime > 4) {
-      el.video.currentTime = 0;
+    if (getCurrentTime() > 4) {
+      seekToSeconds(0, !el.video.paused);
       return;
     }
     const prevIdx = (state.queueIndex - 1 + state.queue.length) % state.queue.length;
@@ -900,19 +1041,50 @@
     loadMediaItemAtIndex(nextIdx, true);
   }
 
-  function seekToRatio(ratio) {
-    const dur = el.video.duration;
+  function seekToSeconds(targetSec, shouldPlayAfter = !el.video.paused) {
+    const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
-    const clamped = Math.max(0, Math.min(1, ratio));
-    el.video.currentTime = clamped * dur;
-    updateTimelineUI();
+    const clamped = Math.max(0, Math.min(dur, targetSec));
+
+    if (!state.streamMode) {
+      el.video.currentTime = clamped;
+      updateTimelineUI();
+      return;
+    }
+
+    // In FFmpeg Live Stream mode: check if targetSec is already inside the local buffer
+    const rel = clamped - state.streamOffset;
+    let inBuffer = false;
+    if (rel >= 0) {
+      for (let i = 0; i < el.video.buffered.length; i++) {
+        if (rel >= el.video.buffered.start(i) && rel <= el.video.buffered.end(i) - 0.25) {
+          inBuffer = true;
+          break;
+        }
+      }
+    }
+
+    if (inBuffer) {
+      el.video.currentTime = rel;
+      updateTimelineUI();
+      if (shouldPlayAfter && el.video.paused) playMedia();
+    } else {
+      reloadStreamAt(clamped, shouldPlayAfter);
+    }
+  }
+
+  function seekToRatio(ratio, shouldPlayAfter = !el.video.paused) {
+    const dur = getDuration();
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    seekToSeconds(Math.max(0, Math.min(1, ratio)) * dur, shouldPlayAfter);
   }
 
   function seekByDelta(deltaSec) {
-    const dur = el.video.duration;
+    const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
-    el.video.currentTime = Math.max(0, Math.min(dur, el.video.currentTime + deltaSec));
-    showToast(`${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatTime(el.video.currentTime)})`);
+    const target = Math.max(0, Math.min(dur, getCurrentTime() + deltaSec));
+    seekToSeconds(target, !el.video.paused);
+    showToast(`${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatTime(target)})`);
   }
 
   function setSpeed(nextSpeed, toast = true) {
@@ -939,7 +1111,6 @@
     if (fit === 'contain' || fit === 'cover' || fit === 'fill') {
       el.video.style.objectFit = fit;
     } else {
-      // Forced aspect ratios: 16:9, 4:3, 21:9
       el.video.style.objectFit = 'fill';
       el.video.style.width = 'auto';
       el.video.style.height = 'auto';
@@ -976,8 +1147,8 @@
   }
 
   function updateTimelineUI() {
-    const cur = el.video.currentTime || 0;
-    const dur = el.video.duration || 0;
+    const cur = getCurrentTime();
+    const dur = getDuration();
     const forceHrs = dur >= 3600;
 
     el.timeElapsed.textContent = formatTime(cur, forceHrs);
@@ -1146,13 +1317,14 @@
       playing: state.playing,
       title: item?.title || null,
       filePath: item?.filePath || null,
-      currentTime: Number((el.video.currentTime || 0).toFixed(2)),
-      duration: Number((el.video.duration || 0).toFixed(2)),
+      currentTime: Number(getCurrentTime().toFixed(2)),
+      duration: Number(getDuration().toFixed(2)),
       volume: state.volume,
       muted: state.muted,
       speed: state.speed,
       accent: state.accentKey === 'custom' ? state.customAccentHex : state.accentKey,
-      queueLength: state.queue.length
+      queueLength: state.queue.length,
+      streamEngine: state.streamMode ? 'ffmpeg-live' : 'native'
     });
   }
 
@@ -1173,7 +1345,7 @@
         break;
       case 'stop':
         pauseMedia();
-        el.video.currentTime = 0;
+        seekToSeconds(0, false);
         showToast('AI Bridge: Stop');
         break;
       case 'next':
@@ -1186,9 +1358,9 @@
         break;
       case 'seek':
         if (typeof cmd.delta === 'number') seekByDelta(cmd.delta);
-        else if (typeof cmd.value === 'number' && Number.isFinite(el.video.duration)) {
-          el.video.currentTime = Math.max(0, Math.min(el.video.duration, cmd.value));
-          showToast(`AI Bridge: Seek → ${formatTime(el.video.currentTime)}`);
+        else if (typeof cmd.value === 'number' && getDuration() > 0) {
+          seekToSeconds(cmd.value, !el.video.paused);
+          showToast(`AI Bridge: Seek → ${formatTime(cmd.value)}`);
         }
         break;
       case 'volume':
@@ -1299,6 +1471,12 @@
     applyVolumeToEngine();
     syncSwitchesUI();
 
+    const initWs = await api.getWindowState();
+    if (initWs) {
+      state.aiPort = initWs.aiPort || 4500;
+      state.hasFfmpeg = Boolean(initWs.hasFfmpeg);
+    }
+
     // 4. Populate Quick Folders in Left Sidebar + detect reference video on Desktop
     const quickFolders = await api.getQuickFolders();
     quickFolders.forEach((qf) => {
@@ -1353,6 +1531,7 @@
       state.isMaximized = ws.maximized;
       state.isFullscreen = ws.fullscreen;
       state.alwaysOnTop = ws.alwaysOnTop;
+      if (typeof ws.hasFfmpeg === 'boolean') state.hasFfmpeg = ws.hasFfmpeg;
       if (ws.aiPort && ws.aiPort !== state.aiPort) {
         state.aiPort = ws.aiPort;
         el.aiEndpointBox.textContent =
@@ -1454,14 +1633,18 @@
     });
     el.btnDrawerAdd.addEventListener('click', () => openFileDialog(true));
     el.btnDrawerBookmark.addEventListener('click', addBookmark);
-    el.btnDrawerClear.addEventListener('click', () => {
+    el.btnDrawerClear.addEventListener('click', async () => {
       if (state.drawerTab === 'queue') {
         pauseMedia();
+        await api.stopStream();
         el.video.removeAttribute('src');
         el.video.classList.remove('loaded');
         el.emptyState.classList.remove('hidden');
         state.queue = [];
         state.queueIndex = -1;
+        state.streamMode = false;
+        state.streamOffset = 0;
+        state.streamDuration = 0;
         el.mediaTitle.textContent = 'VLCopyCAT';
         document.title = 'VLCopyCAT';
         clearSubtitles();
@@ -1476,7 +1659,7 @@
       pushPlayerStatus();
     });
 
-    // 9. Transport & Video Events
+    // 9. Transport, Video Events & Automatic Codec Fallback
     el.btnPlay.addEventListener('click', togglePlay);
     el.btnPrev.addEventListener('click', playPrev);
     el.btnNext.addEventListener('click', playNext);
@@ -1502,8 +1685,28 @@
       pushPlayerStatus();
     });
     el.video.addEventListener('timeupdate', updateTimelineUI);
+
+    // Automatic reactive fallback if any native container/codec or Hi10P stream fails
+    el.video.addEventListener('error', () => {
+      const item = getCurrentItem();
+      if (!item || !state.hasFfmpeg) return;
+
+      if (!state.streamMode && !state.fallbackAttempted) {
+        state.fallbackAttempted = true;
+        startFfmpegStreamPlayback(item, 0, true, false);
+      } else if (state.streamMode && !state.streamForceTranscode) {
+        // Fallback for 10-bit H.264 (Hi10P) or unusual profiles -> transcode video to yuv420p
+        startFfmpegStreamPlayback(item, state.streamOffset, true, true);
+      }
+    });
+
     el.video.addEventListener('ended', () => {
-      if (state.loop) return;
+      if (state.loop) {
+        if (state.streamMode) {
+          reloadStreamAt(0, true);
+        }
+        return;
+      }
       if (state.queue.length > 1 && state.queueIndex < state.queue.length - 1) {
         playNext();
       } else {
@@ -1560,13 +1763,15 @@
 
     // 10. Thick Seekbar Scrubbing & Live Hover Preview Card
     let isScrubbing = false;
+    let wasPlayingBeforeScrub = false;
+
     const calcSeekRatio = (clientX) => {
       const rect = el.seekbarTrack.getBoundingClientRect();
       return Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
     };
 
     const updateHoverPreview = (clientX) => {
-      const dur = el.video.duration;
+      const dur = getDuration();
       if (!Number.isFinite(dur) || dur <= 0 || !getCurrentItem()) {
         el.seekHoverCard.classList.remove('visible');
         return;
@@ -1588,22 +1793,48 @@
     };
 
     el.seekbarTrack.addEventListener('pointerdown', (e) => {
-      if (!getCurrentItem()) return;
+      const dur = getDuration();
+      if (!getCurrentItem() || dur <= 0) return;
       isScrubbing = true;
+      wasPlayingBeforeScrub = !el.video.paused;
       el.seekbarTrack.setPointerCapture(e.pointerId);
-      seekToRatio(calcSeekRatio(e.clientX));
+
+      const targetSec = calcSeekRatio(e.clientX) * dur;
+      if (state.streamMode) {
+        state.scrubPreviewTime = targetSec;
+        updateTimelineUI();
+      } else {
+        seekToSeconds(targetSec, wasPlayingBeforeScrub);
+      }
       updateHoverPreview(e.clientX);
     });
+
     el.seekbarTrack.addEventListener('pointermove', (e) => {
       updateHoverPreview(e.clientX);
-      if (isScrubbing) seekToRatio(calcSeekRatio(e.clientX));
-    });
-    el.seekbarTrack.addEventListener('pointerup', (e) => {
-      if (isScrubbing) {
-        isScrubbing = false;
-        el.seekbarTrack.releasePointerCapture(e.pointerId);
+      if (!isScrubbing) return;
+      const dur = getDuration();
+      if (dur <= 0) return;
+      const targetSec = calcSeekRatio(e.clientX) * dur;
+      if (state.streamMode) {
+        state.scrubPreviewTime = targetSec;
+        updateTimelineUI();
+      } else {
+        seekToSeconds(targetSec, wasPlayingBeforeScrub);
       }
     });
+
+    el.seekbarTrack.addEventListener('pointerup', (e) => {
+      if (!isScrubbing) return;
+      isScrubbing = false;
+      el.seekbarTrack.releasePointerCapture(e.pointerId);
+
+      if (state.streamMode && state.scrubPreviewTime !== null) {
+        const finalSec = state.scrubPreviewTime;
+        state.scrubPreviewTime = null;
+        seekToSeconds(finalSec, wasPlayingBeforeScrub);
+      }
+    });
+
     el.seekbarTrack.addEventListener('pointerleave', () => {
       if (!isScrubbing) el.seekHoverCard.classList.remove('visible');
     });
@@ -1686,7 +1917,7 @@
 
     el.swLoop.addEventListener('click', () => {
       state.loop = !state.loop;
-      el.video.loop = state.loop;
+      el.video.loop = state.streamMode ? false : state.loop;
       syncSwitchesUI();
       showToast(state.loop ? 'Loop: ON' : 'Loop: OFF');
     });

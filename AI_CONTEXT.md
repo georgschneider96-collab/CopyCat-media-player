@@ -53,9 +53,12 @@ While VLCopyCAT is running, it hosts a lightweight local JSON HTTP server on `12
     "muted": false,
     "speed": 1,
     "accent": "orange",
-    "queueLength": 4
+    "queueLength": 4,
+    "streamEngine": "ffmpeg-live"
   }
   ```
+- **`GET http://127.0.0.1:4500/api/stream?path=...&start=0&vcodec=h264`** — Zero-disk FFmpeg fragmented MP4 live stream for non-Chromium containers/codecs (such as HLS `mpegts` streams saved with `.mp4` extensions, `.mkv`, `.avi`, `.ts`, `AC3`/`DTS` audio, or `Hi10P` anime encodes).
+- **`GET http://127.0.0.1:4500/api/thumb?path=...&t=120`** — Instant on-demand MJPEG seekbar hover preview frame generator for streamed media.
 - **`POST http://127.0.0.1:4500/api/control`** — Execute an action:
   ```json
   { "action": "togglePlay" }

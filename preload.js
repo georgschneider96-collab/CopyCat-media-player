@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
   openSubtitle: () => ipcRenderer.invoke('dialog:openSubtitle'),
 
+  // Media probe & FFmpeg stream lifecycle
+  probeMedia: (filePath) => ipcRenderer.invoke('media:probe', filePath),
+  stopStream: () => ipcRenderer.invoke('media:stopStream'),
+
   // Filesystem helpers
   getPathForFile: (file) => {
     try {
