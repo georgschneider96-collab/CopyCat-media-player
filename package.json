@@ -33,7 +33,17 @@
       "main.js",
       "preload.js",
       "src/**",
-      "assets/**"
+      "assets/**",
+      "bin/**"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "pip-helper.exe"
+        ]
+      }
     ]
   },
   "keywords": [

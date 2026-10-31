@@ -5,7 +5,11 @@ const http = require('http');
 const { spawn, spawnSync, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
 
-const PIP_HELPER_PATH = path.join(__dirname, 'bin', 'pip-helper.exe');
+const PIP_HELPER_PATH = (() => {
+  const packaged = path.join(process.resourcesPath || '', 'bin', 'pip-helper.exe');
+  if (fs.existsSync(packaged)) return packaged;
+  return path.join(__dirname, 'bin', 'pip-helper.exe');
+})();
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.webm', '.mov', '.avi', '.m4v', '.ogv',

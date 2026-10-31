@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('vlcopycat', {
+const copycatApi = {
   // Window controls
   minimize: () => ipcRenderer.invoke('win:minimize'),
   maximize: () => ipcRenderer.invoke('win:maximize'),
@@ -44,4 +44,7 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   onPipExitRequested: (cb) => ipcRenderer.on('pip:exitRequested', () => cb()),
   onAiCommand: (cb) => ipcRenderer.on('ai:command', (_e, cmd) => cb(cmd)),
   onInitialMedia: (cb) => ipcRenderer.on('media:initial', (_e, data) => cb(data))
-});
+};
+
+contextBridge.exposeInMainWorld('copycat', copycatApi);
+contextBridge.exposeInMainWorld('vlcopycat', copycatApi);

@@ -1,10 +1,10 @@
-// VLCopyCAT Renderer Application
-// Implements Juxtopposed's 25-Year VLC Redesign UI + Universal FFmpeg Live Stream Engine + 200% Cone Boost + Local AI Bridge
+// CopyCat media player — Renderer Application
+// Modern Desktop Media Player with 200% Cone Boost, Universal FFmpeg Stream Engine & Local AI Bridge
 
 (() => {
   'use strict';
 
-  const api = window.vlcopycat;
+  const api = window.copycat || window.vlcopycat;
   const ICONS = window.VLC_ICONS;
 
   // Juxtopposed's 9 Cone Accent Palettes (from 01_cone_palette.png & 12_accent_colors.png)
@@ -109,10 +109,7 @@
     draggingQueueItem: false,
     externalFileDragActive: false,
     dialogOpen: false,
-    lastPauseAt: 0,
-
-    // Optional detected reference demo video on Desktop
-    demoVideoPath: null
+    lastPauseAt: 0
   };
 
   // ==================== DOM ELEMENTS ====================
@@ -2374,7 +2371,7 @@
       state.hasFfmpeg = Boolean(initWs.hasFfmpeg);
     }
 
-    // 4. Populate Customizable Shortcuts in Left Sidebar + detect reference video on Desktop
+    // 4. Populate Customizable Shortcuts in Left Sidebar
     const defaultQuickFolders = await api.getQuickFolders();
     if (!Array.isArray(state.sidebarShortcuts)) {
       state.sidebarShortcuts = defaultQuickFolders.map((q) => ({ label: q.label, path: q.path }));
