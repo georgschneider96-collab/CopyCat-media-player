@@ -2679,15 +2679,49 @@
       }
     });
 
-    // Stage click (single-click play/pause, double-click fullscreen)
+    // Stage click (immediately close open sidebars/menus; otherwise single-click play/pause, double-click fullscreen)
     let stageClickTimer = null;
+    let suppressDblClickUntil = 0;
     el.videoStage.addEventListener('click', (e) => {
-      if (el.headerMenu.classList.contains('open') || el.bottomPopover.classList.contains('open')) {
-        el.headerMenu.classList.remove('open');
-        el.bottomPopover.classList.remove('open');
+      if (e.target.closest('button')) return;
+
+      const leftOpen = !el.librarySidebar.classList.contains('collapsed');
+      const rightOpen = !el.rightDrawer.classList.contains('collapsed');
+      const menuOrPopOpen =
+        el.headerMenu.classList.contains('open') || el.bottomPopover.classList.contains('open');
+
+      if (leftOpen || rightOpen || menuOrPopOpen) {
+        if (stageClickTimer) {
+          clearTimeout(stageClickTimer);
+          stageClickTimer = null;
+        }
+        if (leftOpen) {
+          clearTimeout(leftSidebarIdleTimer);
+          el.librarySidebar.classList.add('collapsed');
+          el.btnSidebar.classList.remove('active');
+          state.leftOpenedByEdge = false;
+          state.hoveringLeftSidebar = false;
+          state.leftEdgeCooldownUntil = Date.now() + 450;
+        }
+        if (rightOpen) {
+          clearTimeout(rightDrawerIdleTimer);
+          el.rightDrawer.classList.add('collapsed');
+          el.btnQueueDrawer.classList.remove('active');
+          state.rightOpenedByEdge = false;
+          state.hoveringRightDrawer = false;
+          state.rightEdgeCooldownUntil = Date.now() + 450;
+        }
+        if (menuOrPopOpen) {
+          el.headerMenu.classList.remove('open');
+          el.bottomPopover.classList.remove('open');
+        }
+        suppressDblClickUntil = Date.now() + 550;
         updateChromeSolidity();
+        applyVideoAppearance();
+        resetFullscreenIdle();
         return;
       }
+
       if (e.target.closest('.empty-state')) return;
       if (!getCurrentItem()) return;
 
@@ -2703,6 +2737,11 @@
     });
 
     el.videoStage.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      if (Date.now() < suppressDblClickUntil) {
+        suppressDblClickUntil = 0;
+        return;
+      }
       if (e.target.closest('.empty-state')) return;
       if (stageClickTimer) {
         clearTimeout(stageClickTimer);
