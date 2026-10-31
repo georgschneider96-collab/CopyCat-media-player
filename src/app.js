@@ -575,7 +575,10 @@
       eqPreset: state.eqPreset,
       showRemainingTime: state.showRemainingTime,
       sidebarShortcuts: state.sidebarShortcuts,
-      dismissShortcutPrompt: state.dismissShortcutPrompt
+      dismissShortcutPrompt: state.dismissShortcutPrompt,
+      lastMediaItem: state.currentItem || null,
+      lastFolder: state.libraryFolder || null,
+      lastPositionSec: el.video && !isNaN(el.video.currentTime) ? el.video.currentTime : 0
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -603,6 +606,12 @@
       if (typeof d.eqPreset === 'string') state.eqPreset = d.eqPreset;
       if (typeof d.showRemainingTime === 'boolean') state.showRemainingTime = d.showRemainingTime;
       if (Array.isArray(d.sidebarShortcuts)) state.sidebarShortcuts = d.sidebarShortcuts;
+
+      if (d.rememberState) {
+        if (d.lastMediaItem) state.savedLastItem = d.lastMediaItem;
+        if (d.lastFolder) state.savedLastFolder = d.lastFolder;
+        if (typeof d.lastPositionSec === 'number') state.savedLastPosition = d.lastPositionSec;
+      }
 
       if (d.accentKey === 'custom' && d.customAccentHex) {
         applyAccent(d.customAccentHex, false);
@@ -2470,8 +2479,11 @@
       }
     });
 
+    let hasLoadedMediaOnStartup = false;
+
     api.onInitialMedia((data) => {
       if (data?.item) {
+        hasLoadedMediaOnStartup = true;
         ingestOpenedBundle({ items: [data.item], folder: data.folder }, true);
       }
     });
@@ -2479,10 +2491,25 @@
     if (api.getInitialMedia) {
       api.getInitialMedia().then((data) => {
         if (data?.item && (!state.currentItem || state.currentItem.path !== data.item.path)) {
+          hasLoadedMediaOnStartup = true;
           ingestOpenedBundle({ items: [data.item], folder: data.folder }, true);
+        } else if (!hasLoadedMediaOnStartup && !state.currentItem && state.savedLastItem && state.savedLastFolder) {
+          // Resume last session
+          ingestOpenedBundle({ items: [state.savedLastItem], folder: state.savedLastFolder }, false);
+          if (state.savedLastPosition > 0) {
+            setTimeout(() => {
+              if (el.video && !isNaN(el.video.duration)) {
+                el.video.currentTime = state.savedLastPosition;
+              }
+            }, 600);
+          }
         }
       }).catch(() => {});
     }
+
+    window.addEventListener('beforeunload', () => {
+      savePreferences();
+    });
 
     api.onAiCommand(handleAiCommand);
 
