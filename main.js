@@ -1,6 +1,20 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+      bypassCSP: true
+    }
+  }
+]);
 
 process.on('uncaughtException', (err) => {
   try {
@@ -65,9 +79,10 @@ let latestPlayerStatus = {
 function resolveMediaTool(toolName) {
   const exe = process.platform === 'win32' ? `${toolName}.exe` : toolName;
   const candidates = [
-    path.join('C:\\YTDownload', exe),
+    path.join(process.resourcesPath || '', 'bin', exe),
     path.join(__dirname, 'bin', exe),
-    path.join(process.resourcesPath || '', 'bin', exe)
+    path.join(process.resourcesPath || '', exe),
+    path.join('C:\\YTDownload', exe)
   ];
   for (const c of candidates) {
     if (c && fs.existsSync(c)) return c;
@@ -218,6 +233,13 @@ function findAutoSubtitle(mediaFilePath) {
   }
 }
 
+function toMediaUrl(filePath) {
+  if (!filePath) return '';
+  const resolved = path.resolve(filePath);
+  const normalized = resolved.replace(/\\/g, '/');
+  return `media:///${encodeURI(normalized).replace(/#/g, '%23').replace(/\?/g, '%3F')}`;
+}
+
 function buildMediaItem(filePath) {
   const resolved = path.resolve(filePath);
   const ext = path.extname(resolved).toLowerCase();
@@ -227,7 +249,8 @@ function buildMediaItem(filePath) {
   const needsStream = detectNeedsStream(resolved, ext);
   return {
     filePath: resolved,
-    fileUrl: pathToFileURL(resolved).href,
+    fileUrl: toMediaUrl(resolved),
+    rawFileUrl: pathToFileURL(resolved).href,
     name: path.basename(resolved),
     title: path.basename(resolved, path.extname(resolved)),
     ext,
@@ -378,7 +401,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: true,
+      webSecurity: false,
       backgroundThrottling: false
     }
   });
@@ -1013,6 +1036,18 @@ if (!isSingleInstance) {
   });
 
   app.whenReady().then(() => {
+    protocol.handle('media', (request) => {
+      try {
+        let pathname = decodeURIComponent(request.url.replace(/^media:\/\/\/?/i, ''));
+        if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(pathname)) {
+          pathname = pathname.slice(1);
+        }
+        return net.fetch(pathToFileURL(path.resolve(pathname)).href);
+      } catch (err) {
+        return new Response('Media file not found', { status: 404 });
+      }
+    });
+
     startAiControlServer(4500);
     createMainWindow();
   });

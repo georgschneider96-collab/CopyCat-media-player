@@ -1,7 +1,7 @@
 {
   "name": "copycat-media-player",
   "productName": "CopyCat media player",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "VLC media player CopyCat based on the redesign of Juxtopposed",
   "main": "main.js",
   "scripts": {
@@ -34,14 +34,17 @@
       "preload.js",
       "src/**",
       "assets/**",
-      "bin/**"
+      "bin/launcher.cs"
     ],
     "extraResources": [
       {
         "from": "bin",
         "to": "bin",
         "filter": [
-          "pip-helper.exe"
+          "pip-helper.exe",
+          "ffmpeg.exe",
+          "ffprobe.exe",
+          "register_associations.ps1"
         ]
       }
     ]
