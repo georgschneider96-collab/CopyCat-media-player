@@ -37,13 +37,16 @@ const copycatApi = {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   hasDesktopShortcut: () => ipcRenderer.invoke('shortcut:hasDesktop'),
   createDesktopShortcut: () => ipcRenderer.invoke('shortcut:createDesktop'),
+  setDefaultPlayer: () => ipcRenderer.invoke('app:setDefaultPlayer'),
+  openDefaultAppsSettings: () => ipcRenderer.invoke('app:openDefaultAppsSettings'),
 
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),
   onWindowState: (cb) => ipcRenderer.on('win:state', (_e, state) => cb(state)),
   onPipExitRequested: (cb) => ipcRenderer.on('pip:exitRequested', () => cb()),
   onAiCommand: (cb) => ipcRenderer.on('ai:command', (_e, cmd) => cb(cmd)),
-  onInitialMedia: (cb) => ipcRenderer.on('media:initial', (_e, data) => cb(data))
+  onInitialMedia: (cb) => ipcRenderer.on('media:initial', (_e, data) => cb(data)),
+  getInitialMedia: () => ipcRenderer.invoke('media:getInitial')
 };
 
 contextBridge.exposeInMainWorld('copycat', copycatApi);

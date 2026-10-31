@@ -325,6 +325,41 @@ function restoreMainWindowWin32() {
   }
 }
 
+let pendingInitialMedia = null;
+
+function bringToFront(win = mainWindow) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.setAlwaysOnTop(true);
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) {
+        win.setAlwaysOnTop(false);
+      }
+    }, 250);
+  } catch {}
+}
+
+function resolveCliMediaFile(argv) {
+  if (!Array.isArray(argv)) return null;
+  const match = argv.slice(1).find((arg) => {
+    if (!arg || typeof arg !== 'string') return false;
+    const clean = arg.replace(/^"|"$/g, '').trim();
+    if (!clean || clean.startsWith('-') || clean === '.') return false;
+    const ext = path.extname(clean).toLowerCase();
+    return MEDIA_EXTENSIONS.has(ext) && fs.existsSync(clean);
+  });
+  if (match) {
+    const clean = match.replace(/^"|"$/g, '').trim();
+    const item = buildMediaItem(clean);
+    const sibling = scanMediaFolder(item.folderPath);
+    return { item, folder: sibling };
+  }
+  return null;
+}
+
 function createMainWindow() {
   const icoPath = path.join(__dirname, 'assets', 'icon.ico');
   const iconPng = path.join(__dirname, 'assets', 'icon.png');
@@ -358,26 +393,16 @@ function createMainWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.setAlwaysOnTop(true);
-    setTimeout(() => {
-      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isAlwaysOnTop()) {
-        mainWindow.setAlwaysOnTop(false);
-      }
-    }, 300);
+    bringToFront(mainWindow);
     broadcastWindowState();
+    if (pendingInitialMedia) {
+      mainWindow.webContents.send('media:initial', pendingInitialMedia);
+    }
+  });
 
-    // Check if a media file was passed via CLI args
-    const cliFile = process.argv.slice(1).find((arg) => {
-      if (arg.startsWith('-')) return false;
-      const ext = path.extname(arg).toLowerCase();
-      return MEDIA_EXTENSIONS.has(ext) && fs.existsSync(arg);
-    });
-    if (cliFile) {
-      const item = buildMediaItem(cliFile);
-      const sibling = scanMediaFolder(item.folderPath);
-      mainWindow.webContents.send('media:initial', { item, folder: sibling });
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (pendingInitialMedia) {
+      mainWindow.webContents.send('media:initial', pendingInitialMedia);
     }
   });
 
@@ -891,6 +916,7 @@ function createDesktopShortcut() {
     const shortcutPath = getDesktopShortcutPath();
     const icoPath = path.join(__dirname, 'assets', 'icon.ico');
     const exeLauncher = path.join(__dirname, 'Launch_CopyCat.exe');
+    const isPackaged = app.isPackaged;
     const targetPath = isPackaged 
       ? process.execPath 
       : (fs.existsSync(exeLauncher) ? exeLauncher : path.join(__dirname, 'Launch_CopyCat.bat'));
@@ -919,6 +945,37 @@ function createDesktopShortcut() {
 ipcMain.handle('shortcut:hasDesktop', () => hasDesktopShortcut());
 ipcMain.handle('shortcut:createDesktop', () => createDesktopShortcut());
 
+ipcMain.handle('media:getInitial', () => {
+  const payload = pendingInitialMedia;
+  pendingInitialMedia = null;
+  return payload;
+});
+
+ipcMain.handle('app:setDefaultPlayer', () => {
+  try {
+    const regScript = path.join(__dirname, 'bin', 'register_associations.ps1');
+    if (fs.existsSync(regScript)) {
+      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', regScript], {
+        windowsHide: true,
+        encoding: 'utf8'
+      });
+      return { ok: result.status === 0, error: result.stderr };
+    }
+    return { ok: false, error: 'register_associations.ps1 script not found' };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('app:openDefaultAppsSettings', () => {
+  try {
+    shell.openExternal('ms-settings:defaultapps');
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle('shell:reveal', (_evt, filePath) => {
   if (filePath && fs.existsSync(filePath)) {
     shell.showItemInFolder(filePath);
@@ -937,10 +994,29 @@ ipcMain.on('player:statusUpdate', (_evt, status) => {
   latestPlayerStatus = { ...latestPlayerStatus, ...status };
 });
 
-app.whenReady().then(() => {
-  startAiControlServer(4500);
-  createMainWindow();
-});
+const isSingleInstance = app.requestSingleInstanceLock();
+
+if (!isSingleInstance) {
+  app.quit();
+} else {
+  pendingInitialMedia = resolveCliMediaFile(process.argv);
+
+  app.on('second-instance', (_event, commandLine) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      bringToFront(mainWindow);
+      const payload = resolveCliMediaFile(commandLine);
+      if (payload) {
+        pendingInitialMedia = payload;
+        mainWindow.webContents.send('media:initial', payload);
+      }
+    }
+  });
+
+  app.whenReady().then(() => {
+    startAiControlServer(4500);
+    createMainWindow();
+  });
+}
 
 app.on('before-quit', () => {
   killActiveStreamProc();

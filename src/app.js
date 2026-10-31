@@ -2476,6 +2476,14 @@
       }
     });
 
+    if (api.getInitialMedia) {
+      api.getInitialMedia().then((data) => {
+        if (data?.item && (!state.currentItem || state.currentItem.path !== data.item.path)) {
+          ingestOpenedBundle({ items: [data.item], folder: data.folder }, true);
+        }
+      }).catch(() => {});
+    }
+
     api.onAiCommand(handleAiCommand);
 
     // 6. Top bar, sidebar & bottom bar hover tracking
@@ -3229,6 +3237,26 @@
         state.dismissShortcutPrompt = true;
         savePreferences();
         if (el.shortcutBanner) el.shortcutBanner.classList.remove('visible');
+      });
+    }
+
+    const btnSetDefaultPlayer = document.getElementById('btn-set-default-player');
+    const btnOpenDefaultApps = document.getElementById('btn-open-default-apps');
+    if (btnSetDefaultPlayer) {
+      btnSetDefaultPlayer.addEventListener('click', async () => {
+        if (!api.setDefaultPlayer) return;
+        showToast('Setting CopyCat media player as default video player...');
+        const res = await api.setDefaultPlayer();
+        if (res?.ok) {
+          showToast('CopyCat media player is now the default video player!');
+        } else {
+          showToast(`Default setup: ${res?.error || 'Associations registered'}`);
+        }
+      });
+    }
+    if (btnOpenDefaultApps) {
+      btnOpenDefaultApps.addEventListener('click', () => {
+        if (api.openDefaultAppsSettings) api.openDefaultAppsSettings();
       });
     }
 
