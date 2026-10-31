@@ -9,7 +9,7 @@ cd C:\Users\Schual\Desktop\VLCopyCAT
 npm start
 ```
 
-Or double-click **`CopyCat media player`** on your desktop, or run **`Launch_CopyCat.bat`** directly from the project folder!
+Or double-click **`CopyCat media player`** on your desktop, or run **`Launch_CopyCat.exe`** (with the custom Cat icon) directly from the project folder!
 
 ## Desktop Shortcut & Packaging
 - **Automatic First-Launch Prompt:** If no desktop shortcut exists, CopyCat media player presents an acrylic prompt banner to create one with a single click.

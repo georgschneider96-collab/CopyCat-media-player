@@ -860,10 +860,10 @@ function createDesktopShortcut() {
   try {
     const shortcutPath = getDesktopShortcutPath();
     const icoPath = path.join(__dirname, 'assets', 'icon.ico');
-    const isPackaged = app.isPackaged;
+    const exeLauncher = path.join(__dirname, 'Launch_CopyCat.exe');
     const targetPath = isPackaged 
       ? process.execPath 
-      : path.join(__dirname, 'Launch_CopyCat.bat');
+      : (fs.existsSync(exeLauncher) ? exeLauncher : path.join(__dirname, 'Launch_CopyCat.bat'));
     const workingDir = isPackaged ? path.dirname(process.execPath) : __dirname;
     const iconLocation = fs.existsSync(icoPath) ? `${icoPath},0` : `${targetPath},0`;
 
