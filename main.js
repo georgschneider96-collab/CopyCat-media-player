@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, clipboard, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -169,19 +169,20 @@ function detectNeedsStream(filePath, ext) {
 function probeMediaFile(filePath) {
   return new Promise((resolve) => {
     if (!FFPROBE_PATH || !filePath || !fs.existsSync(filePath)) {
-      return resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null });
+      return resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null, chapters: [] });
     }
     const args = [
       '-v', 'error',
       '-show_entries', 'format=format_name,duration',
       '-show_entries', 'stream=index,codec_type,codec_name,width,height',
+      '-show_chapters',
       '-of', 'json',
       filePath
     ];
     const proc = spawn(FFPROBE_PATH, args, { windowsHide: true });
     let out = '';
     proc.stdout.on('data', (chunk) => { out += chunk.toString(); });
-    proc.on('error', () => resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null }));
+    proc.on('error', () => resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null, chapters: [] }));
     proc.on('close', () => {
       try {
         const parsed = JSON.parse(out || '{}');
@@ -189,6 +190,14 @@ function probeMediaFile(filePath) {
         const vStream = streams.find((s) => s.codec_type === 'video');
         const aStream = streams.find((s) => s.codec_type === 'audio');
         const duration = Number(parsed.format?.duration) || 0;
+        const rawChapters = Array.isArray(parsed.chapters) ? parsed.chapters : [];
+        const chapters = rawChapters.map((c, idx) => ({
+          index: idx,
+          start: Math.max(0, Number(c.start_time) || (Number(c.start) / 1000) || 0),
+          end: Math.max(0, Number(c.end_time) || (Number(c.end) / 1000) || 0),
+          title: (c.tags && (c.tags.title || c.tags.TITLE || c.tags.Title)) || ''
+        })).filter((c) => c.end > c.start);
+
         resolve({
           ok: true,
           formatName: parsed.format?.format_name || '',
@@ -196,10 +205,11 @@ function probeMediaFile(filePath) {
           videoCodec: vStream?.codec_name || null,
           audioCodec: aStream?.codec_name || null,
           width: vStream?.width || 0,
-          height: vStream?.height || 0
+          height: vStream?.height || 0,
+          chapters
         });
       } catch {
-        resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null });
+        resolve({ ok: false, duration: 0, videoCodec: null, audioCodec: null, chapters: [] });
       }
     });
   });
@@ -292,12 +302,27 @@ function scanMediaFolder(folderPath) {
   }
 }
 
+let userAlwaysOnTop = false;
+
+function applyAlwaysOnTop(flag) {
+  userAlwaysOnTop = Boolean(flag);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.setAlwaysOnTop(userAlwaysOnTop, 'screen-saver');
+    } catch {
+      mainWindow.setAlwaysOnTop(userAlwaysOnTop);
+    }
+  }
+  broadcastWindowState();
+  return userAlwaysOnTop;
+}
+
 function broadcastWindowState() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('win:state', {
     maximized: mainWindow.isMaximized(),
     fullscreen: mainWindow.isFullScreen(),
-    alwaysOnTop: mainWindow.isAlwaysOnTop(),
+    alwaysOnTop: userAlwaysOnTop,
     aiPort: aiServerPort,
     hasFfmpeg: Boolean(FFMPEG_PATH)
   });
@@ -356,12 +381,18 @@ function bringToFront(win = mainWindow) {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
-    win.setAlwaysOnTop(true);
-    setTimeout(() => {
-      if (win && !win.isDestroyed()) {
-        win.setAlwaysOnTop(false);
+    if (!userAlwaysOnTop) {
+      try {
+        win.setAlwaysOnTop(true, 'screen-saver');
+      } catch {
+        win.setAlwaysOnTop(true);
       }
-    }, 250);
+      setTimeout(() => {
+        if (win && !win.isDestroyed() && !userAlwaysOnTop) {
+          win.setAlwaysOnTop(false);
+        }
+      }, 250);
+    }
   } catch {}
 }
 
@@ -407,6 +438,10 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer ${level}] ${message} (${sourceId}:${line})`);
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) {
@@ -666,15 +701,7 @@ function startAiControlServer(port = 4500) {
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             if (payload.action === 'bringToFront') {
-              mainWindow.show();
-              mainWindow.restore();
-              mainWindow.setAlwaysOnTop(true);
-              setTimeout(() => {
-                if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isAlwaysOnTop()) {
-                  mainWindow.setAlwaysOnTop(false);
-                }
-              }, 250);
-              mainWindow.focus();
+              bringToFront(mainWindow);
               return sendJson(200, { ok: true, dispatched: 'bringToFront' });
             }
             if (payload.action === 'togglePip') {
@@ -720,11 +747,10 @@ ipcMain.handle('win:toggleFullscreen', () => {
   broadcastWindowState();
 });
 ipcMain.handle('win:toggleAlwaysOnTop', () => {
-  if (!mainWindow) return false;
-  const next = !mainWindow.isAlwaysOnTop();
-  mainWindow.setAlwaysOnTop(next);
-  broadcastWindowState();
-  return next;
+  return applyAlwaysOnTop(!userAlwaysOnTop);
+});
+ipcMain.handle('win:setAlwaysOnTop', (_evt, flag) => {
+  return applyAlwaysOnTop(flag);
 });
 ipcMain.handle('win:enterPip', async (_evt, opts = {}) => {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
@@ -783,10 +809,27 @@ ipcMain.handle('win:leavePip', (_evt, opts = {}) => {
 });
 
 ipcMain.handle('win:close', () => mainWindow?.close());
+ipcMain.handle('win:setOpacity', (_e, opacity) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const val = Math.max(0.2, Math.min(1.0, Number(opacity) || 1.0));
+    mainWindow.setOpacity(val);
+    return val;
+  }
+  return 1.0;
+});
+ipcMain.handle('clipboard:writeImage', (_e, dataUrl) => {
+  try {
+    const img = nativeImage.createFromDataURL(dataUrl);
+    clipboard.writeImage(img);
+    return true;
+  } catch (err) {
+    return false;
+  }
+});
 ipcMain.handle('win:getState', () => ({
   maximized: mainWindow?.isMaximized() || false,
   fullscreen: mainWindow?.isFullScreen() || false,
-  alwaysOnTop: mainWindow?.isAlwaysOnTop() || false,
+  alwaysOnTop: userAlwaysOnTop,
   aiPort: aiServerPort,
   hasFfmpeg: Boolean(FFMPEG_PATH)
 }));

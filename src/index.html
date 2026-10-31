@@ -68,6 +68,10 @@
         <span id="menu-always-top-label">Pin Window Always on Top</span>
         <span class="menu-shortcut"></span>
       </button>
+      <button class="menu-item" id="menu-toggle-theme">
+        <span>Toggle Dark / Light Theme</span>
+        <span class="menu-shortcut" id="menu-theme-label">Dark</span>
+      </button>
       <button class="menu-item" id="menu-settings">
         <span>Global Preferences &amp; Themes...</span>
         <span class="menu-shortcut">Ctrl+P</span>
@@ -123,6 +127,12 @@
         <!-- On-Screen HUD Toast -->
         <div class="osd-toast" id="osd-toast"></div>
 
+        <!-- Hold-to-2x Speed Floating HUD Pill -->
+        <div class="hold-speed-badge hidden" id="hold-speed-badge">
+          <span class="hold-speed-rate">2.0x</span>
+          <span class="hold-speed-icon">⏩</span>
+        </div>
+
         <!-- Drag & Drop Overlay -->
         <div class="drop-overlay" id="drop-overlay">Drop media or subtitle file to play</div>
 
@@ -138,6 +148,55 @@
             <button class="lib-mini-link" id="btn-banner-dismiss-shortcut">Not Now</button>
           </div>
         </div>
+
+        <!-- Resume Playback Prompt Banner -->
+        <div class="shortcut-banner" id="resume-prompt-banner" style="z-index:42;">
+          <div class="shortcut-banner-icon" id="resume-prompt-icon"></div>
+          <div class="shortcut-banner-body">
+            <div class="shortcut-banner-title">Continue where you left off?</div>
+            <div class="shortcut-banner-desc" id="resume-prompt-desc">Resume playback at 00:00</div>
+          </div>
+          <div class="shortcut-banner-actions">
+            <button class="primary-pill-btn" id="btn-resume-continue" type="button">Continue</button>
+          </div>
+        </div>
+
+        <!-- Restore Previous Queue Prompt Banner -->
+        <div class="shortcut-banner" id="queue-prompt-banner" style="z-index:41;">
+          <div class="shortcut-banner-icon" id="queue-prompt-icon"></div>
+          <div class="shortcut-banner-body">
+            <div class="shortcut-banner-title">Restore previous queue?</div>
+            <div class="shortcut-banner-desc" id="queue-prompt-desc">This video was part of your previous queue.</div>
+          </div>
+          <div class="shortcut-banner-actions">
+            <button class="primary-pill-btn" id="btn-restore-queue-confirm" type="button">Restore</button>
+          </div>
+        </div>
+
+        <!-- Floating Skip Segment Button (Opening / Ending / Credits / Jump to After-Credits) -->
+        <button class="skip-segment-btn hidden" id="btn-skip-segment" type="button" title="Skip Segment (Tab)">
+          <span class="skip-segment-icon">⏩</span>
+          <span class="skip-segment-label" id="skip-segment-label">Skip Opening</span>
+          <span class="skip-segment-hotkey">Tab</span>
+        </button>
+
+        <!-- Up Next 5-Second Countdown Card -->
+        <div class="up-next-banner hidden" id="up-next-banner">
+          <div class="up-next-progress-bar">
+            <div class="up-next-progress-fill" id="up-next-progress-fill"></div>
+          </div>
+          <div class="up-next-content">
+            <div class="up-next-header">
+              <span class="up-next-badge">UP NEXT</span>
+              <span class="up-next-countdown">in <strong id="up-next-countdown-num">5</strong>s</span>
+            </div>
+            <div class="up-next-title" id="up-next-title" title="Next video title">Next File Name</div>
+            <div class="up-next-actions">
+              <button class="primary-pill-btn up-next-btn-play" id="btn-up-next-play" type="button">Play Now ➔</button>
+              <button class="ghost-pill-btn up-next-btn-dismiss" id="btn-up-next-dismiss" type="button" title="Dismiss countdown">Cancel</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Right Queue & Bookmarks Drawer -->
@@ -145,6 +204,7 @@
         <div class="drawer-tabs">
           <button class="drawer-tab active" data-drawer-tab="queue" id="tab-drawer-queue">Queue (0)</button>
           <button class="drawer-tab" data-drawer-tab="bookmarks" id="tab-drawer-bookmarks">Bookmarks (0)</button>
+          <button class="drawer-tab" data-drawer-tab="history" id="tab-drawer-history">History (0)</button>
         </div>
         <div class="drawer-body" id="drawer-body"></div>
         <div class="drawer-footer">
@@ -158,9 +218,11 @@
     <!-- ==================== BOTTOM SINGLE-ROW CONTROL BAR ==================== -->
     <footer class="bottom-bar" id="bottom-bar">
       <div class="transport-group">
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-step-back" title="Step 1 Frame Backward (,)"></button>
         <button class="icon-btn" id="btn-prev" title="Previous Track (P)"></button>
         <button class="play-pill-btn" id="btn-play" title="Play / Pause (Space)"></button>
         <button class="icon-btn" id="btn-next" title="Next Track (N)"></button>
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-step-fwd" title="Step 1 Frame Forward (.)"></button>
       </div>
 
       <div class="time-label" id="time-elapsed" title="Elapsed Time">00:00</div>
@@ -175,7 +237,9 @@
           <div class="seekbar-fill-clip">
             <div class="seekbar-fill" id="seekbar-fill"></div>
           </div>
+          <div class="seekbar-ab-range" id="seekbar-ab-range"></div>
           <div class="seekbar-sub-blocks" id="seekbar-sub-blocks"></div>
+          <div class="seekbar-chapters" id="seekbar-chapters"></div>
           <div class="seekbar-thumb" id="seekbar-thumb"></div>
 
           <div class="seek-hover-card" id="seek-hover-card">
@@ -186,6 +250,7 @@
       </div>
 
       <div class="time-label" id="time-total" title="Click to toggle Remaining / Total Duration">00:00</div>
+      <button class="bottom-speed-badge hidden" id="bottom-speed-badge" title="Current Playback Speed (Click to reset to 1.0x)" type="button">1.0x</button>
 
       <div class="volume-group">
         <button class="icon-btn" id="btn-mute" title="Mute / Unmute (M)"></button>
@@ -198,6 +263,11 @@
       </div>
 
       <div class="right-actions-group">
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-shuffle" title="Shuffle Queue (S)"></button>
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-repeat" title="Repeat Mode (R)"></button>
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-ab" title="A-B Repeat Loop (L)"></button>
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-night" title="Night Mode DRC (H)"></button>
+        <button class="icon-btn bottom-custom-btn hidden" id="btn-bottom-snapshot" title="Take Snapshot (Shift+S)"></button>
         <button class="icon-btn" id="btn-audio-pop" title="Audio &amp; Equalizer"></button>
         <button class="icon-btn" id="btn-sub-pop" title="Subtitles &amp; Sync"></button>
         <button class="icon-btn" id="btn-gear-pop" title="Playback &amp; Video Controls"></button>
@@ -221,17 +291,44 @@
           <span id="lbl-speed" style="font-weight:600;color:var(--accent);">1.00x</span>
         </div>
         <input type="range" class="jux-range" id="rng-speed" min="0.25" max="2" step="0.05" value="1" />
-        <div style="display:flex;gap:5px;">
+        <div id="quick-speed-chips-wrap" style="display:flex;gap:4px;flex-wrap:wrap;">
           <button class="lib-add-btn speed-chip" data-speed="0.5" style="flex:1;">0.5x</button>
+          <button class="lib-add-btn speed-chip" data-speed="0.75" style="flex:1;">0.75x</button>
           <button class="lib-add-btn speed-chip" data-speed="1" style="flex:1;">1.0x</button>
           <button class="lib-add-btn speed-chip" data-speed="1.25" style="flex:1;">1.25x</button>
           <button class="lib-add-btn speed-chip" data-speed="1.5" style="flex:1;">1.5x</button>
           <button class="lib-add-btn speed-chip" data-speed="2" style="flex:1;">2.0x</button>
         </div>
+
         <div class="pop-row">
-          <span class="pop-label">Loop Current Track</span>
-          <button class="jux-switch" id="sw-loop" type="button"></button>
+          <span class="pop-label">Repeat Mode</span>
+          <button class="lib-add-btn" id="btn-repeat-mode-cycle" style="padding:3px 10px;font-weight:600;">Off</button>
         </div>
+        <div class="pop-row">
+          <span class="pop-label">Shuffle Queue</span>
+          <button class="jux-switch" id="sw-shuffle" type="button"></button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Skip Opening/Credits</span>
+          <select class="jux-select" id="sel-pop-skip-mode">
+            <option value="prompt">Prompt to Skip (Default)</option>
+            <option value="never">Always Play Full Video</option>
+            <option value="skip_ending">Skip Ending &amp; Credits</option>
+            <option value="skip_all">Skip Opening &amp; Credits</option>
+          </select>
+        </div>
+
+        <div class="pop-section-divider"></div>
+        <div class="pop-row">
+          <span class="pop-label">A-B Repeat Loop</span>
+          <span id="lbl-ab-status" style="font-size:11.5px;color:var(--accent);">Off</span>
+        </div>
+        <div style="display:flex;gap:5px;">
+          <button class="lib-add-btn" id="btn-ab-set-a" style="flex:1;">Set [A]</button>
+          <button class="lib-add-btn" id="btn-ab-set-b" style="flex:1;">Set [B]</button>
+          <button class="lib-add-btn" id="btn-ab-clear" style="flex:1;">Clear</button>
+        </div>
+
         <div class="pop-row">
           <span class="pop-label">Subtitle Blocks on Timeline</span>
           <button class="jux-switch on" id="sw-sub-timeline" type="button"></button>
@@ -285,6 +382,14 @@
         <input type="range" class="jux-range" id="rng-volume-pop" min="0" max="200" step="1" value="100" />
 
         <div class="pop-row">
+          <div>
+            <div class="pop-label">Night Mode (DRC)</div>
+            <div style="font-size:10.5px;color:var(--text-muted);">Compress range to balance quiet dialogue &amp; explosions</div>
+          </div>
+          <button class="jux-switch" id="sw-night-mode" type="button"></button>
+        </div>
+
+        <div class="pop-row">
           <span class="pop-label">Equalizer Profile</span>
           <select class="jux-select" id="sel-eq-preset">
             <option value="flat">Flat (Studio)</option>
@@ -293,6 +398,16 @@
             <option value="vocal">Vocal Clarity</option>
             <option value="night">Night Softener</option>
           </select>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Audio Sync Offset</span>
+          <span id="lbl-audio-delay" style="font-size:11.5px;color:var(--accent);">0 ms</span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="lib-add-btn" id="btn-audio-minus25" style="flex:1;">-25 ms</button>
+          <button class="lib-add-btn" id="btn-audio-reset" style="flex:1;">Reset</button>
+          <button class="lib-add-btn" id="btn-audio-plus25" style="flex:1;">+25 ms</button>
         </div>
 
         <div class="pop-row">
@@ -325,6 +440,41 @@
           <button class="lib-add-btn" id="btn-sub-minus100" style="flex:1;">-100 ms</button>
           <button class="lib-add-btn" id="btn-sub-reset" style="flex:1;">Reset</button>
           <button class="lib-add-btn" id="btn-sub-plus100" style="flex:1;">+100 ms</button>
+        </div>
+
+        <div class="pop-section-divider"></div>
+        <div class="settings-section-title" style="font-size:11.5px;margin-bottom:0;">Advanced Subtitle Appearance</div>
+
+        <div class="pop-row">
+          <span class="pop-label">Font Family</span>
+          <select class="jux-select" id="sel-sub-font" style="min-width:125px;">
+            <option value="'Segoe UI Variable Text', system-ui, sans-serif">Segoe UI</option>
+            <option value="Inter, system-ui, sans-serif">Inter</option>
+            <option value="Arial, sans-serif">Arial</option>
+            <option value="'Roboto', sans-serif">Roboto</option>
+            <option value="'Cascadia Code', Consolas, monospace">Consolas</option>
+            <option value="Georgia, serif">Georgia</option>
+          </select>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Text Color</span>
+          <div style="display:flex;gap:6px;" id="sub-color-swatches">
+            <button type="button" class="sub-color-pill active" data-color="#FFFFFF" style="background:#FFFFFF;" title="White"></button>
+            <button type="button" class="sub-color-pill" data-color="#FFF59D" style="background:#FFF59D;" title="Pale Yellow"></button>
+            <button type="button" class="sub-color-pill" data-color="#FFE082" style="background:#FFE082;" title="Warm Amber"></button>
+            <button type="button" class="sub-color-pill" data-color="#80DEEA" style="background:#80DEEA;" title="Cyan"></button>
+            <button type="button" class="sub-color-pill" data-color="#C8E6C9" style="background:#C8E6C9;" title="Mint Green"></button>
+          </div>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Background Style</span>
+          <select class="jux-select" id="sel-sub-bg" style="min-width:125px;">
+            <option value="shadow">Shadow Only</option>
+            <option value="box-translucent">Semi-Transparent Box</option>
+            <option value="box-solid">Solid Black Box</option>
+          </select>
         </div>
       </div>
 
@@ -369,6 +519,49 @@
           <div class="settings-content">
             <!-- Panel: Interface & Theme -->
             <div class="settings-panel" data-settings-panel="interface" style="display:flex;flex-direction:column;gap:18px;">
+              <!-- First Option: Reset All Settings to Default -->
+              <div class="pop-row" style="padding-bottom:14px;border-bottom:1px solid var(--border-panel);">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Reset All Settings to Default</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Restore theme, appearance, hotkeys, volume, and playback options to factory defaults</div>
+                </div>
+                <button class="ghost-pill-btn" id="btn-reset-all-settings" type="button" style="padding:6px 14px;font-size:12px;font-weight:600;white-space:nowrap;" title="Reset all settings to default">Reset to Defaults</button>
+              </div>
+
+              <div>
+                <div class="settings-section-title">Color Theme</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                  Choose between Dark mode (default) and Light mode.
+                </div>
+                <div class="theme-mode-segmented">
+                  <button type="button" class="theme-mode-card active" id="btn-theme-dark" data-theme-mode="dark">
+                    <div class="theme-mode-preview theme-preview-dark">
+                      <div class="theme-preview-top"></div>
+                      <div class="theme-preview-body"></div>
+                    </div>
+                    <div class="theme-mode-info">
+                      <div class="theme-mode-title">
+                        <span>Dark Mode</span>
+                        <span class="theme-default-badge">Default</span>
+                      </div>
+                      <div class="theme-mode-sub">Low-light void &amp; deep carbon panels</div>
+                    </div>
+                  </button>
+                  <button type="button" class="theme-mode-card" id="btn-theme-light" data-theme-mode="light">
+                    <div class="theme-mode-preview theme-preview-light">
+                      <div class="theme-preview-top"></div>
+                      <div class="theme-preview-body"></div>
+                    </div>
+                    <div class="theme-mode-info">
+                      <div class="theme-mode-title">
+                        <span>Light Mode</span>
+                      </div>
+                      <div class="theme-mode-sub">Clean daylight aesthetic &amp; frosted bars</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <div class="settings-section-title">Cone Accent Color</div>
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
@@ -405,10 +598,116 @@
                 </div>
                 <button class="jux-switch" id="sw-always-on-top" type="button"></button>
               </div>
+
+              <!-- Seekbar Thumb Style -->
+              <div>
+                <div class="settings-section-title">Seekbar Thumb Style</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">
+                  Choose your timeline scrubber indicator design:
+                </div>
+                <div class="thumb-style-segmented">
+                  <button type="button" class="thumb-style-card" data-thumb-style="cone" id="btn-thumb-cone">
+                    <span class="thumb-style-icon" id="preview-thumb-cone"></span>
+                    <span>Traffic Cone</span>
+                  </button>
+                  <button type="button" class="thumb-style-card" data-thumb-style="paw" id="btn-thumb-paw">
+                    <span class="thumb-style-icon" id="preview-thumb-paw"></span>
+                    <span>Cat Paw</span>
+                  </button>
+                  <button type="button" class="thumb-style-card active" data-thumb-style="pill" id="btn-thumb-pill">
+                    <span class="thumb-style-icon thumb-preview-pill"></span>
+                    <span>Minimal Pill</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Audio Visualizer Style -->
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Audio Visualizer Style</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Choose how audio is drawn on the background visualizer canvas</div>
+                </div>
+                <select class="jux-select" id="sel-visualizer-style" style="min-width:160px;">
+                  <option value="bars">Spectrum Frequency Bars</option>
+                  <option value="waveform">Oscilloscope Waveform</option>
+                  <option value="aura">Neon Pulse Aura</option>
+                </select>
+              </div>
+
+              <!-- Ghost Mode (Window Transparency) -->
+              <div>
+                <div class="pop-row">
+                  <div>
+                    <div class="settings-section-title" style="margin-bottom:2px;">Ghost Mode (Window Transparency)</div>
+                    <div style="font-size:11.5px;color:var(--text-muted);">Make player window translucent for multitasking (Hotkey: G)</div>
+                  </div>
+                  <button class="jux-switch" id="sw-ghost-mode" type="button"></button>
+                </div>
+                <div class="pop-row" style="margin-top:8px;">
+                  <span class="pop-label">Ghost Opacity</span>
+                  <span id="lbl-ghost-opacity" style="font-size:11.5px;color:var(--accent);font-weight:600;">75%</span>
+                </div>
+                <input type="range" class="jux-range" id="rng-ghost-opacity" min="30" max="95" step="5" value="75" />
+              </div>
+
+              <!-- Bottom Bar Action Icons Customization -->
+              <div>
+                <div class="settings-section-title">Bottom Bar Action Icons</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">
+                  Choose which extra quick-action buttons appear directly on the bottom control bar:
+                </div>
+                <div class="bottom-icons-custom-grid">
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-step" />
+                    <span>Frame Step (&lt;| |&gt;)</span>
+                  </label>
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-shuffle" />
+                    <span>Shuffle Queue</span>
+                  </label>
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-repeat" />
+                    <span>Repeat Mode</span>
+                  </label>
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-ab" />
+                    <span>A-B Repeat Loop</span>
+                  </label>
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-night" />
+                    <span>Night Mode (DRC)</span>
+                  </label>
+                  <label class="custom-check-item">
+                    <input type="checkbox" id="chk-bar-snapshot" />
+                    <span>Quick Snapshot</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <!-- Panel: General & Playback -->
             <div class="settings-panel" data-settings-panel="general" style="display:none;flex-direction:column;gap:18px;">
+              <!-- Quick Speed Buttons in Popover Filter -->
+              <div>
+                <div class="pop-row" style="margin-bottom:6px;">
+                  <div>
+                    <div class="settings-section-title" style="margin-bottom:2px;">Popover Quick Speed Buttons</div>
+                    <div style="font-size:11.5px;color:var(--text-muted);">Select which speed pills appear in the Playback popover</div>
+                  </div>
+                  <div style="display:flex;gap:6px;">
+                    <button class="lib-mini-link" id="btn-speed-chips-all" type="button">All</button>
+                    <button class="lib-mini-link" id="btn-speed-chips-none" type="button">None</button>
+                  </div>
+                </div>
+                <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="0.5" checked /> <span>0.5x</span></label>
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="0.75" checked /> <span>0.75x</span></label>
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="1" checked /> <span>1.0x</span></label>
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="1.25" checked /> <span>1.25x</span></label>
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="1.5" checked /> <span>1.5x</span></label>
+                  <label class="custom-check-item"><input type="checkbox" class="chk-speed-chip" data-speed="2" checked /> <span>2.0x</span></label>
+                </div>
+              </div>
               <div class="pop-row">
                 <div>
                   <div class="settings-section-title" style="margin-bottom:2px;">Desktop Shortcut</div>
@@ -429,53 +728,106 @@
               </div>
 
               <div class="pop-row">
-                <div>
-                  <div class="settings-section-title" style="margin-bottom:2px;">Continue Folder on Single-File Open</div>
-                  <div style="font-size:11.5px;color:var(--text-muted);">When opening an external file (Ctrl+O), continue playing subsequent files in its folder without adding them to Queue</div>
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Opening &amp; Credits Skipping</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Choose behavior for intro, ending, credits, and post-credits scenes</div>
                 </div>
-                <button class="jux-switch on" id="sw-autoload-folder" type="button"></button>
+                <select class="jux-select" id="sel-skip-mode" style="min-width:230px;">
+                  <option value="prompt">Prompt to Skip (Default)</option>
+                  <option value="never">Always Play Full Video (No Skip Options)</option>
+                  <option value="skip_ending">Play Opening, Skip Ending &amp; Credits</option>
+                  <option value="skip_all">Skip Opening, Ending &amp; Credits (Binge)</option>
+                </select>
               </div>
 
               <div class="pop-row">
-                <div>
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Continue Folder on Single File</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Play subsequent files in the same folder automatically without queuing</div>
+                </div>
+                <button class="jux-switch on" id="sw-autoload-folder" type="button" style="flex-shrink:0;"></button>
+              </div>
+
+              <div class="pop-row">
+                <div style="flex:1;min-width:0;padding-right:12px;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Auto-Detect Subtitles</div>
                   <div style="font-size:11.5px;color:var(--text-muted);">Automatically load matching .srt or .vtt subtitle files next to videos</div>
                 </div>
-                <button class="jux-switch on" id="sw-autoload-sub" type="button"></button>
+                <button class="jux-switch on" id="sw-autoload-sub" type="button" style="flex-shrink:0;"></button>
               </div>
 
               <div class="pop-row">
-                <div>
+                <div style="flex:1;min-width:0;padding-right:12px;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Remember Volume &amp; Theme</div>
                   <div style="font-size:11.5px;color:var(--text-muted);">Persist accent palette, volume level, and UI preferences across launches</div>
                 </div>
-                <button class="jux-switch on" id="sw-remember-state" type="button"></button>
+                <button class="jux-switch on" id="sw-remember-state" type="button" style="flex-shrink:0;"></button>
               </div>
 
               <div class="pop-row">
-                <div>
+                <div style="flex:1;min-width:0;padding-right:12px;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Resume Last Video on Startup</div>
                   <div style="font-size:11.5px;color:var(--text-muted);">Automatically reopen your last played video and folder when starting CopyCat from the shortcut</div>
                 </div>
-                <button class="jux-switch" id="sw-resume-playback" type="button"></button>
+                <button class="jux-switch" id="sw-resume-playback" type="button" style="flex-shrink:0;"></button>
               </div>
             </div>
 
             <!-- Panel: Keyboard Shortcuts -->
-            <div class="settings-panel" data-settings-panel="shortcuts" style="display:none;flex-direction:column;gap:10px;">
-              <div class="settings-section-title">Built-in Hotkeys</div>
-              <div class="code-box" style="display:grid;grid-template-columns:150px 1fr;row-gap:6px;column-gap:12px;">
-                <span style="color:var(--accent);">Space / K</span><span>Play or Pause</span>
-                <span style="color:var(--accent);">F / Double-Click</span><span>Toggle Fullscreen</span>
-                <span style="color:var(--accent);">Left / Right</span><span>Seek -5s / +5s (Shift for 15s)</span>
-                <span style="color:var(--accent);">Up / Down</span><span>Volume +5% / -5% (up to 200%)</span>
-                <span style="color:var(--accent);">M</span><span>Mute / Unmute</span>
-                <span style="color:var(--accent);">[ / ]</span><span>Playback Speed -0.1x / +0.1x</span>
-                <span style="color:var(--accent);">P / N</span><span>Previous / Next (Folder or Queue)</span>
-                <span style="color:var(--accent);">B</span><span>Bookmark Current Timestamp</span>
-                <span style="color:var(--accent);">Shift + S</span><span>Save PNG Snapshot to Pictures</span>
-                <span style="color:var(--accent);">Ctrl + O / Ctrl + F</span><span>Open File / Open Folder</span>
-                <span style="color:var(--accent);">Ctrl + P</span><span>Toggle Global Preferences</span>
+            <div class="settings-panel" data-settings-panel="shortcuts" style="display:none;flex-direction:column;gap:14px;">
+              <div>
+                <div class="settings-section-title" style="margin-bottom:4px;">Hotkey Step & Tuning</div>
+                <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">
+                  Customize how much volume jumps, how many seconds seek skips, and playback speed increments per keypress.
+                </div>
+                <div class="shortcut-tuning-grid">
+                  <div class="tuning-card">
+                    <div class="tuning-card-label">Volume Step</div>
+                    <div class="tuning-card-sub">Per Up/Down arrow</div>
+                    <div class="tuning-card-input-wrap">
+                      <input type="number" id="inp-tune-vol" class="tuning-number-input" min="1" max="25" step="1" value="5">
+                      <span class="tuning-unit">%</span>
+                    </div>
+                  </div>
+                  <div class="tuning-card">
+                    <div class="tuning-card-label">Seek Step (Small)</div>
+                    <div class="tuning-card-sub">Left / Right arrows</div>
+                    <div class="tuning-card-input-wrap">
+                      <input type="number" id="inp-tune-seek-small" class="tuning-number-input" min="1" max="60" step="1" value="5">
+                      <span class="tuning-unit">sec</span>
+                    </div>
+                  </div>
+                  <div class="tuning-card">
+                    <div class="tuning-card-label">Seek Step (Large)</div>
+                    <div class="tuning-card-sub">Shift + Left / Right</div>
+                    <div class="tuning-card-input-wrap">
+                      <input type="number" id="inp-tune-seek-large" class="tuning-number-input" min="5" max="300" step="5" value="15">
+                      <span class="tuning-unit">sec</span>
+                    </div>
+                  </div>
+                  <div class="tuning-card">
+                    <div class="tuning-card-label">Speed Increment</div>
+                    <div class="tuning-card-sub">[ and ] brackets</div>
+                    <div class="tuning-card-input-wrap">
+                      <input type="number" id="inp-tune-speed" class="tuning-number-input" min="0.01" max="0.5" step="0.05" value="0.10">
+                      <span class="tuning-unit">x</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Custom Keybindings</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Click any key badge below to record a new key. Press Esc to cancel.</div>
+                </div>
+                <button class="ghost-pill-btn" id="btn-reset-hotkeys" type="button" style="padding:4px 10px;font-size:11px;" title="Reset all keyboard shortcuts and steps to factory defaults">
+                  Reset Defaults
+                </button>
+              </div>
+
+              <div class="hotkeys-table-container" id="hotkeys-table-container">
+                <!-- Dynamically populated by renderHotkeysTable() -->
               </div>
             </div>
 

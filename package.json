@@ -1,7 +1,7 @@
 {
   "name": "copycat-media-player",
   "productName": "CopyCat media player",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "description": "VLC media player CopyCat based on the redesign of Juxtopposed",
   "main": "main.js",
   "scripts": {

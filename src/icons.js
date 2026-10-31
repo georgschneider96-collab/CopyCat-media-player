@@ -133,5 +133,62 @@ window.VLC_ICONS = {
   search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
     <circle cx="11" cy="11" r="6.5"/>
     <line x1="16" y1="16" x2="20" y2="20"/>
+  </svg>`,
+
+  stepBack: `<svg viewBox="0 0 24 24" fill="currentColor">
+    <rect x="4.5" y="6" width="2.2" height="12" rx="1.1"/>
+    <polygon points="19.5 6 9.5 12 19.5 18 19.5 6"/>
+  </svg>`,
+
+  stepFwd: `<svg viewBox="0 0 24 24" fill="currentColor">
+    <rect x="17.3" y="6" width="2.2" height="12" rx="1.1"/>
+    <polygon points="4.5 6 14.5 12 4.5 18 4.5 6"/>
+  </svg>`,
+
+  shuffle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="16 3 21 3 21 8"/>
+    <line x1="4" y1="20" x2="21" y2="3"/>
+    <polyline points="21 16 21 21 16 21"/>
+    <line x1="15" y1="15" x2="21" y2="21"/>
+    <line x1="4" y1="4" x2="9" y2="9"/>
+  </svg>`,
+
+  repeat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="17 1 21 5 17 9"/>
+    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+    <polyline points="7 23 3 19 7 15"/>
+    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+  </svg>`,
+
+  repeatOne: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="17 1 21 5 17 9"/>
+    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+    <polyline points="7 23 3 19 7 15"/>
+    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+    <text x="10.2" y="15" font-size="8.5" font-weight="bold" fill="currentColor" stroke="none">1</text>
+  </svg>`,
+
+  abLoop: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6.5" cy="12" r="3.5"/>
+    <circle cx="17.5" cy="12" r="3.5"/>
+    <path d="M6.5 8.5h11"/>
+    <path d="M6.5 15.5h11"/>
+  </svg>`,
+
+  nightMode: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>`,
+
+  history: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/>
+    <polyline points="12 7 12 12 15 15"/>
+  </svg>`,
+
+  catPaw: `<svg viewBox="0 0 24 24" fill="currentColor">
+    <ellipse cx="12" cy="15.2" rx="5" ry="4"/>
+    <circle cx="5.8" cy="9.8" r="2.2"/>
+    <circle cx="9.8" cy="6.6" r="2.2"/>
+    <circle cx="14.2" cy="6.6" r="2.2"/>
+    <circle cx="18.2" cy="9.8" r="2.2"/>
   </svg>`
 };

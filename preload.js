@@ -6,9 +6,12 @@ const copycatApi = {
   maximize: () => ipcRenderer.invoke('win:maximize'),
   toggleFullscreen: () => ipcRenderer.invoke('win:toggleFullscreen'),
   toggleAlwaysOnTop: () => ipcRenderer.invoke('win:toggleAlwaysOnTop'),
+  setAlwaysOnTop: (flag) => ipcRenderer.invoke('win:setAlwaysOnTop', flag),
   enterPip: (opts) => ipcRenderer.invoke('win:enterPip', opts),
   leavePip: (opts) => ipcRenderer.invoke('win:leavePip', opts),
   close: () => ipcRenderer.invoke('win:close'),
+  setWindowOpacity: (opacity) => ipcRenderer.invoke('win:setOpacity', opacity),
+  copyImageToClipboard: (dataUrl) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
   getWindowState: () => ipcRenderer.invoke('win:getState'),
 
   // File & folder dialogs
