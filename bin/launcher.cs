@@ -18,8 +18,8 @@ namespace CopyCatLauncher
                     Directory.SetCurrentDirectory(appDir);
                 }
 
-                string batFile = Path.Combine(appDir, "Launch_CopyCat.bat");
                 string electronExe = Path.Combine(appDir, "node_modules", "electron", "dist", "electron.exe");
+                string batFile = Path.Combine(appDir, "Launch_CopyCat.bat");
 
                 string passedArgs = "";
                 if (args != null && args.Length > 0)
@@ -34,7 +34,18 @@ namespace CopyCatLauncher
                     }
                 }
 
-                if (File.Exists(batFile))
+                if (File.Exists(electronExe))
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = "cmd.exe";
+                    psi.Arguments = "/c start \"\" \"" + electronExe + "\" . " + passedArgs;
+                    psi.WorkingDirectory = appDir;
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    psi.CreateNoWindow = true;
+                    psi.UseShellExecute = false;
+                    Process.Start(psi);
+                }
+                else if (File.Exists(batFile))
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();
                     psi.FileName = "cmd.exe";
@@ -45,13 +56,15 @@ namespace CopyCatLauncher
                     psi.UseShellExecute = false;
                     Process.Start(psi);
                 }
-                else if (File.Exists(electronExe))
+                else
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = electronExe;
-                    psi.Arguments = "." + passedArgs;
+                    psi.FileName = "cmd.exe";
+                    psi.Arguments = "/c npm start";
                     psi.WorkingDirectory = appDir;
-                    psi.UseShellExecute = true;
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    psi.CreateNoWindow = true;
+                    psi.UseShellExecute = false;
                     Process.Start(psi);
                 }
             }
