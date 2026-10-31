@@ -90,6 +90,7 @@
     autoLoadFolder: true,
     autoLoadSub: true,
     rememberState: true,
+    resumeLastVideo: false,
 
     // Window & chrome interaction state
     isFullscreen: false,
@@ -246,6 +247,7 @@
     swAutoloadFolder: $('sw-autoload-folder'),
     swAutoloadSub: $('sw-autoload-sub'),
     swRememberState: $('sw-remember-state'),
+    swResumePlayback: $('sw-resume-playback'),
     btnCreateDesktopShortcut: $('btn-create-desktop-shortcut'),
     aiEndpointBox: $('ai-endpoint-box'),
     aiSampleCmd: $('ai-sample-cmd'),
@@ -570,6 +572,7 @@
       folderPlaybackV3: true,
       autoLoadSub: state.autoLoadSub,
       rememberState: state.rememberState,
+      resumeLastVideo: state.resumeLastVideo,
       subTimelineBlocks: state.subTimelineBlocks,
       subSizePx: state.subSizePx,
       eqPreset: state.eqPreset,
@@ -601,6 +604,7 @@
       }
       if (typeof d.autoLoadSub === 'boolean') state.autoLoadSub = d.autoLoadSub;
       if (typeof d.rememberState === 'boolean') state.rememberState = d.rememberState;
+      if (typeof d.resumeLastVideo === 'boolean') state.resumeLastVideo = d.resumeLastVideo;
       if (typeof d.subTimelineBlocks === 'boolean') state.subTimelineBlocks = d.subTimelineBlocks;
       if (typeof d.subSizePx === 'number') state.subSizePx = d.subSizePx;
       if (typeof d.eqPreset === 'string') state.eqPreset = d.eqPreset;
@@ -632,6 +636,7 @@
     el.swAutoloadFolder.classList.toggle('on', state.autoLoadFolder);
     el.swAutoloadSub.classList.toggle('on', state.autoLoadSub);
     el.swRememberState.classList.toggle('on', state.rememberState);
+    if (el.swResumePlayback) el.swResumePlayback.classList.toggle('on', Boolean(state.resumeLastVideo));
 
     el.selEqPreset.value = state.eqPreset;
     el.rngSubSize.value = String(state.subSizePx);
@@ -2493,8 +2498,8 @@
         if (data?.item && (!state.currentItem || state.currentItem.path !== data.item.path)) {
           hasLoadedMediaOnStartup = true;
           ingestOpenedBundle({ items: [data.item], folder: data.folder }, true);
-        } else if (!hasLoadedMediaOnStartup && !state.currentItem && state.savedLastItem && state.savedLastFolder) {
-          // Resume last session
+        } else if (!hasLoadedMediaOnStartup && !state.currentItem && state.resumeLastVideo && state.savedLastItem && state.savedLastFolder) {
+          // Resume last session if enabled in Settings
           ingestOpenedBundle({ items: [state.savedLastItem], folder: state.savedLastFolder }, false);
           if (state.savedLastPosition > 0) {
             setTimeout(() => {
@@ -3234,6 +3239,14 @@
       syncSwitchesUI();
       savePreferences();
     });
+    if (el.swResumePlayback) {
+      el.swResumePlayback.addEventListener('click', () => {
+        state.resumeLastVideo = !state.resumeLastVideo;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.resumeLastVideo ? 'Resume on Startup: Enabled' : 'Resume on Startup: Disabled (Starts with clean Cat)');
+      });
+    }
 
     el.btnCopyAiCmd.addEventListener('click', () => {
       navigator.clipboard.writeText(el.aiSampleCmd.textContent).then(() => {
