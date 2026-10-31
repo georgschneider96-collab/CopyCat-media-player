@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   getQuickFolders: () => ipcRenderer.invoke('fs:getQuickFolders'),
   saveSnapshot: (payload) => ipcRenderer.invoke('fs:saveSnapshot', payload),
   revealInExplorer: (filePath) => ipcRenderer.invoke('shell:reveal', filePath),
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),

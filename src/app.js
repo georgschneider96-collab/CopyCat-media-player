@@ -138,7 +138,6 @@
     menuOpenMulti: $('menu-open-multi'),
     menuOpenFolder: $('menu-open-folder'),
     menuOpenSub: $('menu-open-sub'),
-    menuPlayDemo: $('menu-play-demo'),
     menuSnapshot: $('menu-snapshot'),
     menuReveal: $('menu-reveal'),
     menuAlwaysTop: $('menu-always-top'),
@@ -163,7 +162,6 @@
     emptyCone: $('empty-cone'),
     btnEmptyOpenFile: $('btn-empty-open-file'),
     btnEmptyOpenFolder: $('btn-empty-open-folder'),
-    btnEmptyDemo: $('btn-empty-demo'),
     subtitleOverlay: $('subtitle-overlay'),
     osdToast: $('osd-toast'),
     dropOverlay: $('drop-overlay'),
@@ -2411,27 +2409,14 @@
       showToast('Sidebar shortcuts reset to default');
     });
 
-    const desktopEntry = defaultQuickFolders.find((q) => q.label === 'Desktop');
-    if (desktopEntry) {
-      const desktopScan = await api.scanFolder(desktopEntry.path);
-      const demo = desktopScan?.items?.find((it) =>
-        it.name.toLowerCase().includes('redesigned vlc') || it.name.includes('ERFeOgqk324')
-      );
-      if (demo) {
-        state.demoVideoPath = demo.filePath;
-        el.btnEmptyDemo.style.display = 'inline-block';
-        el.menuPlayDemo.style.display = 'flex';
-        const playDemo = async () => {
-          const res = await api.resolvePaths([state.demoVideoPath]);
-          if (res) ingestOpenedBundle(res, true);
-        };
-        el.btnEmptyDemo.addEventListener('click', playDemo);
-        el.menuPlayDemo.addEventListener('click', () => {
-          el.headerMenu.classList.remove('open');
-          playDemo();
-        });
+    // Open external links safely via shell.openExternal
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[target="_blank"]');
+      if (link && link.href) {
+        e.preventDefault();
+        api.openExternal(link.href);
       }
-    }
+    });
 
     // 5. Window controls & IPC listeners
     el.btnMinimize.addEventListener('click', () => api.minimize());

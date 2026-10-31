@@ -333,6 +333,13 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     broadcastWindowState();
@@ -834,6 +841,14 @@ ipcMain.handle('shell:reveal', (_evt, filePath) => {
   if (filePath && fs.existsSync(filePath)) {
     shell.showItemInFolder(filePath);
   }
+});
+
+ipcMain.handle('shell:openExternal', (_evt, targetUrl) => {
+  if (targetUrl && (targetUrl.startsWith('https://') || targetUrl.startsWith('http://'))) {
+    shell.openExternal(targetUrl);
+    return true;
+  }
+  return false;
 });
 
 ipcMain.on('player:statusUpdate', (_evt, status) => {
