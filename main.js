@@ -1,6 +1,17 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+process.on('uncaughtException', (err) => {
+  try {
+    fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] uncaughtException: ${err.stack || err.message}\n`);
+  } catch {}
+});
+process.on('unhandledRejection', (reason) => {
+  try {
+    fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] unhandledRejection: ${reason?.stack || reason}\n`);
+  } catch {}
+});
 const http = require('http');
 const { spawn, spawnSync, execFile } = require('child_process');
 const { pathToFileURL } = require('url');
@@ -348,6 +359,13 @@ function createMainWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(true);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isAlwaysOnTop()) {
+        mainWindow.setAlwaysOnTop(false);
+      }
+    }, 300);
     broadcastWindowState();
 
     // Check if a media file was passed via CLI args
@@ -599,6 +617,18 @@ function startAiControlServer(port = 4500) {
           }
 
           if (mainWindow && !mainWindow.isDestroyed()) {
+            if (payload.action === 'bringToFront') {
+              mainWindow.show();
+              mainWindow.restore();
+              mainWindow.setAlwaysOnTop(true);
+              setTimeout(() => {
+                if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isAlwaysOnTop()) {
+                  mainWindow.setAlwaysOnTop(false);
+                }
+              }, 250);
+              mainWindow.focus();
+              return sendJson(200, { ok: true, dispatched: 'bringToFront' });
+            }
             if (payload.action === 'togglePip') {
               mainWindow.webContents.executeJavaScript('document.getElementById("btn-pip")?.click()', true).catch(() => {});
             } else {

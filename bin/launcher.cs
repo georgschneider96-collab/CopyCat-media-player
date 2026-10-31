@@ -19,7 +19,6 @@ namespace CopyCatLauncher
                 }
 
                 string electronExe = Path.Combine(appDir, "node_modules", "electron", "dist", "electron.exe");
-                string batFile = Path.Combine(appDir, "Launch_CopyCat.bat");
 
                 string passedArgs = "";
                 if (args != null && args.Length > 0)
@@ -37,23 +36,10 @@ namespace CopyCatLauncher
                 if (File.Exists(electronExe))
                 {
                     ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = "cmd.exe";
-                    psi.Arguments = "/c start \"\" \"" + electronExe + "\" . " + passedArgs;
+                    psi.FileName = electronExe;
+                    psi.Arguments = string.IsNullOrEmpty(passedArgs) ? "." : ". " + passedArgs.TrimStart();
                     psi.WorkingDirectory = appDir;
-                    psi.WindowStyle = ProcessWindowStyle.Hidden;
-                    psi.CreateNoWindow = true;
-                    psi.UseShellExecute = false;
-                    Process.Start(psi);
-                }
-                else if (File.Exists(batFile))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = "cmd.exe";
-                    psi.Arguments = "/c \"\"" + batFile + "\"" + passedArgs + "\"";
-                    psi.WorkingDirectory = appDir;
-                    psi.WindowStyle = ProcessWindowStyle.Hidden;
-                    psi.CreateNoWindow = true;
-                    psi.UseShellExecute = false;
+                    psi.UseShellExecute = true;
                     Process.Start(psi);
                 }
                 else
