@@ -311,6 +311,7 @@ function restoreMainWindowWin32() {
 }
 
 function createMainWindow() {
+  const iconPath = path.join(__dirname, 'assets', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 700,
@@ -319,6 +320,7 @@ function createMainWindow() {
     frame: false,
     backgroundColor: '#0A0A0A',
     title: 'VLCopyCAT',
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

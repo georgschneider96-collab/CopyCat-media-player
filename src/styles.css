@@ -131,6 +131,10 @@ html, body {
 .cone-btn {
   color: var(--accent);
 }
+.cone-btn svg {
+  width: 20px;
+  height: 20px;
+}
 .cone-btn:hover {
   color: var(--accent-hover);
   background: rgba(var(--accent-rgb), 0.12);
