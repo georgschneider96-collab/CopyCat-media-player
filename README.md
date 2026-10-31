@@ -1,6 +1,6 @@
 # CopyCat media player 🐈🎬
 
-A modern, hardware-accelerated Windows desktop media player inspired by **Juxtopposed's "I Redesigned VLC After 25 Years"** concept — built with Electron, HTML5 Video/Canvas, and Web Audio API, featuring a custom **Cat Icon** design, desktop shortcut integration, and built-in **Local AI Control Bridge**.
+VLC media player CopyCat based on the redesign of Juxtopposed — built with Electron, HTML5 Video/Canvas, and Web Audio API, featuring a custom **Cat Icon** design, desktop shortcut integration, and built-in **Local AI Control Bridge**.
 
 ## Quick Start
 

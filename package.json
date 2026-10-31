@@ -2,7 +2,7 @@
   "name": "copycat-media-player",
   "productName": "CopyCat media player",
   "version": "1.0.0",
-  "description": "CopyCat media player — Modern Desktop Media Player with built-in Local AI Control API",
+  "description": "VLC media player CopyCat based on the redesign of Juxtopposed",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
