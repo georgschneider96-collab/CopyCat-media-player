@@ -98,6 +98,9 @@
     hoveringBottomBar: false,
     hoveringLeftSidebar: false,
     hoveringRightDrawer: false,
+    hoveringBottomPopover: false,
+    interactingBottomPopover: false,
+    bottomPopoverSelectOpen: false,
     leftOpenedByEdge: false,
     rightOpenedByEdge: false,
     leftEdgeCooldownUntil: 0,
@@ -1820,7 +1823,7 @@
     const item = getCurrentItem();
     const shouldShow = Boolean(item && (item.isAudio || state.visualizerEnabled));
     el.visualizerCanvas.classList.toggle('visible', shouldShow);
-    el.btnAudioPop.classList.toggle('active', state.visualizerEnabled || state.eqPreset !== 'flat');
+    syncPopoverButtonsActive();
 
     if (shouldShow && !visualizerRaf) {
       drawVisualizerLoop();
@@ -1948,6 +1951,42 @@
   let fsIdleTimer = null;
   let leftSidebarIdleTimer = null;
   let rightDrawerIdleTimer = null;
+  let bottomPopoverIdleTimer = null;
+
+  function syncPopoverButtonsActive() {
+    const popOpen = el.bottomPopover.classList.contains('open');
+    const activeTab = document.querySelector('.pop-tab.active')?.dataset?.popTab || '';
+    el.btnAudioPop.classList.toggle(
+      'active',
+      (popOpen && activeTab === 'audio') || state.visualizerEnabled || state.eqPreset !== 'flat'
+    );
+    el.btnSubPop.classList.toggle(
+      'active',
+      (popOpen && activeTab === 'subtitles') || (state.subEnabled && state.subCues.length > 0)
+    );
+    el.btnGearPop.classList.toggle(
+      'active',
+      popOpen && (activeTab === 'playback' || activeTab === 'video')
+    );
+  }
+
+  function closeBottomPopover({ refreshLayout = false } = {}) {
+    clearTimeout(bottomPopoverIdleTimer);
+    bottomPopoverIdleTimer = null;
+    const wasOpen = el.bottomPopover.classList.contains('open');
+    el.bottomPopover.classList.remove('open');
+    state.hoveringBottomPopover = false;
+    state.interactingBottomPopover = false;
+    state.bottomPopoverSelectOpen = false;
+    syncPopoverButtonsActive();
+    if (wasOpen) {
+      if (refreshLayout) {
+        finishSidebarAutoCollapse();
+      } else {
+        updateChromeSolidity();
+      }
+    }
+  }
 
   function updateChromeSolidity() {
     const hasMedia = Boolean(getCurrentItem());
@@ -2000,9 +2039,11 @@
   function syncSidebarAutoCollapse() {
     clearTimeout(leftSidebarIdleTimer);
     clearTimeout(rightDrawerIdleTimer);
+    clearTimeout(bottomPopoverIdleTimer);
 
     const leftOpen = !el.librarySidebar.classList.contains('collapsed');
     const rightOpen = !el.rightDrawer.classList.contains('collapsed');
+    const popOpen = el.bottomPopover.classList.contains('open');
     const searchFocused = document.activeElement === el.libSearchInput;
 
     // Auto-collapse open left library sidebar if mouse doesn't hover over it (5s while playing, 3.2s if edge-opened while paused/idle)
@@ -2058,17 +2099,38 @@
         }
       }, delayMs);
     }
+
+    // Auto-close bottom popover (Audio & Equalizer, Subtitles & Sync, Playback & Video) after 5s when unhovered & uninteracted
+    if (
+      popOpen &&
+      !state.hoveringBottomPopover &&
+      !state.interactingBottomPopover &&
+      !state.bottomPopoverSelectOpen &&
+      !state.dialogOpen
+    ) {
+      bottomPopoverIdleTimer = setTimeout(() => {
+        if (
+          el.bottomPopover.classList.contains('open') &&
+          !state.hoveringBottomPopover &&
+          !state.interactingBottomPopover &&
+          !state.bottomPopoverSelectOpen &&
+          !state.dialogOpen
+        ) {
+          closeBottomPopover({ refreshLayout: true });
+        }
+      }, 5000);
+    }
   }
 
   function openPopoverTab(tabName) {
     el.headerMenu.classList.remove('open');
-    updateChromeSolidity();
+    const activeTab = document.querySelector('.pop-tab.active')?.dataset?.popTab || '';
     const isAlreadyOpenOnSame =
       el.bottomPopover.classList.contains('open') &&
-      document.querySelector(`.pop-tab[data-pop-tab="${tabName}"]`)?.classList.contains('active');
+      (activeTab === tabName || (tabName === 'playback' && activeTab === 'video'));
 
     if (isAlreadyOpenOnSame) {
-      el.bottomPopover.classList.remove('open');
+      closeBottomPopover();
       return;
     }
 
@@ -2079,11 +2141,14 @@
       p.classList.toggle('active', p.dataset.popPanel === tabName);
     });
     el.bottomPopover.classList.add('open');
+    syncPopoverButtonsActive();
+    updateChromeSolidity();
+    resetFullscreenIdle();
   }
 
   function toggleSettingsModal(forceOpen) {
     el.headerMenu.classList.remove('open');
-    el.bottomPopover.classList.remove('open');
+    closeBottomPopover();
     const shouldOpen = typeof forceOpen === 'boolean'
       ? forceOpen
       : !el.settingsBackdrop.classList.contains('open');
@@ -2459,10 +2524,58 @@
       if (e.propertyName === 'margin-right') applyVideoAppearance();
     });
 
+    el.bottomPopover.addEventListener('mouseenter', () => {
+      state.hoveringBottomPopover = true;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.bottomPopover.addEventListener('mouseleave', () => {
+      state.hoveringBottomPopover = false;
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    el.bottomPopover.addEventListener('pointerdown', (e) => {
+      state.interactingBottomPopover = true;
+      if (e.target.closest('select')) {
+        state.bottomPopoverSelectOpen = true;
+      }
+      syncSidebarAutoCollapse();
+      resetFullscreenIdle();
+    });
+    ['input', 'change', 'click', 'keydown', 'wheel'].forEach((evName) => {
+      el.bottomPopover.addEventListener(
+        evName,
+        (e) => {
+          if (evName === 'change' && e.target.closest('select')) {
+            state.bottomPopoverSelectOpen = false;
+          }
+          syncSidebarAutoCollapse();
+          resetFullscreenIdle();
+        },
+        { passive: true }
+      );
+    });
+    [el.selVideoFit, el.selEqPreset].forEach((sel) => {
+      sel.addEventListener('blur', () => {
+        if (state.bottomPopoverSelectOpen) {
+          state.bottomPopoverSelectOpen = false;
+          syncSidebarAutoCollapse();
+        }
+      });
+    });
+    const endPopoverPointerInteraction = () => {
+      if (state.interactingBottomPopover) {
+        state.interactingBottomPopover = false;
+        syncSidebarAutoCollapse();
+      }
+    };
+    window.addEventListener('pointerup', endPopoverPointerInteraction);
+    window.addEventListener('pointercancel', endPopoverPointerInteraction);
+
     el.btnCone.addEventListener('click', () => toggleSettingsModal());
     el.btnMenu.addEventListener('click', (e) => {
       e.stopPropagation();
-      el.bottomPopover.classList.remove('open');
+      closeBottomPopover();
       el.headerMenu.classList.toggle('open');
       updateChromeSolidity();
     });
@@ -2679,48 +2792,66 @@
       }
     });
 
-    // Stage click (immediately close open sidebars/menus; otherwise single-click play/pause, double-click fullscreen)
+    // Stage click (immediately close open sidebars, Audio/Subtitles/Playback popover & menus; otherwise single-click play/pause, double-click fullscreen)
     let stageClickTimer = null;
     let suppressDblClickUntil = 0;
-    el.videoStage.addEventListener('click', (e) => {
-      if (e.target.closest('button')) return;
+    let dismissedOverlayOnPointerDown = false;
 
+    const dismissOpenStageOverlays = () => {
       const leftOpen = !el.librarySidebar.classList.contains('collapsed');
       const rightOpen = !el.rightDrawer.classList.contains('collapsed');
-      const menuOrPopOpen =
-        el.headerMenu.classList.contains('open') || el.bottomPopover.classList.contains('open');
+      const headerMenuOpen = el.headerMenu.classList.contains('open');
+      const bottomPopOpen = el.bottomPopover.classList.contains('open');
 
-      if (leftOpen || rightOpen || menuOrPopOpen) {
-        if (stageClickTimer) {
-          clearTimeout(stageClickTimer);
-          stageClickTimer = null;
-        }
-        if (leftOpen) {
-          clearTimeout(leftSidebarIdleTimer);
-          el.librarySidebar.classList.add('collapsed');
-          el.btnSidebar.classList.remove('active');
-          state.leftOpenedByEdge = false;
-          state.hoveringLeftSidebar = false;
-          state.leftEdgeCooldownUntil = Date.now() + 450;
-        }
-        if (rightOpen) {
-          clearTimeout(rightDrawerIdleTimer);
-          el.rightDrawer.classList.add('collapsed');
-          el.btnQueueDrawer.classList.remove('active');
-          state.rightOpenedByEdge = false;
-          state.hoveringRightDrawer = false;
-          state.rightEdgeCooldownUntil = Date.now() + 450;
-        }
-        if (menuOrPopOpen) {
-          el.headerMenu.classList.remove('open');
-          el.bottomPopover.classList.remove('open');
-        }
-        suppressDblClickUntil = Date.now() + 550;
-        updateChromeSolidity();
-        applyVideoAppearance();
-        resetFullscreenIdle();
+      if (!leftOpen && !rightOpen && !headerMenuOpen && !bottomPopOpen) {
+        return false;
+      }
+
+      if (stageClickTimer) {
+        clearTimeout(stageClickTimer);
+        stageClickTimer = null;
+      }
+      if (leftOpen) {
+        clearTimeout(leftSidebarIdleTimer);
+        el.librarySidebar.classList.add('collapsed');
+        el.btnSidebar.classList.remove('active');
+        state.leftOpenedByEdge = false;
+        state.hoveringLeftSidebar = false;
+        state.leftEdgeCooldownUntil = Date.now() + 450;
+      }
+      if (rightOpen) {
+        clearTimeout(rightDrawerIdleTimer);
+        el.rightDrawer.classList.add('collapsed');
+        el.btnQueueDrawer.classList.remove('active');
+        state.rightOpenedByEdge = false;
+        state.hoveringRightDrawer = false;
+        state.rightEdgeCooldownUntil = Date.now() + 450;
+      }
+      if (headerMenuOpen) {
+        el.headerMenu.classList.remove('open');
+      }
+      if (bottomPopOpen) {
+        closeBottomPopover();
+      }
+      suppressDblClickUntil = Date.now() + 550;
+      updateChromeSolidity();
+      applyVideoAppearance();
+      resetFullscreenIdle();
+      return true;
+    };
+
+    el.videoStage.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      dismissedOverlayOnPointerDown = dismissOpenStageOverlays();
+    });
+
+    el.videoStage.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      if (dismissedOverlayOnPointerDown) {
+        dismissedOverlayOnPointerDown = false;
         return;
       }
+      if (dismissOpenStageOverlays()) return;
 
       if (e.target.closest('.empty-state')) return;
       if (!getCurrentItem()) return;
@@ -2911,6 +3042,8 @@
         document.querySelectorAll('.pop-panel').forEach((p) => {
           p.classList.toggle('active', p.dataset.popPanel === name);
         });
+        syncPopoverButtonsActive();
+        syncSidebarAutoCollapse();
       });
     });
 
@@ -2990,7 +3123,7 @@
     el.swSubEnabled.addEventListener('click', () => {
       state.subEnabled = !state.subEnabled;
       syncSwitchesUI();
-      el.btnSubPop.classList.toggle('active', state.subEnabled && state.subCues.length > 0);
+      syncPopoverButtonsActive();
       renderSubtitleBlocksOnSeekbar();
       updateActiveSubtitleCue();
     });
@@ -3085,7 +3218,7 @@
         !e.target.closest('#btn-sub-pop') &&
         !e.target.closest('#btn-gear-pop')
       ) {
-        el.bottomPopover.classList.remove('open');
+        closeBottomPopover();
       }
     });
 
@@ -3453,6 +3586,13 @@
           syncSidebarAutoCollapse();
         }
       }
+      if (el.bottomPopover.classList.contains('open')) {
+        const insidePop = el.bottomPopover.contains(e.target);
+        if (state.hoveringBottomPopover !== insidePop) {
+          state.hoveringBottomPopover = insidePop;
+          syncSidebarAutoCollapse();
+        }
+      }
       handleEdgeAutoOpen(e);
       resetFullscreenIdle();
     });
@@ -3461,6 +3601,7 @@
       clearEdgeHoverTimers();
       state.hoveringLeftSidebar = false;
       state.hoveringRightDrawer = false;
+      state.hoveringBottomPopover = false;
       syncSidebarAutoCollapse();
     });
     window.addEventListener('resize', applyVideoAppearance);
@@ -3471,6 +3612,7 @@
       state.hoveringBottomBar = false;
       state.hoveringLeftSidebar = false;
       state.hoveringRightDrawer = false;
+      state.hoveringBottomPopover = false;
       updateChromeSolidity();
     });
 
@@ -3478,7 +3620,12 @@
       resetFullscreenIdle();
 
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
-        if (e.key === 'Escape') e.target.blur();
+        if (e.key === 'Escape') {
+          e.target.blur();
+          if (el.bottomPopover.contains(e.target)) {
+            closeBottomPopover();
+          }
+        }
         return;
       }
 
@@ -3522,7 +3669,7 @@
           if (el.settingsBackdrop.classList.contains('open')) {
             toggleSettingsModal(false);
           } else if (el.bottomPopover.classList.contains('open') || el.headerMenu.classList.contains('open')) {
-            el.bottomPopover.classList.remove('open');
+            closeBottomPopover();
             el.headerMenu.classList.remove('open');
             updateChromeSolidity();
           } else if (state.isFullscreen) {
