@@ -28,7 +28,7 @@
     night:  [-4.5, 2.0, -3.0]
   };
 
-  const STORAGE_KEY = 'vlcopycat_prefs_v1';
+  const STORAGE_KEY = 'copycat_media_player_prefs_v1';
 
   // ==================== STATE ====================
   const state = {
@@ -44,6 +44,7 @@
     sidebarShortcuts: null,  // [{ label, path }] — customizable user shortcuts
     bookmarks: [],           // { id, title, filePath, time }
     drawerTab: 'queue',      // 'queue' | 'bookmarks'
+    dismissShortcutPrompt: false,
 
     playing: false,
     volume: 100,             // 0..200 (200% cone boost)
@@ -165,6 +166,10 @@
     subtitleOverlay: $('subtitle-overlay'),
     osdToast: $('osd-toast'),
     dropOverlay: $('drop-overlay'),
+    shortcutBanner: $('shortcut-banner'),
+    shortcutBannerIcon: $('shortcut-banner-icon'),
+    btnBannerCreateShortcut: $('btn-banner-create-shortcut'),
+    btnBannerDismissShortcut: $('btn-banner-dismiss-shortcut'),
 
     rightDrawer: $('right-drawer'),
     tabDrawerQueue: $('tab-drawer-queue'),
@@ -244,6 +249,7 @@
     swAutoloadFolder: $('sw-autoload-folder'),
     swAutoloadSub: $('sw-autoload-sub'),
     swRememberState: $('sw-remember-state'),
+    btnCreateDesktopShortcut: $('btn-create-desktop-shortcut'),
     aiEndpointBox: $('ai-endpoint-box'),
     aiSampleCmd: $('ai-sample-cmd'),
     btnCopyAiCmd: $('btn-copy-ai-cmd')
@@ -571,7 +577,8 @@
       subSizePx: state.subSizePx,
       eqPreset: state.eqPreset,
       showRemainingTime: state.showRemainingTime,
-      sidebarShortcuts: state.sidebarShortcuts
+      sidebarShortcuts: state.sidebarShortcuts,
+      dismissShortcutPrompt: state.dismissShortcutPrompt
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -580,12 +587,13 @@
 
   function loadPreferences() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('vlcopycat_prefs_v1');
       if (!raw) return;
       const d = JSON.parse(raw);
       if (typeof d.volume === 'number') state.volume = d.volume;
       if (typeof d.showHoverThumb === 'boolean') state.showHoverThumb = d.showHoverThumb;
       if (typeof d.autoHideFs === 'boolean') state.autoHideFs = d.autoHideFs;
+      if (typeof d.dismissShortcutPrompt === 'boolean') state.dismissShortcutPrompt = d.dismissShortcutPrompt;
       if (d.folderPlaybackV3 && typeof d.autoLoadFolder === 'boolean') {
         state.autoLoadFolder = d.autoLoadFolder;
       } else {
@@ -811,13 +819,21 @@
     state.streamMode = false;
     state.streamOffset = 0;
     state.streamDuration = 0;
-    el.mediaTitle.textContent = 'VLCopyCAT';
-    document.title = 'VLCopyCAT';
+    el.mediaTitle.textContent = 'CopyCat media player';
+    document.title = 'CopyCat media player';
     clearSubtitles();
     updateVisualizerVisibility();
     updateTransportUI();
     updateTimelineUI();
     updateChromeSolidity();
+
+    if (!state.dismissShortcutPrompt && api.hasDesktopShortcut) {
+      api.hasDesktopShortcut().then((has) => {
+        if (!has && !state.currentItem && el.shortcutBanner) {
+          el.shortcutBanner.classList.add('visible');
+        }
+      }).catch(() => {});
+    }
   }
 
   async function loadMediaItem(
@@ -859,17 +875,20 @@
 
     el.video.classList.toggle('loaded', !item.isAudio);
     el.emptyState.classList.add('hidden');
+    if (el.shortcutBanner) {
+      el.shortcutBanner.classList.remove('visible');
+    }
     updateChromeSolidity();
     applyVideoAppearance();
 
     el.mediaTitle.textContent = item.title || item.name;
-    document.title = `${item.title || item.name} — VLCopyCAT`;
+    document.title = `${item.title || item.name} — CopyCat media player`;
 
     if ('mediaSession' in navigator && typeof MediaMetadata !== 'undefined') {
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: item.title || item.name,
-          artist: item.folderName || 'VLCopyCAT'
+          artist: item.folderName || 'CopyCat media player'
         });
       } catch {}
     }
@@ -1778,9 +1797,9 @@
     const ctx = canvas.getContext('2d');
     ctx.drawImage(el.video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
-    const res = await api.saveSnapshot({ dataUrl, baseName: item.title || 'vlcopycat' });
+    const res = await api.saveSnapshot({ dataUrl, baseName: item.title || 'copycat' });
     if (res?.ok) {
-      showToast('Snapshot saved to Pictures/VLCopyCAT Snapshots');
+      showToast('Snapshot saved to Pictures/CopyCat media player Snapshots');
     } else {
       showToast('Snapshot failed');
     }
@@ -2183,7 +2202,7 @@
   function pushPlayerStatus() {
     const item = getCurrentItem();
     api.reportStatus({
-      app: 'VLCopyCAT',
+      app: 'CopyCat media player',
       playing: state.playing,
       title: item?.title || null,
       filePath: item?.filePath || null,
@@ -2319,6 +2338,7 @@
     el.btnClose.innerHTML = ICONS.close;
     el.libSearchIcon.innerHTML = ICONS.search;
     el.emptyCone.innerHTML = ICONS.cone;
+    if (el.shortcutBannerIcon) el.shortcutBannerIcon.innerHTML = ICONS.cone;
 
     el.btnPrev.innerHTML = ICONS.prev;
     el.btnPlay.innerHTML = ICONS.play;
@@ -3189,6 +3209,32 @@
       });
     });
 
+    // Desktop Shortcut creation handlers
+    async function triggerCreateShortcut() {
+      if (!api.createDesktopShortcut) return;
+      const res = await api.createDesktopShortcut();
+      if (res && res.success) {
+        showToast('Desktop shortcut "CopyCat media player" created!');
+        if (el.shortcutBanner) el.shortcutBanner.classList.remove('visible');
+      } else {
+        showToast(`Shortcut error: ${res?.error || 'failed'}`);
+      }
+    }
+
+    if (el.btnBannerCreateShortcut) {
+      el.btnBannerCreateShortcut.addEventListener('click', triggerCreateShortcut);
+    }
+    if (el.btnCreateDesktopShortcut) {
+      el.btnCreateDesktopShortcut.addEventListener('click', triggerCreateShortcut);
+    }
+    if (el.btnBannerDismissShortcut) {
+      el.btnBannerDismissShortcut.addEventListener('click', () => {
+        state.dismissShortcutPrompt = true;
+        savePreferences();
+        if (el.shortcutBanner) el.shortcutBanner.classList.remove('visible');
+      });
+    }
+
     // Close floating menus when clicking outside
     document.addEventListener('click', (e) => {
       if (!e.target.closest('#header-menu') && !e.target.closest('#btn-menu')) {
@@ -3720,6 +3766,20 @@
     renderRightDrawer();
     updateChromeSolidity();
     pushPlayerStatus();
+
+    // Check if desktop shortcut exists; if missing and not dismissed, show prompt banner
+    setTimeout(async () => {
+      try {
+        if (!state.dismissShortcutPrompt && !state.currentItem && api.hasDesktopShortcut) {
+          const has = await api.hasDesktopShortcut();
+          if (!has && el.shortcutBanner && !state.currentItem) {
+            el.shortcutBanner.classList.add('visible');
+          }
+        }
+      } catch (err) {
+        console.warn('Desktop shortcut check:', err);
+      }
+    }, 600);
   }
 
   init();

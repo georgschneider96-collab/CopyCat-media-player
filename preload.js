@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('vlcopycat', {
   saveSnapshot: (payload) => ipcRenderer.invoke('fs:saveSnapshot', payload),
   revealInExplorer: (filePath) => ipcRenderer.invoke('shell:reveal', filePath),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  hasDesktopShortcut: () => ipcRenderer.invoke('shortcut:hasDesktop'),
+  createDesktopShortcut: () => ipcRenderer.invoke('shortcut:createDesktop'),
 
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),

@@ -1,29 +1,32 @@
-# VLCopyCAT — AI Assistant Context & Architecture Guide
+# CopyCat media player — AI Assistant Context & Architecture Guide
 
-> **Purpose of this file:** Give any AI assistant (Gemini, Claude, ChatGPT, GitHub Copilot, Cursor, Antigravity, local Ollama models, or MCP agents) instant, complete understanding of how **VLCopyCAT** is structured, how to modify its UI/features, and how to control the running player programmatically via HTTP.
+> **Purpose of this file:** Give any AI assistant (Gemini, Claude, ChatGPT, GitHub Copilot, Cursor, Antigravity, local Ollama models, or MCP agents) instant, complete understanding of how **CopyCat media player** is structured, how to modify its UI/features, and how to control the running player programmatically via HTTP.
 
 ---
 
 ## 1. Project Overview
-**VLCopyCAT** is a standalone frameless Windows desktop media player built with **Electron + Vanilla HTML5/CSS3/JS + Web Audio API**, faithfully implementing Juxtopposed's *VLC After 25 Years* UI redesign.
+**CopyCat media player** is a standalone frameless Windows desktop media player built with **Electron + Vanilla HTML5/CSS3/JS + Web Audio API**, faithfully implementing Juxtopposed's *VLC After 25 Years* UI redesign with a custom cat icon identity.
 
 Zero build-step complexity: edit any file in `src/` and press `Ctrl + R` inside the app (when Developer Mode is enabled) or restart via `npm start`.
 
 ## 2. File Structure
 ```text
-VLCopyCAT/
-├── package.json        # Electron app manifest (`npm start` runs the desktop player)
+CopyCat media player/
+├── package.json        # Electron app manifest (`npm start`, `npm run dist`)
 ├── main.js             # Electron Main Process: frameless window, native file/folder dialogs,
-│                       #   auto-subtitle (.srt/.vtt) discovery, and Local AI HTTP API (port 4500)
+│                       #   desktop shortcut manager, auto-subtitles, and Local AI HTTP API (port 4500)
 ├── preload.js          # Electron Preload: exposes `window.vlcopycat` IPC bridge securely
 ├── AI_CONTEXT.md       # This architecture & AI control reference
 ├── README.md           # User quick-start, hotkeys, and customization guide
+├── assets/
+│   ├── icon.ico        # Multi-resolution Windows icon (16, 24, 32, 48, 64, 128, 256px)
+│   └── cat_icon.svg    # Source vector cat design
 └── src/
     ├── index.html      # Player DOM: Top Header, Left Library Sidebar, Center Video Stage,
     │                   #   Right Queue/Bookmarks Drawer, Bottom Bar, Popovers & Settings Modal
-    ├── styles.css      # Design tokens (--accent, --accent-rgb), 9 color themes, cone slider,
+    ├── styles.css      # Design tokens (--accent, --accent-rgb), 9 color themes, cat iconography,
     │                   #   Juxtopposed [ON|OFF] switches, seekbar & glassmorphic surfaces
-    ├── icons.js        # Crisp inline vector SVGs matching the redesign's iconography
+    ├── icons.js        # Crisp inline vector SVGs matching the redesign's iconography & custom cat
     └── app.js          # Core Player State, Web Audio 200% Gain + EQ + Visualizer, offscreen
                         #   hover-thumbnail generator, SRT/VTT subtitle engine & AI IPC handler
 ```
@@ -37,13 +40,14 @@ All accent colors are driven by two CSS custom properties on `:root`:
 `orange`, `amber`, `lime`, `emerald`, `cyan`, `blue`, `purple`, `magenta`, `rose`.
 
 ## 4. Built-in Local AI Control API (`http://127.0.0.1:4500`)
-While VLCopyCAT is running, it hosts a lightweight local JSON HTTP server on `127.0.0.1:4500` so any AI assistant, CLI tool, PowerShell script, or MCP tool can inspect and control playback in real time.
+While CopyCat media player is running, it hosts a lightweight local JSON HTTP server on `127.0.0.1:4500` so any AI assistant, CLI tool, PowerShell script, or MCP tool can inspect and control playback in real time.
 
 ### Endpoints
 - **`GET http://127.0.0.1:4500/`** — Self-documenting API schema & available commands.
 - **`GET http://127.0.0.1:4500/api/status`** — Returns live player state:
   ```json
   {
+    "app": "CopyCat media player",
     "playing": true,
     "title": "example.mp4",
     "filePath": "C:\\Videos\\example.mp4",
@@ -57,7 +61,7 @@ While VLCopyCAT is running, it hosts a lightweight local JSON HTTP server on `12
     "streamEngine": "ffmpeg-live"
   }
   ```
-- **`GET http://127.0.0.1:4500/api/stream?path=...&start=0&vcodec=h264`** — Zero-disk FFmpeg fragmented MP4 live stream for non-Chromium containers/codecs (such as HLS `mpegts` streams saved with `.mp4` extensions, `.mkv`, `.avi`, `.ts`, `AC3`/`DTS` audio, or `Hi10P` anime encodes).
+- **`GET http://127.0.0.1:4500/api/stream?path=...&start=0&vcodec=h264`** — Zero-disk FFmpeg fragmented MP4 live stream for non-Chromium containers/codecs.
 - **`GET http://127.0.0.1:4500/api/thumb?path=...&t=120`** — Instant on-demand MJPEG seekbar hover preview frame generator for streamed media.
 - **`POST http://127.0.0.1:4500/api/control`** — Execute an action:
   ```json

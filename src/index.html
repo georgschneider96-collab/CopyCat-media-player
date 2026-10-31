@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file: media: http://127.0.0.1:*;" />
-  <title>VLCopyCAT</title>
+  <title>CopyCat media player</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="icons.js"></script>
   <script defer src="app.js"></script>
@@ -14,7 +14,7 @@
     <!-- ==================== CONSOLIDATED TOP HEADER BAR ==================== -->
     <header class="top-bar" id="top-bar">
       <div class="top-left">
-        <button class="icon-btn cone-btn" id="btn-cone" title="VLCopyCAT — Theme & Preferences (Ctrl+P)"></button>
+        <button class="icon-btn cone-btn" id="btn-cone" title="CopyCat media player — Theme & Preferences (Ctrl+P)"></button>
         <button class="icon-btn" id="btn-menu" title="Media Menu"></button>
         <button class="icon-btn" id="btn-sidebar" title="Toggle Folder Library Sidebar"></button>
         <div class="v-divider"></div>
@@ -24,7 +24,7 @@
         </button>
       </div>
 
-      <div class="top-center" id="media-title">VLCopyCAT</div>
+      <div class="top-center" id="media-title">CopyCat media player</div>
 
       <div class="top-right">
         <button class="icon-btn" id="btn-pip" title="Popup Mini Player (PiP)"></button>
@@ -125,6 +125,19 @@
 
         <!-- Drag & Drop Overlay -->
         <div class="drop-overlay" id="drop-overlay">Drop media or subtitle file to play</div>
+
+        <!-- First-Run Desktop Shortcut Prompt Banner -->
+        <div class="shortcut-banner" id="shortcut-banner">
+          <div class="shortcut-banner-icon" id="shortcut-banner-icon"></div>
+          <div class="shortcut-banner-body">
+            <div class="shortcut-banner-title">Create Desktop Shortcut?</div>
+            <div class="shortcut-banner-desc">Add "CopyCat media player" with the cat icon to your desktop for quick access.</div>
+          </div>
+          <div class="shortcut-banner-actions">
+            <button class="primary-pill-btn" id="btn-banner-create-shortcut">Create Shortcut</button>
+            <button class="lib-mini-link" id="btn-banner-dismiss-shortcut">Not Now</button>
+          </div>
+        </div>
       </section>
 
       <!-- Right Queue & Bookmarks Drawer -->
@@ -388,7 +401,7 @@
               <div class="pop-row">
                 <div>
                   <div class="settings-section-title" style="margin-bottom:2px;">Always on Top</div>
-                  <div style="font-size:11.5px;color:var(--text-muted);">Keep VLCopyCAT floating above other desktop windows</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Keep CopyCat media player floating above other desktop windows</div>
                 </div>
                 <button class="jux-switch" id="sw-always-on-top" type="button"></button>
               </div>
@@ -396,6 +409,14 @@
 
             <!-- Panel: General & Playback -->
             <div class="settings-panel" data-settings-panel="general" style="display:none;flex-direction:column;gap:18px;">
+              <div class="pop-row">
+                <div>
+                  <div class="settings-section-title" style="margin-bottom:2px;">Desktop Shortcut</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Create or repair the desktop shortcut called "CopyCat media player" with the cat icon</div>
+                </div>
+                <button class="lib-add-btn" id="btn-create-desktop-shortcut" style="padding:5px 12px;">Create Shortcut</button>
+              </div>
+
               <div class="pop-row">
                 <div>
                   <div class="settings-section-title" style="margin-bottom:2px;">Continue Folder on Single-File Open</div>
@@ -444,7 +465,7 @@
               <div>
                 <div class="settings-section-title">Local AI Assistant Bridge</div>
                 <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
-                  Any AI coding assistant (Antigravity, Claude, Cursor, Windsurf, Copilot, Codex) can read <strong style="color:var(--text-primary);">AI_CONTEXT.md</strong> in your project folder or control VLCopyCAT live over HTTP:
+                  Any AI coding assistant (Antigravity, Claude, Cursor, Windsurf, Copilot, Codex) can read <strong style="color:var(--text-primary);">AI_CONTEXT.md</strong> in your project folder or control CopyCat media player live over HTTP:
                 </div>
               </div>
 
@@ -469,7 +490,7 @@
               <div>
                 <div class="settings-section-title">Inspiration &amp; Credits</div>
                 <div style="font-size:12.5px;color:var(--text-muted);line-height:1.6;margin-top:4px;">
-                  VLCopyCAT is a modern desktop media player inspired by Juxtopposed's VLC redesign concept and the VideoLAN project.
+                  CopyCat media player is a modern desktop media player inspired by Juxtopposed's VLC redesign concept and the VideoLAN project.
                 </div>
               </div>
 

@@ -32,7 +32,7 @@ let wasFullscreenBeforePip = false;
 let restoringFromPipLeave = false;
 
 let latestPlayerStatus = {
-  app: 'VLCopyCAT',
+  app: 'CopyCat media player',
   playing: false,
   title: null,
   filePath: null,
@@ -311,7 +311,9 @@ function restoreMainWindowWin32() {
 }
 
 function createMainWindow() {
-  const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  const icoPath = path.join(__dirname, 'assets', 'icon.ico');
+  const iconPng = path.join(__dirname, 'assets', 'icon.png');
+  const windowIcon = fs.existsSync(icoPath) ? icoPath : (fs.existsSync(iconPng) ? iconPng : undefined);
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 700,
@@ -319,8 +321,8 @@ function createMainWindow() {
     minHeight: 420,
     frame: false,
     backgroundColor: '#0A0A0A',
-    title: 'VLCopyCAT',
-    icon: fs.existsSync(iconPath) ? iconPath : undefined,
+    title: 'CopyCat media player',
+    icon: windowIcon,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -519,15 +521,15 @@ function startAiControlServer(port = 4500) {
 
     if (req.method === 'GET' && (pathname === '/' || pathname === '/api')) {
       return sendJson(200, {
-        name: 'VLCopyCAT Local AI Control Bridge',
-        version: '1.1.0',
+        name: 'CopyCat media player Local AI Control Bridge',
+        version: '1.2.0',
         port: aiServerPort,
         ffmpegEnabled: Boolean(FFMPEG_PATH),
         endpoints: {
           'GET /api/status': 'Inspect live playback state, title, timestamps, volume, speed, and theme',
           'GET /api/stream': 'Zero-disk FFmpeg fragmented MP4 live stream for MPEG-TS, MKV, AVI, AC3, HEVC, etc.',
           'POST /api/control': {
-            description: 'Control VLCopyCAT from any AI assistant or local script',
+            description: 'Control CopyCat media player from any AI assistant or local script',
             actions: [
               'play', 'pause', 'togglePlay', 'stop', 'next', 'prev',
               'seek (value in sec or delta in sec)',
@@ -824,7 +826,7 @@ ipcMain.handle('fs:getQuickFolders', () => {
 
 ipcMain.handle('fs:saveSnapshot', (_evt, { dataUrl, baseName }) => {
   try {
-    const picturesDir = path.join(app.getPath('pictures'), 'VLCopyCAT Snapshots');
+    const picturesDir = path.join(app.getPath('pictures'), 'CopyCat media player Snapshots');
     fs.mkdirSync(picturesDir, { recursive: true });
     const safe = (baseName || 'snapshot').replace(/[<>:"/\\|?*]+/g, '_');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -836,6 +838,52 @@ ipcMain.handle('fs:saveSnapshot', (_evt, { dataUrl, baseName }) => {
     return { ok: false, error: err.message };
   }
 });
+
+function getDesktopShortcutPath() {
+  const desktopPath = app.getPath('desktop');
+  return path.join(desktopPath, 'CopyCat media player.lnk');
+}
+
+function hasDesktopShortcut() {
+  try {
+    return fs.existsSync(getDesktopShortcutPath());
+  } catch {
+    return false;
+  }
+}
+
+function createDesktopShortcut() {
+  try {
+    const shortcutPath = getDesktopShortcutPath();
+    const icoPath = path.join(__dirname, 'assets', 'icon.ico');
+    const isPackaged = app.isPackaged;
+    const targetPath = isPackaged 
+      ? process.execPath 
+      : path.join(__dirname, 'Launch_CopyCat.bat');
+    const workingDir = isPackaged ? path.dirname(process.execPath) : __dirname;
+    const iconLocation = fs.existsSync(icoPath) ? `${icoPath},0` : `${targetPath},0`;
+
+    const psScript = `
+      $ws = New-Object -ComObject WScript.Shell;
+      $s = $ws.CreateShortcut('${shortcutPath.replace(/'/g, "''")}');
+      $s.TargetPath = '${targetPath.replace(/'/g, "''")}';
+      $s.WorkingDirectory = '${workingDir.replace(/'/g, "''")}';
+      $s.IconLocation = '${iconLocation.replace(/'/g, "''")}';
+      $s.Description = 'CopyCat media player';
+      $s.Save();
+    `;
+    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+      windowsHide: true
+    });
+    const created = fs.existsSync(shortcutPath);
+    return { success: created, ok: created, shortcutPath };
+  } catch (err) {
+    return { success: false, ok: false, error: err.message };
+  }
+}
+
+ipcMain.handle('shortcut:hasDesktop', () => hasDesktopShortcut());
+ipcMain.handle('shortcut:createDesktop', () => createDesktopShortcut());
 
 ipcMain.handle('shell:reveal', (_evt, filePath) => {
   if (filePath && fs.existsSync(filePath)) {
