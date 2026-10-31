@@ -38,6 +38,7 @@
     folderPlayIndex: -1,
     queue: [],               // Explicit user-built right-sidebar Queue (only via + / Add Files)
     queueIndex: -1,
+    queuedNextIndex: -1,     // Armed Queue index to play automatically next after current folder/single video
     libraryFolder: null,     // { folderPath, parentPath, folderName, subfolders, items }
     libraryFilter: '',
     sidebarShortcuts: null,  // [{ label, path }] — customizable user shortcuts
@@ -97,6 +98,10 @@
     hoveringBottomBar: false,
     hoveringLeftSidebar: false,
     hoveringRightDrawer: false,
+    leftOpenedByEdge: false,
+    rightOpenedByEdge: false,
+    leftEdgeCooldownUntil: 0,
+    rightEdgeCooldownUntil: 0,
     draggingQueueItem: false,
     externalFileDragActive: false,
     dialogOpen: false,
@@ -800,6 +805,7 @@
     state.currentItem = null;
     state.playbackSource = null;
     state.queueIndex = -1;
+    state.queuedNextIndex = -1;
     state.folderPlayIndex = -1;
     state.streamMode = false;
     state.streamOffset = 0;
@@ -821,6 +827,7 @@
 
     state.currentItem = item;
     state.playbackSource = source;
+    state.queuedNextIndex = -1;
 
     if (source === 'folder') {
       if (Array.isArray(folderList)) {
@@ -946,6 +953,13 @@
       state.queueIndex += items.length;
     }
 
+    // When playing from a folder (or single file) and adding to Queue, arm the Queue to play next automatically
+    if (!isPlayerIdle && state.playbackSource !== 'queue') {
+      if (state.queuedNextIndex < 0 || idx <= state.queuedNextIndex) {
+        state.queuedNextIndex = idx;
+      }
+    }
+
     renderLibraryList();
     renderRightDrawer();
     pushPlayerStatus();
@@ -955,7 +969,11 @@
     } else if (toast) {
       if (isAppend) {
         if (items.length === 1) {
-          showToast(`Queued: ${items[0].title || items[0].name}`);
+          const prefix =
+            state.playbackSource !== 'queue' && state.queuedNextIndex === idx
+              ? 'Up next in queue'
+              : 'Added to queue';
+          showToast(`${prefix}: ${items[0].title || items[0].name}`);
         } else {
           showToast(`Added ${items.length} files to queue`);
         }
@@ -1028,6 +1046,16 @@
       }
     }
 
+    if (state.queuedNextIndex >= 0) {
+      if (fromIdx > state.queuedNextIndex && toIdx <= state.queuedNextIndex) {
+        state.queuedNextIndex = toIdx;
+      } else if (fromIdx === state.queuedNextIndex && toIdx < fromIdx) {
+        state.queuedNextIndex = toIdx;
+      } else if (fromIdx < state.queuedNextIndex && toIdx >= state.queuedNextIndex) {
+        state.queuedNextIndex--;
+      }
+    }
+
     renderRightDrawer();
     pushPlayerStatus();
   }
@@ -1045,6 +1073,13 @@
       } else if (idx === state.queueIndex) {
         const nextIdx = Math.min(idx, state.queue.length - 1);
         await loadQueueItemAtIndex(nextIdx, !el.video.paused);
+      }
+    } else if (state.queuedNextIndex >= 0) {
+      if (idx < state.queuedNextIndex) {
+        state.queuedNextIndex--;
+      }
+      if (state.queuedNextIndex >= state.queue.length) {
+        state.queuedNextIndex = -1;
       }
     }
 
@@ -1442,17 +1477,34 @@
       }
       const frag = document.createDocumentFragment();
 
+      const armedIdx =
+        state.playbackSource !== 'queue' &&
+        state.queuedNextIndex >= 0 &&
+        state.queuedNextIndex < state.queue.length
+          ? state.queuedNextIndex
+          : -1;
+
       if (state.playbackSource !== 'queue' && getCurrentItem()) {
         const banner = document.createElement('div');
-        banner.className = 'queue-mode-banner';
+        banner.className = 'queue-mode-banner' + (armedIdx >= 0 ? ' armed' : '');
         const lbl = document.createElement('span');
-        lbl.textContent = state.playbackSource === 'folder' ? 'Playing from folder' : 'Playing single file';
+        if (armedIdx >= 0) {
+          lbl.textContent = `Up next: Queue #${armedIdx + 1}`;
+        } else {
+          lbl.textContent =
+            state.playbackSource === 'folder' ? 'Playing from folder' : 'Playing single file';
+        }
         const btnStartQ = document.createElement('button');
         btnStartQ.type = 'button';
         btnStartQ.className = 'lib-add-btn';
-        btnStartQ.textContent = 'Play Queue';
-        btnStartQ.title = 'Switch playback to item #1 in Queue';
-        btnStartQ.addEventListener('click', () => loadQueueItemAtIndex(0, true));
+        btnStartQ.textContent = armedIdx >= 0 ? 'Play Now' : 'Play Queue';
+        btnStartQ.title =
+          armedIdx >= 0
+            ? `Switch immediately to Queue #${armedIdx + 1}`
+            : 'Switch playback to item #1 in Queue';
+        btnStartQ.addEventListener('click', () =>
+          loadQueueItemAtIndex(armedIdx >= 0 ? armedIdx : 0, true)
+        );
         banner.appendChild(lbl);
         banner.appendChild(btnStartQ);
         frag.appendChild(banner);
@@ -1460,8 +1512,12 @@
 
       state.queue.forEach((item, idx) => {
         const isQueuePlaying = state.playbackSource === 'queue' && idx === state.queueIndex;
+        const isUpNext = !isQueuePlaying && armedIdx === idx;
         const row = document.createElement('div');
-        row.className = 'lib-item queue-row' + (isQueuePlaying ? ' playing' : '');
+        row.className =
+          'lib-item queue-row' +
+          (isQueuePlaying ? ' playing' : '') +
+          (isUpNext ? ' up-next' : '');
         row.title = `${item.name}\n(Click to play from Queue • Drag anywhere to reorder)`;
 
         const grip = document.createElement('span');
@@ -1602,6 +1658,16 @@
   }
 
   function playNext() {
+    if (
+      state.playbackSource !== 'queue' &&
+      state.queuedNextIndex >= 0 &&
+      state.queuedNextIndex < state.queue.length
+    ) {
+      const startIdx = state.queuedNextIndex;
+      state.queuedNextIndex = -1;
+      loadQueueItemAtIndex(startIdx, true);
+      return;
+    }
     if (state.playbackSource === 'queue' && state.queue.length > 0) {
       const nextIdx = (state.queueIndex + 1) % state.queue.length;
       loadQueueItemAtIndex(nextIdx, true);
@@ -1939,42 +2005,46 @@
     const rightOpen = !el.rightDrawer.classList.contains('collapsed');
     const searchFocused = document.activeElement === el.libSearchInput;
 
-    // Auto-collapse open left library sidebar if mouse doesn't hover over it for 5s while playing
+    // Auto-collapse open left library sidebar if mouse doesn't hover over it (5s while playing, 3.2s if edge-opened while paused/idle)
     if (
       leftOpen &&
-      state.playing &&
+      (state.playing || state.leftOpenedByEdge) &&
       !state.hoveringLeftSidebar &&
       !searchFocused &&
       !state.dialogOpen
     ) {
+      const delayMs = state.playing ? 5000 : 3200;
       leftSidebarIdleTimer = setTimeout(() => {
         if (
           !el.librarySidebar.classList.contains('collapsed') &&
-          state.playing &&
+          (state.playing || state.leftOpenedByEdge) &&
           !state.hoveringLeftSidebar &&
           document.activeElement !== el.libSearchInput &&
           !state.dialogOpen
         ) {
           el.librarySidebar.classList.add('collapsed');
           el.btnSidebar.classList.remove('active');
+          state.leftOpenedByEdge = false;
+          state.leftEdgeCooldownUntil = Date.now() + 450;
           finishSidebarAutoCollapse();
         }
-      }, 5000);
+      }, delayMs);
     }
 
-    // Auto-collapse open right queue/bookmarks drawer if mouse doesn't hover over it for 5s while playing
+    // Auto-collapse open right queue/bookmarks drawer if mouse doesn't hover over it (5s while playing, 3.2s if edge-opened while paused/idle)
     if (
       rightOpen &&
-      state.playing &&
+      (state.playing || state.rightOpenedByEdge) &&
       !state.hoveringRightDrawer &&
       !state.draggingQueueItem &&
       !state.externalFileDragActive &&
       !state.dialogOpen
     ) {
+      const delayMs = state.playing ? 5000 : 3200;
       rightDrawerIdleTimer = setTimeout(() => {
         if (
           !el.rightDrawer.classList.contains('collapsed') &&
-          state.playing &&
+          (state.playing || state.rightOpenedByEdge) &&
           !state.hoveringRightDrawer &&
           !state.draggingQueueItem &&
           !state.externalFileDragActive &&
@@ -1982,9 +2052,11 @@
         ) {
           el.rightDrawer.classList.add('collapsed');
           el.btnQueueDrawer.classList.remove('active');
+          state.rightOpenedByEdge = false;
+          state.rightEdgeCooldownUntil = Date.now() + 450;
           finishSidebarAutoCollapse();
         }
-      }, 5000);
+      }, delayMs);
     }
   }
 
@@ -2060,6 +2132,7 @@
       accent: state.accentKey === 'custom' ? state.customAccentHex : state.accentKey,
       playbackSource: state.playbackSource || 'idle',
       queueLength: state.queue.length,
+      queuedNextIndex: state.queuedNextIndex,
       streamEngine: state.streamMode ? 'ffmpeg-live' : 'native'
     });
   }
@@ -2397,6 +2470,8 @@
     el.btnSidebar.addEventListener('click', () => {
       const collapsed = el.librarySidebar.classList.toggle('collapsed');
       el.btnSidebar.classList.toggle('active', !collapsed);
+      state.leftOpenedByEdge = false;
+      if (collapsed) state.leftEdgeCooldownUntil = Date.now() + 450;
       updateChromeSolidity();
     });
 
@@ -2404,6 +2479,8 @@
       if (state.libraryFolder) {
         const collapsed = el.librarySidebar.classList.toggle('collapsed');
         el.btnSidebar.classList.toggle('active', !collapsed);
+        state.leftOpenedByEdge = false;
+        if (collapsed) state.leftEdgeCooldownUntil = Date.now() + 450;
         updateChromeSolidity();
       } else {
         openFolderDialog();
@@ -2467,6 +2544,8 @@
     el.btnQueueDrawer.addEventListener('click', () => {
       const collapsed = el.rightDrawer.classList.toggle('collapsed');
       el.btnQueueDrawer.classList.toggle('active', !collapsed);
+      state.rightOpenedByEdge = false;
+      if (collapsed) state.rightEdgeCooldownUntil = Date.now() + 450;
       updateChromeSolidity();
     });
     document.querySelectorAll('[data-drawer-tab]').forEach((btn) => {
@@ -2481,6 +2560,7 @@
       if (state.drawerTab === 'queue') {
         state.queue = [];
         state.queueIndex = -1;
+        state.queuedNextIndex = -1;
         if (state.playbackSource === 'queue') {
           await resetPlayerToIdle();
         }
@@ -2574,6 +2654,14 @@
         return;
       }
       if (
+        state.playbackSource !== 'queue' &&
+        state.queuedNextIndex >= 0 &&
+        state.queuedNextIndex < state.queue.length
+      ) {
+        const startIdx = state.queuedNextIndex;
+        state.queuedNextIndex = -1;
+        loadQueueItemAtIndex(startIdx, true);
+      } else if (
         state.playbackSource === 'queue' &&
         state.queueIndex >= 0 &&
         state.queueIndex < state.queue.length - 1
@@ -3172,15 +3260,174 @@
       }
     });
 
-    // 15. Keyboard Shortcuts & Fullscreen Mouse Activity
-    window.addEventListener('mousemove', () => {
+    // 15. Keyboard Shortcuts, Edge-Hover Auto-Open & Fullscreen Mouse Activity
+    let leftEdgeHoverTimer = null;
+    let rightEdgeHoverTimer = null;
+    let leftEdgeOpenedAt = 0;
+    let rightEdgeOpenedAt = 0;
+    let lastClientX = -1;
+    let lastClientY = -1;
+    let pointerInWindow = false;
+
+    const clearEdgeHoverTimers = () => {
+      if (leftEdgeHoverTimer) {
+        clearTimeout(leftEdgeHoverTimer);
+        leftEdgeHoverTimer = null;
+      }
+      if (rightEdgeHoverTimer) {
+        clearTimeout(rightEdgeHoverTimer);
+        rightEdgeHoverTimer = null;
+      }
+    };
+
+    const isPointInElement = (elem, x, y) => {
+      if (!pointerInWindow || x < 0 || y < 0) return false;
+      const r = elem.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+
+    const handleEdgeAutoOpen = (e) => {
+      if (
+        isScrubbing ||
+        isDraggingVol ||
+        state.draggingQueueItem ||
+        state.externalFileDragActive ||
+        state.dialogOpen ||
+        el.settingsBackdrop.classList.contains('open')
+      ) {
+        clearEdgeHoverTimers();
+        return;
+      }
+
+      const EDGE_PX = 16;
+      const inVerticalZone = e.clientY > 40 && e.clientY < window.innerHeight - 52;
+
+      // Left edge -> auto-open Folder sidebar
+      const nearLeftEdge =
+        inVerticalZone &&
+        e.clientX >= 0 &&
+        e.clientX <= EDGE_PX &&
+        el.librarySidebar.classList.contains('collapsed') &&
+        Date.now() > state.leftEdgeCooldownUntil;
+
+      if (nearLeftEdge) {
+        if (!leftEdgeHoverTimer) {
+          leftEdgeHoverTimer = setTimeout(() => {
+            leftEdgeHoverTimer = null;
+            if (
+              !pointerInWindow ||
+              !el.librarySidebar.classList.contains('collapsed') ||
+              Date.now() <= state.leftEdgeCooldownUntil ||
+              state.dialogOpen ||
+              el.settingsBackdrop.classList.contains('open')
+            ) {
+              return;
+            }
+            el.librarySidebar.classList.remove('collapsed');
+            el.btnSidebar.classList.add('active');
+            state.leftOpenedByEdge = true;
+            state.hoveringLeftSidebar = true;
+            leftEdgeOpenedAt = Date.now();
+            updateChromeSolidity();
+            resetFullscreenIdle();
+
+            setTimeout(() => {
+              if (!el.librarySidebar.classList.contains('collapsed')) {
+                const inside = isPointInElement(el.librarySidebar, lastClientX, lastClientY);
+                if (state.hoveringLeftSidebar !== inside) {
+                  state.hoveringLeftSidebar = inside;
+                  syncSidebarAutoCollapse();
+                }
+              }
+            }, 260);
+          }, 85);
+        }
+      } else if (leftEdgeHoverTimer) {
+        clearTimeout(leftEdgeHoverTimer);
+        leftEdgeHoverTimer = null;
+      }
+
+      // Right edge -> auto-open Queue / Bookmarks drawer
+      const nearRightEdge =
+        inVerticalZone &&
+        e.clientX >= window.innerWidth - EDGE_PX &&
+        e.clientX <= window.innerWidth &&
+        el.rightDrawer.classList.contains('collapsed') &&
+        Date.now() > state.rightEdgeCooldownUntil;
+
+      if (nearRightEdge) {
+        if (!rightEdgeHoverTimer) {
+          rightEdgeHoverTimer = setTimeout(() => {
+            rightEdgeHoverTimer = null;
+            if (
+              !pointerInWindow ||
+              !el.rightDrawer.classList.contains('collapsed') ||
+              Date.now() <= state.rightEdgeCooldownUntil ||
+              state.dialogOpen ||
+              el.settingsBackdrop.classList.contains('open')
+            ) {
+              return;
+            }
+            el.rightDrawer.classList.remove('collapsed');
+            el.btnQueueDrawer.classList.add('active');
+            state.rightOpenedByEdge = true;
+            state.hoveringRightDrawer = true;
+            rightEdgeOpenedAt = Date.now();
+            updateChromeSolidity();
+            resetFullscreenIdle();
+
+            setTimeout(() => {
+              if (!el.rightDrawer.classList.contains('collapsed')) {
+                const inside = isPointInElement(el.rightDrawer, lastClientX, lastClientY);
+                if (state.hoveringRightDrawer !== inside) {
+                  state.hoveringRightDrawer = inside;
+                  syncSidebarAutoCollapse();
+                }
+              }
+            }, 260);
+          }, 85);
+        }
+      } else if (rightEdgeHoverTimer) {
+        clearTimeout(rightEdgeHoverTimer);
+        rightEdgeHoverTimer = null;
+      }
+    };
+
+    window.addEventListener('mousemove', (e) => {
+      pointerInWindow = true;
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
       if (state.externalFileDragActive) {
         endExternalFileDrag({ restoreCollapsed: true, hoveringQueue: false });
       }
+      if (!el.librarySidebar.classList.contains('collapsed') && Date.now() - leftEdgeOpenedAt > 260) {
+        const insideLeft = el.librarySidebar.contains(e.target);
+        if (state.hoveringLeftSidebar !== insideLeft) {
+          state.hoveringLeftSidebar = insideLeft;
+          syncSidebarAutoCollapse();
+        }
+      }
+      if (!el.rightDrawer.classList.contains('collapsed') && Date.now() - rightEdgeOpenedAt > 260) {
+        const insideRight = el.rightDrawer.contains(e.target);
+        if (state.hoveringRightDrawer !== insideRight) {
+          state.hoveringRightDrawer = insideRight;
+          syncSidebarAutoCollapse();
+        }
+      }
+      handleEdgeAutoOpen(e);
       resetFullscreenIdle();
+    });
+    document.addEventListener('mouseleave', () => {
+      pointerInWindow = false;
+      clearEdgeHoverTimers();
+      state.hoveringLeftSidebar = false;
+      state.hoveringRightDrawer = false;
+      syncSidebarAutoCollapse();
     });
     window.addEventListener('resize', applyVideoAppearance);
     window.addEventListener('blur', () => {
+      pointerInWindow = false;
+      clearEdgeHoverTimers();
       state.hoveringTopBar = false;
       state.hoveringBottomBar = false;
       state.hoveringLeftSidebar = false;

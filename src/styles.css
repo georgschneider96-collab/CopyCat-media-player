@@ -442,6 +442,15 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
 }
+.queue-mode-banner.armed {
+  background: rgba(var(--accent-rgb), 0.1);
+  border-color: rgba(var(--accent-rgb), 0.38);
+  color: var(--accent);
+}
+.queue-row.up-next .lib-item-badge {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  color: var(--accent);
+}
 
 /* Draggable Queue Reordering */
 #app.queue-sorting,
