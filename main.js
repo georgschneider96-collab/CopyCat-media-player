@@ -563,6 +563,19 @@ function startAiControlServer(port = 4500) {
             const item = buildMediaItem(payload.filePath);
             const folder = scanMediaFolder(item.folderPath);
             payload.resolved = { item, folder };
+          } else if (payload.action === 'enqueue') {
+            const rawList = Array.isArray(payload.filePaths)
+              ? payload.filePaths
+              : payload.filePath
+                ? [payload.filePath]
+                : [];
+            const validItems = rawList
+              .filter((p) => p && fs.existsSync(p) && MEDIA_EXTENSIONS.has(path.extname(p).toLowerCase()))
+              .map(buildMediaItem);
+            if (!validItems.length) {
+              return sendJson(404, { ok: false, error: 'No valid media files to enqueue' });
+            }
+            payload.resolvedItems = validItems;
           } else if (payload.action === 'openFolder' && payload.folderPath) {
             if (!fs.existsSync(payload.folderPath)) {
               return sendJson(404, { ok: false, error: `Folder not found: ${payload.folderPath}` });

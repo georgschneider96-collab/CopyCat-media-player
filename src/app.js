@@ -81,7 +81,7 @@
     showHoverThumb: true,
     autoHideFs: true,
     alwaysOnTop: false,
-    autoLoadFolder: true,
+    autoLoadFolder: false,
     autoLoadSub: true,
     rememberState: true,
 
@@ -555,6 +555,7 @@
       showHoverThumb: state.showHoverThumb,
       autoHideFs: state.autoHideFs,
       autoLoadFolder: state.autoLoadFolder,
+      queueBehaviorV2: true,
       autoLoadSub: state.autoLoadSub,
       rememberState: state.rememberState,
       subTimelineBlocks: state.subTimelineBlocks,
@@ -576,7 +577,11 @@
       if (typeof d.volume === 'number') state.volume = d.volume;
       if (typeof d.showHoverThumb === 'boolean') state.showHoverThumb = d.showHoverThumb;
       if (typeof d.autoHideFs === 'boolean') state.autoHideFs = d.autoHideFs;
-      if (typeof d.autoLoadFolder === 'boolean') state.autoLoadFolder = d.autoLoadFolder;
+      if (d.queueBehaviorV2 && typeof d.autoLoadFolder === 'boolean') {
+        state.autoLoadFolder = d.autoLoadFolder;
+      } else {
+        state.autoLoadFolder = false;
+      }
       if (typeof d.autoLoadSub === 'boolean') state.autoLoadSub = d.autoLoadSub;
       if (typeof d.rememberState === 'boolean') state.rememberState = d.rememberState;
       if (typeof d.subTimelineBlocks === 'boolean') state.subTimelineBlocks = d.subTimelineBlocks;
@@ -858,7 +863,91 @@
     pushPlayerStatus();
   }
 
-  function ingestOpenedBundle(bundle, autoPlay = true) {
+  function appendItemsToQueue(items, { playFirstIfIdle = true, toast = true } = {}) {
+    if (!Array.isArray(items) || !items.length) {
+      if (toast) showToast('No supported media files selected');
+      return;
+    }
+
+    const wasEmpty = state.queue.length === 0 || state.queueIndex < 0;
+    state.queue.push(...items);
+
+    renderLibraryList();
+    renderRightDrawer();
+    pushPlayerStatus();
+
+    if (wasEmpty && playFirstIfIdle) {
+      loadMediaItemAtIndex(0, true);
+    } else if (toast) {
+      if (items.length === 1) {
+        showToast(`Queued: ${items[0].title || items[0].name}`);
+      } else {
+        showToast(`Added ${items.length} files to queue`);
+      }
+    }
+  }
+
+  function moveQueueItem(fromIdx, toIdx) {
+    if (
+      fromIdx < 0 ||
+      fromIdx >= state.queue.length ||
+      toIdx < 0 ||
+      toIdx >= state.queue.length ||
+      fromIdx === toIdx
+    ) {
+      return;
+    }
+    const [moved] = state.queue.splice(fromIdx, 1);
+    state.queue.splice(toIdx, 0, moved);
+
+    if (state.queueIndex === fromIdx) {
+      state.queueIndex = toIdx;
+    } else if (fromIdx < state.queueIndex && toIdx >= state.queueIndex) {
+      state.queueIndex--;
+    } else if (fromIdx > state.queueIndex && toIdx <= state.queueIndex) {
+      state.queueIndex++;
+    }
+
+    renderRightDrawer();
+    pushPlayerStatus();
+  }
+
+  async function removeQueueItem(idx) {
+    if (idx < 0 || idx >= state.queue.length) return;
+    const removed = state.queue[idx];
+    state.queue.splice(idx, 1);
+
+    if (state.queue.length === 0) {
+      pauseMedia();
+      await api.stopStream();
+      el.video.removeAttribute('src');
+      el.video.classList.remove('loaded');
+      el.emptyState.classList.remove('hidden');
+      state.queueIndex = -1;
+      state.streamMode = false;
+      state.streamOffset = 0;
+      state.streamDuration = 0;
+      el.mediaTitle.textContent = 'VLCopyCAT';
+      document.title = 'VLCopyCAT';
+      clearSubtitles();
+      updateVisualizerVisibility();
+      updateTransportUI();
+      updateTimelineUI();
+      updateChromeSolidity();
+    } else if (idx < state.queueIndex) {
+      state.queueIndex--;
+    } else if (idx === state.queueIndex) {
+      const nextIdx = Math.min(idx, state.queue.length - 1);
+      await loadMediaItemAtIndex(nextIdx, !el.video.paused);
+    }
+
+    renderLibraryList();
+    renderRightDrawer();
+    pushPlayerStatus();
+    if (removed) showToast(`Removed from queue: ${removed.title || removed.name}`);
+  }
+
+  function ingestOpenedBundle(bundle, autoPlay = true, { append = false } = {}) {
     if (!bundle) return;
     if (bundle.subtitleOnly) {
       loadSubtitleData(bundle.subtitleOnly, true);
@@ -871,18 +960,24 @@
       return;
     }
 
-    if (bundle.folder) {
+    if (bundle.folder && (!append || !state.libraryFolder)) {
       state.libraryFolder = bundle.folder;
       el.libFolderLabel.textContent = bundle.folder.folderName || 'Folder';
       el.folderCrumbText.textContent = bundle.folder.folderName || 'Folder';
     }
 
+    if (append) {
+      appendItemsToQueue(items, { playFirstIfIdle: autoPlay, toast: true });
+      renderSidebarShortcuts();
+      return;
+    }
+
     if (items.length === 1 && state.autoLoadFolder && bundle.folder?.items?.length > 1) {
-      state.queue = bundle.folder.items;
+      state.queue = bundle.folder.items.slice();
       const targetIdx = state.queue.findIndex((x) => x.filePath === items[0].filePath);
       loadMediaItemAtIndex(targetIdx >= 0 ? targetIdx : 0, autoPlay);
     } else {
-      state.queue = items;
+      state.queue = items.slice();
       loadMediaItemAtIndex(0, autoPlay);
     }
 
@@ -994,7 +1089,7 @@
     filteredFiles.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'lib-item' + (item.filePath === currentPath ? ' playing' : '');
-      row.title = item.name;
+      row.title = `${item.name}\n(Click to play • Click + or right-click to add to Queue)`;
 
       const badge = document.createElement('div');
       badge.className = 'lib-item-badge';
@@ -1004,12 +1099,48 @@
       name.className = 'lib-item-name';
       name.textContent = item.title || item.name;
 
+      const actions = document.createElement('div');
+      actions.className = 'row-actions';
+      const btnQueue = document.createElement('button');
+      btnQueue.type = 'button';
+      btnQueue.className = 'row-act-btn';
+      btnQueue.textContent = '+';
+      btnQueue.title = 'Add to Queue';
+      btnQueue.addEventListener('click', (e) => {
+        e.stopPropagation();
+        appendItemsToQueue([item], { playFirstIfIdle: true, toast: true });
+      });
+      actions.appendChild(btnQueue);
+
       row.appendChild(badge);
       row.appendChild(name);
+      row.appendChild(actions);
+
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        appendItemsToQueue([item], { playFirstIfIdle: true, toast: true });
+      });
+
       row.addEventListener('click', () => {
-        state.queue = folderItems.slice();
-        const idx = state.queue.findIndex((x) => x.filePath === item.filePath);
-        loadMediaItemAtIndex(idx >= 0 ? idx : 0, true);
+        if (state.autoLoadFolder) {
+          state.queue = folderItems.slice();
+          const idx = state.queue.findIndex((x) => x.filePath === item.filePath);
+          loadMediaItemAtIndex(idx >= 0 ? idx : 0, true);
+          return;
+        }
+
+        const existingIdx = state.queue.findIndex((x) => x.filePath === item.filePath);
+        if (existingIdx >= 0) {
+          loadMediaItemAtIndex(existingIdx, true);
+        } else if (state.queue.length <= 1) {
+          state.queue = [item];
+          renderRightDrawer();
+          loadMediaItemAtIndex(0, true);
+        } else {
+          state.queue.push(item);
+          renderRightDrawer();
+          loadMediaItemAtIndex(state.queue.length - 1, true);
+        }
       });
 
       frag.appendChild(row);
@@ -1037,13 +1168,14 @@
 
     if (state.drawerTab === 'queue') {
       if (!state.queue.length) {
-        el.drawerBody.innerHTML = `<div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:12px;">Queue is empty. Open or drop media files to begin.</div>`;
+        el.drawerBody.innerHTML = `<div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:12px;">Queue is empty. Click "+ Add Files" or press "+" next to any file in the library.</div>`;
         return;
       }
       const frag = document.createDocumentFragment();
       state.queue.forEach((item, idx) => {
         const row = document.createElement('div');
         row.className = 'lib-item' + (idx === state.queueIndex ? ' playing' : '');
+        row.title = item.name;
 
         const badge = document.createElement('div');
         badge.className = 'lib-item-badge';
@@ -1053,8 +1185,49 @@
         name.className = 'lib-item-name';
         name.textContent = item.title || item.name;
 
+        const actions = document.createElement('div');
+        actions.className = 'row-actions';
+
+        if (idx > 0) {
+          const btnUp = document.createElement('button');
+          btnUp.type = 'button';
+          btnUp.className = 'row-act-btn';
+          btnUp.textContent = '↑';
+          btnUp.title = 'Move Up';
+          btnUp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            moveQueueItem(idx, idx - 1);
+          });
+          actions.appendChild(btnUp);
+        }
+
+        if (idx < state.queue.length - 1) {
+          const btnDown = document.createElement('button');
+          btnDown.type = 'button';
+          btnDown.className = 'row-act-btn';
+          btnDown.textContent = '↓';
+          btnDown.title = 'Move Down';
+          btnDown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            moveQueueItem(idx, idx + 1);
+          });
+          actions.appendChild(btnDown);
+        }
+
+        const btnRm = document.createElement('button');
+        btnRm.type = 'button';
+        btnRm.className = 'row-act-btn danger';
+        btnRm.textContent = '×';
+        btnRm.title = 'Remove from Queue';
+        btnRm.addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeQueueItem(idx);
+        });
+        actions.appendChild(btnRm);
+
         row.appendChild(badge);
         row.appendChild(name);
+        row.appendChild(actions);
         row.addEventListener('click', () => loadMediaItemAtIndex(idx, true));
         frag.appendChild(row);
       });
@@ -1358,14 +1531,26 @@
     syncSidebarAutoCollapse();
     try {
       const bundle = await api.openFiles(multi);
-      if (bundle) ingestOpenedBundle(bundle, true);
+      if (bundle) ingestOpenedBundle(bundle, true, { append: false });
     } finally {
       state.dialogOpen = false;
       syncSidebarAutoCollapse();
     }
   }
 
-  async function openFolderDialog() {
+  async function enqueueFilesDialog() {
+    state.dialogOpen = true;
+    syncSidebarAutoCollapse();
+    try {
+      const bundle = await api.openFiles(true);
+      if (bundle) ingestOpenedBundle(bundle, true, { append: true });
+    } finally {
+      state.dialogOpen = false;
+      syncSidebarAutoCollapse();
+    }
+  }
+
+  async function openFolderDialog({ browseOnly = false } = {}) {
     state.dialogOpen = true;
     syncSidebarAutoCollapse();
     try {
@@ -1379,8 +1564,14 @@
       updateChromeSolidity();
       renderSidebarShortcuts();
       renderLibraryList();
+
+      if (browseOnly && getCurrentItem()) {
+        return;
+      }
+
       if (folder.items?.length) {
         state.queue = folder.items.slice();
+        renderRightDrawer();
         loadMediaItemAtIndex(0, true);
       } else if (!folder.subfolders?.length) {
         showToast('Folder contains no media files');
@@ -1651,13 +1842,18 @@
         break;
       case 'openFile':
         if (cmd.resolved) {
-          ingestOpenedBundle({ items: [cmd.resolved.item], folder: cmd.resolved.folder }, true);
+          ingestOpenedBundle({ items: [cmd.resolved.item], folder: cmd.resolved.folder }, true, { append: false });
           showToast(`AI Bridge: Opened ${cmd.resolved.item.name}`);
+        }
+        break;
+      case 'enqueue':
+        if (cmd.resolvedItems?.length) {
+          appendItemsToQueue(cmd.resolvedItems, { playFirstIfIdle: true, toast: true });
         }
         break;
       case 'openFolder':
         if (cmd.resolvedFolder) {
-          ingestOpenedBundle({ items: cmd.resolvedFolder.items, folder: cmd.resolvedFolder }, true);
+          ingestOpenedBundle({ items: cmd.resolvedFolder.items, folder: cmd.resolvedFolder }, true, { append: false });
           showToast(`AI Bridge: Loaded folder ${cmd.resolvedFolder.folderName}`);
         }
         break;
@@ -1933,7 +2129,7 @@
     el.menuOpenMulti.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
       updateChromeSolidity();
-      openFileDialog(true);
+      enqueueFilesDialog();
     });
     el.menuOpenFolder.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
@@ -1973,10 +2169,10 @@
     });
     el.libSearchInput.addEventListener('focus', syncSidebarAutoCollapse);
     el.libSearchInput.addEventListener('blur', syncSidebarAutoCollapse);
-    el.btnLibOpenFolder.addEventListener('click', openFolderDialog);
-    el.btnLibOpenFiles.addEventListener('click', () => openFileDialog(true));
+    el.btnLibOpenFolder.addEventListener('click', () => openFolderDialog({ browseOnly: true }));
+    el.btnLibOpenFiles.addEventListener('click', enqueueFilesDialog);
     el.btnEmptyOpenFile.addEventListener('click', () => openFileDialog(false));
-    el.btnEmptyOpenFolder.addEventListener('click', openFolderDialog);
+    el.btnEmptyOpenFolder.addEventListener('click', () => openFolderDialog());
 
     // 8. Right Queue & Bookmarks Drawer
     el.btnQueueDrawer.addEventListener('click', () => {
@@ -1990,7 +2186,7 @@
         renderRightDrawer();
       });
     });
-    el.btnDrawerAdd.addEventListener('click', () => openFileDialog(true));
+    el.btnDrawerAdd.addEventListener('click', enqueueFilesDialog);
     el.btnDrawerBookmark.addEventListener('click', addBookmark);
     el.btnDrawerClear.addEventListener('click', async () => {
       if (state.drawerTab === 'queue') {
@@ -2501,8 +2697,12 @@
       const paths = files.map((f) => api.getPathForFile(f)).filter(Boolean);
       if (!paths.length) return;
 
+      const droppedOnQueue =
+        Boolean(e.target?.closest?.('#right-drawer')) ||
+        (!el.rightDrawer.classList.contains('collapsed') && Boolean(getCurrentItem()));
+
       const resolved = await api.resolvePaths(paths);
-      if (resolved) ingestOpenedBundle(resolved, true);
+      if (resolved) ingestOpenedBundle(resolved, true, { append: droppedOnQueue });
       else showToast('Unsupported file format');
     });
 
@@ -2527,7 +2727,7 @@
 
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyO') {
         e.preventDefault();
-        openFileDialog(true);
+        enqueueFilesDialog();
         return;
       }
       if (e.ctrlKey && e.code === 'KeyO') {

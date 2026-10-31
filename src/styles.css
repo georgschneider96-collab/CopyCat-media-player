@@ -387,6 +387,42 @@ html, body {
   white-space: nowrap;
   flex: 1;
 }
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.12s ease;
+}
+.lib-item:hover .row-actions {
+  opacity: 1;
+}
+.row-act-btn {
+  width: 21px;
+  height: 21px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.row-act-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #343434;
+  color: var(--accent);
+}
+.row-act-btn.danger:hover {
+  color: #F43F5E;
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.1);
+}
 
 /* ==================== CENTER VIDEO STAGE ==================== */
 .video-stage {
