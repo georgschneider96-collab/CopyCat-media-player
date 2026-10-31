@@ -32,7 +32,11 @@
 
   // ==================== STATE ====================
   const state = {
-    queue: [],
+    currentItem: null,       // Active media item (from folder, queue, or single file)
+    playbackSource: null,    // 'folder' | 'queue' | 'single' | null
+    folderPlaylist: [],      // Ordered media items for active left-sidebar folder playback
+    folderPlayIndex: -1,
+    queue: [],               // Explicit user-built right-sidebar Queue (only via + / Add Files)
     queueIndex: -1,
     libraryFolder: null,     // { folderPath, parentPath, folderName, subfolders, items }
     libraryFilter: '',
@@ -81,7 +85,7 @@
     showHoverThumb: true,
     autoHideFs: true,
     alwaysOnTop: false,
-    autoLoadFolder: false,
+    autoLoadFolder: true,
     autoLoadSub: true,
     rememberState: true,
 
@@ -507,10 +511,7 @@
   }
 
   function getCurrentItem() {
-    if (state.queueIndex >= 0 && state.queueIndex < state.queue.length) {
-      return state.queue[state.queueIndex];
-    }
-    return null;
+    return state.currentItem || null;
   }
 
   // ==================== THEME & PREFERENCES PERSISTENCE ====================
@@ -556,7 +557,7 @@
       showHoverThumb: state.showHoverThumb,
       autoHideFs: state.autoHideFs,
       autoLoadFolder: state.autoLoadFolder,
-      queueBehaviorV2: true,
+      folderPlaybackV3: true,
       autoLoadSub: state.autoLoadSub,
       rememberState: state.rememberState,
       subTimelineBlocks: state.subTimelineBlocks,
@@ -578,10 +579,10 @@
       if (typeof d.volume === 'number') state.volume = d.volume;
       if (typeof d.showHoverThumb === 'boolean') state.showHoverThumb = d.showHoverThumb;
       if (typeof d.autoHideFs === 'boolean') state.autoHideFs = d.autoHideFs;
-      if (d.queueBehaviorV2 && typeof d.autoLoadFolder === 'boolean') {
+      if (d.folderPlaybackV3 && typeof d.autoLoadFolder === 'boolean') {
         state.autoLoadFolder = d.autoLoadFolder;
       } else {
-        state.autoLoadFolder = false;
+        state.autoLoadFolder = true;
       }
       if (typeof d.autoLoadSub === 'boolean') state.autoLoadSub = d.autoLoadSub;
       if (typeof d.rememberState === 'boolean') state.rememberState = d.rememberState;
@@ -788,11 +789,52 @@
     }
   }
 
-  // ==================== MEDIA LOADING, QUEUE & LIBRARY ====================
-  async function loadMediaItemAtIndex(idx, autoPlay = true) {
-    if (idx < 0 || idx >= state.queue.length) return;
-    state.queueIndex = idx;
-    const item = state.queue[idx];
+  // ==================== MEDIA LOADING, FOLDER PLAYBACK & EXPLICIT QUEUE ====================
+  async function resetPlayerToIdle() {
+    pauseMedia();
+    await api.stopStream();
+    el.video.removeAttribute('src');
+    el.video.classList.remove('loaded');
+    el.emptyState.classList.remove('hidden');
+    state.currentItem = null;
+    state.playbackSource = null;
+    state.queueIndex = -1;
+    state.folderPlayIndex = -1;
+    state.streamMode = false;
+    state.streamOffset = 0;
+    state.streamDuration = 0;
+    el.mediaTitle.textContent = 'VLCopyCAT';
+    document.title = 'VLCopyCAT';
+    clearSubtitles();
+    updateVisualizerVisibility();
+    updateTransportUI();
+    updateTimelineUI();
+    updateChromeSolidity();
+  }
+
+  async function loadMediaItem(
+    item,
+    { autoPlay = true, source = 'single', folderList = null, folderIdx = -1, queueIdx = -1 } = {}
+  ) {
+    if (!item) return;
+
+    state.currentItem = item;
+    state.playbackSource = source;
+
+    if (source === 'folder') {
+      if (Array.isArray(folderList)) {
+        state.folderPlaylist = folderList.slice();
+      }
+      state.folderPlayIndex = folderIdx;
+      state.queueIndex = -1;
+    } else if (source === 'queue') {
+      state.queueIndex = queueIdx;
+      state.folderPlayIndex = -1;
+    } else {
+      state.queueIndex = -1;
+      state.folderPlayIndex = -1;
+      state.folderPlaylist = [];
+    }
 
     await api.stopStream();
     clearSubtitles();
@@ -864,21 +906,42 @@
     pushPlayerStatus();
   }
 
+  async function loadQueueItemAtIndex(idx, autoPlay = true) {
+    if (idx < 0 || idx >= state.queue.length) return;
+    await loadMediaItem(state.queue[idx], {
+      autoPlay,
+      source: 'queue',
+      queueIdx: idx
+    });
+  }
+
+  async function loadFolderItemAtIndex(idx, autoPlay = true, folderListOverride = null) {
+    const list = Array.isArray(folderListOverride) ? folderListOverride : state.folderPlaylist;
+    if (!Array.isArray(list) || idx < 0 || idx >= list.length) return;
+    await loadMediaItem(list[idx], {
+      autoPlay,
+      source: 'folder',
+      folderList: Array.isArray(folderListOverride) ? folderListOverride : null,
+      folderIdx: idx
+    });
+  }
+
   function appendItemsToQueue(items, { playFirstIfIdle = true, toast = true } = {}) {
     if (!Array.isArray(items) || !items.length) {
       if (toast) showToast('No supported media files selected');
       return;
     }
 
-    const wasEmpty = state.queue.length === 0 || state.queueIndex < 0;
+    const isPlayerIdle = !getCurrentItem();
+    const firstNewIdx = state.queue.length;
     state.queue.push(...items);
 
     renderLibraryList();
     renderRightDrawer();
     pushPlayerStatus();
 
-    if (wasEmpty && playFirstIfIdle) {
-      loadMediaItemAtIndex(0, true);
+    if (isPlayerIdle && playFirstIfIdle) {
+      loadQueueItemAtIndex(firstNewIdx, true);
     } else if (toast) {
       if (items.length === 1) {
         showToast(`Queued: ${items[0].title || items[0].name}`);
@@ -901,12 +964,14 @@
     const [moved] = state.queue.splice(fromIdx, 1);
     state.queue.splice(toIdx, 0, moved);
 
-    if (state.queueIndex === fromIdx) {
-      state.queueIndex = toIdx;
-    } else if (fromIdx < state.queueIndex && toIdx >= state.queueIndex) {
-      state.queueIndex--;
-    } else if (fromIdx > state.queueIndex && toIdx <= state.queueIndex) {
-      state.queueIndex++;
+    if (state.playbackSource === 'queue' && state.queueIndex >= 0) {
+      if (state.queueIndex === fromIdx) {
+        state.queueIndex = toIdx;
+      } else if (fromIdx < state.queueIndex && toIdx >= state.queueIndex) {
+        state.queueIndex--;
+      } else if (fromIdx > state.queueIndex && toIdx <= state.queueIndex) {
+        state.queueIndex++;
+      }
     }
 
     renderRightDrawer();
@@ -918,28 +983,15 @@
     const removed = state.queue[idx];
     state.queue.splice(idx, 1);
 
-    if (state.queue.length === 0) {
-      pauseMedia();
-      await api.stopStream();
-      el.video.removeAttribute('src');
-      el.video.classList.remove('loaded');
-      el.emptyState.classList.remove('hidden');
-      state.queueIndex = -1;
-      state.streamMode = false;
-      state.streamOffset = 0;
-      state.streamDuration = 0;
-      el.mediaTitle.textContent = 'VLCopyCAT';
-      document.title = 'VLCopyCAT';
-      clearSubtitles();
-      updateVisualizerVisibility();
-      updateTransportUI();
-      updateTimelineUI();
-      updateChromeSolidity();
-    } else if (idx < state.queueIndex) {
-      state.queueIndex--;
-    } else if (idx === state.queueIndex) {
-      const nextIdx = Math.min(idx, state.queue.length - 1);
-      await loadMediaItemAtIndex(nextIdx, !el.video.paused);
+    if (state.playbackSource === 'queue') {
+      if (state.queue.length === 0) {
+        await resetPlayerToIdle();
+      } else if (idx < state.queueIndex) {
+        state.queueIndex--;
+      } else if (idx === state.queueIndex) {
+        const nextIdx = Math.min(idx, state.queue.length - 1);
+        await loadQueueItemAtIndex(nextIdx, !el.video.paused);
+      }
     }
 
     renderLibraryList();
@@ -973,13 +1025,14 @@
       return;
     }
 
+    // Play without adding to the explicit Queue
     if (items.length === 1 && state.autoLoadFolder && bundle.folder?.items?.length > 1) {
-      state.queue = bundle.folder.items.slice();
-      const targetIdx = state.queue.findIndex((x) => x.filePath === items[0].filePath);
-      loadMediaItemAtIndex(targetIdx >= 0 ? targetIdx : 0, autoPlay);
+      const targetIdx = bundle.folder.items.findIndex((x) => x.filePath === items[0].filePath);
+      loadFolderItemAtIndex(targetIdx >= 0 ? targetIdx : 0, autoPlay, bundle.folder.items);
+    } else if (items.length > 1) {
+      loadFolderItemAtIndex(0, autoPlay, items);
     } else {
-      state.queue = items.slice();
-      loadMediaItemAtIndex(0, autoPlay);
+      loadMediaItem(items[0], { autoPlay, source: 'single' });
     }
 
     renderSidebarShortcuts();
@@ -1087,10 +1140,13 @@
     });
 
     const currentPath = getCurrentItem()?.filePath;
+    const queuedPaths = new Set(state.queue.map((qItem) => qItem.filePath));
+
     filteredFiles.forEach((item) => {
+      const isQueued = queuedPaths.has(item.filePath);
       const row = document.createElement('div');
       row.className = 'lib-item' + (item.filePath === currentPath ? ' playing' : '');
-      row.title = `${item.name}\n(Click to play • Click + or right-click to add to Queue)`;
+      row.title = `${item.name}\n(Click to play folder from here down • Click + or right-click to add to Queue)`;
 
       const badge = document.createElement('div');
       badge.className = 'lib-item-badge';
@@ -1101,12 +1157,12 @@
       name.textContent = item.title || item.name;
 
       const actions = document.createElement('div');
-      actions.className = 'row-actions';
+      actions.className = 'row-actions' + (isQueued ? ' has-queued' : '');
       const btnQueue = document.createElement('button');
       btnQueue.type = 'button';
-      btnQueue.className = 'row-act-btn';
+      btnQueue.className = 'row-act-btn' + (isQueued ? ' is-queued' : '');
       btnQueue.textContent = '+';
-      btnQueue.title = 'Add to Queue';
+      btnQueue.title = isQueued ? 'In Queue (click to add again)' : 'Add to Queue';
       btnQueue.addEventListener('click', (e) => {
         e.stopPropagation();
         appendItemsToQueue([item], { playFirstIfIdle: true, toast: true });
@@ -1123,24 +1179,11 @@
       });
 
       row.addEventListener('click', () => {
-        if (state.autoLoadFolder) {
-          state.queue = folderItems.slice();
-          const idx = state.queue.findIndex((x) => x.filePath === item.filePath);
-          loadMediaItemAtIndex(idx >= 0 ? idx : 0, true);
-          return;
-        }
-
-        const existingIdx = state.queue.findIndex((x) => x.filePath === item.filePath);
-        if (existingIdx >= 0) {
-          loadMediaItemAtIndex(existingIdx, true);
-        } else if (state.queue.length <= 1) {
-          state.queue = [item];
-          renderRightDrawer();
-          loadMediaItemAtIndex(0, true);
+        const idx = folderItems.findIndex((x) => x.filePath === item.filePath);
+        if (idx >= 0) {
+          loadFolderItemAtIndex(idx, true, folderItems);
         } else {
-          state.queue.push(item);
-          renderRightDrawer();
-          loadMediaItemAtIndex(state.queue.length - 1, true);
+          loadMediaItem(item, { autoPlay: true, source: 'single' });
         }
       });
 
@@ -1296,7 +1339,7 @@
         syncSidebarAutoCollapse();
 
         if (!wasStarted) {
-          if (commitDrop) loadMediaItemAtIndex(fromIdx, true);
+          if (commitDrop) loadQueueItemAtIndex(fromIdx, true);
           return;
         }
 
@@ -1340,14 +1383,32 @@
 
     if (state.drawerTab === 'queue') {
       if (!state.queue.length) {
-        el.drawerBody.innerHTML = `<div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:12px;">Queue is empty. Click "+ Add Files" or press "+" next to any file in the library.</div>`;
+        el.drawerBody.innerHTML = `<div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:12px;">Queue is empty. Press <strong>+</strong> next to any file in a folder or click "+ Add Files" below to queue specific videos.</div>`;
         return;
       }
       const frag = document.createDocumentFragment();
+
+      if (state.playbackSource !== 'queue' && getCurrentItem()) {
+        const banner = document.createElement('div');
+        banner.className = 'queue-mode-banner';
+        const lbl = document.createElement('span');
+        lbl.textContent = state.playbackSource === 'folder' ? 'Playing from folder' : 'Playing single file';
+        const btnStartQ = document.createElement('button');
+        btnStartQ.type = 'button';
+        btnStartQ.className = 'lib-add-btn';
+        btnStartQ.textContent = 'Play Queue';
+        btnStartQ.title = 'Switch playback to item #1 in Queue';
+        btnStartQ.addEventListener('click', () => loadQueueItemAtIndex(0, true));
+        banner.appendChild(lbl);
+        banner.appendChild(btnStartQ);
+        frag.appendChild(banner);
+      }
+
       state.queue.forEach((item, idx) => {
+        const isQueuePlaying = state.playbackSource === 'queue' && idx === state.queueIndex;
         const row = document.createElement('div');
-        row.className = 'lib-item queue-row' + (idx === state.queueIndex ? ' playing' : '');
-        row.title = `${item.name}\n(Click to play • Drag anywhere to reorder)`;
+        row.className = 'lib-item queue-row' + (isQueuePlaying ? ' playing' : '');
+        row.title = `${item.name}\n(Click to play from Queue • Drag anywhere to reorder)`;
 
         const grip = document.createElement('span');
         grip.className = 'queue-grip';
@@ -1408,8 +1469,13 @@
           const current = getCurrentItem();
           if (!current || current.filePath !== bm.filePath) {
             const qIdx = state.queue.findIndex((x) => x.filePath === bm.filePath);
-            if (qIdx >= 0) {
-              await loadMediaItemAtIndex(qIdx, true);
+            const fIdx = state.folderPlaylist.findIndex((x) => x.filePath === bm.filePath);
+            if (state.playbackSource === 'queue' && qIdx >= 0) {
+              await loadQueueItemAtIndex(qIdx, true);
+            } else if (fIdx >= 0) {
+              await loadFolderItemAtIndex(fIdx, true);
+            } else if (qIdx >= 0) {
+              await loadQueueItemAtIndex(qIdx, true);
             } else {
               const res = await api.resolvePaths([bm.filePath]);
               if (res) ingestOpenedBundle(res, true);
@@ -1461,19 +1527,30 @@
   }
 
   function playPrev() {
-    if (!state.queue.length) return;
+    if (!getCurrentItem()) return;
     if (getCurrentTime() > 4) {
       seekToSeconds(0, !el.video.paused);
       return;
     }
-    const prevIdx = (state.queueIndex - 1 + state.queue.length) % state.queue.length;
-    loadMediaItemAtIndex(prevIdx, true);
+    if (state.playbackSource === 'queue' && state.queue.length > 0) {
+      const prevIdx = (state.queueIndex - 1 + state.queue.length) % state.queue.length;
+      loadQueueItemAtIndex(prevIdx, true);
+    } else if (state.playbackSource === 'folder' && state.folderPlaylist.length > 0) {
+      const prevIdx = (state.folderPlayIndex - 1 + state.folderPlaylist.length) % state.folderPlaylist.length;
+      loadFolderItemAtIndex(prevIdx, true);
+    } else {
+      seekToSeconds(0, !el.video.paused);
+    }
   }
 
   function playNext() {
-    if (!state.queue.length) return;
-    const nextIdx = (state.queueIndex + 1) % state.queue.length;
-    loadMediaItemAtIndex(nextIdx, true);
+    if (state.playbackSource === 'queue' && state.queue.length > 0) {
+      const nextIdx = (state.queueIndex + 1) % state.queue.length;
+      loadQueueItemAtIndex(nextIdx, true);
+    } else if (state.playbackSource === 'folder' && state.folderPlaylist.length > 0) {
+      const nextIdx = (state.folderPlayIndex + 1) % state.folderPlaylist.length;
+      loadFolderItemAtIndex(nextIdx, true);
+    }
   }
 
   function seekToSeconds(targetSec, shouldPlayAfter = !el.video.paused) {
@@ -1716,14 +1793,12 @@
       renderSidebarShortcuts();
       renderLibraryList();
 
-      if (browseOnly && getCurrentItem()) {
+      if (browseOnly) {
         return;
       }
 
       if (folder.items?.length) {
-        state.queue = folder.items.slice();
-        renderRightDrawer();
-        loadMediaItemAtIndex(0, true);
+        loadFolderItemAtIndex(0, true, folder.items);
       } else if (!folder.subfolders?.length) {
         showToast('Folder contains no media files');
       }
@@ -1923,6 +1998,7 @@
       muted: state.muted,
       speed: state.speed,
       accent: state.accentKey === 'custom' ? state.customAccentHex : state.accentKey,
+      playbackSource: state.playbackSource || 'idle',
       queueLength: state.queue.length,
       streamEngine: state.streamMode ? 'ffmpeg-live' : 'native'
     });
@@ -2343,25 +2419,15 @@
     el.btnDrawerBookmark.addEventListener('click', addBookmark);
     el.btnDrawerClear.addEventListener('click', async () => {
       if (state.drawerTab === 'queue') {
-        pauseMedia();
-        await api.stopStream();
-        el.video.removeAttribute('src');
-        el.video.classList.remove('loaded');
-        el.emptyState.classList.remove('hidden');
         state.queue = [];
         state.queueIndex = -1;
-        state.streamMode = false;
-        state.streamOffset = 0;
-        state.streamDuration = 0;
-        el.mediaTitle.textContent = 'VLCopyCAT';
-        document.title = 'VLCopyCAT';
-        clearSubtitles();
-        updateVisualizerVisibility();
-        updateTransportUI();
-        updateTimelineUI();
-        updateChromeSolidity();
+        if (state.playbackSource === 'queue') {
+          await resetPlayerToIdle();
+        }
+        showToast('Cleared queue');
       } else {
         state.bookmarks = [];
+        showToast('Cleared bookmarks');
       }
       renderLibraryList();
       renderRightDrawer();
@@ -2447,8 +2513,18 @@
         }
         return;
       }
-      if (state.queue.length > 1 && state.queueIndex < state.queue.length - 1) {
-        playNext();
+      if (
+        state.playbackSource === 'queue' &&
+        state.queueIndex >= 0 &&
+        state.queueIndex < state.queue.length - 1
+      ) {
+        loadQueueItemAtIndex(state.queueIndex + 1, true);
+      } else if (
+        state.playbackSource === 'folder' &&
+        state.folderPlayIndex >= 0 &&
+        state.folderPlayIndex < state.folderPlaylist.length - 1
+      ) {
+        loadFolderItemAtIndex(state.folderPlayIndex + 1, true);
       } else {
         updateTransportUI();
         pushPlayerStatus();
@@ -2854,9 +2930,15 @@
       const paths = files.map((f) => api.getPathForFile(f)).filter(Boolean);
       if (!paths.length) return;
 
-      const droppedOnQueue =
-        Boolean(e.target?.closest?.('#right-drawer')) ||
-        (!el.rightDrawer.classList.contains('collapsed') && Boolean(getCurrentItem()));
+      let droppedOnQueue = Boolean(e.target?.closest?.('#right-drawer'));
+      if (!droppedOnQueue && !el.rightDrawer.classList.contains('collapsed')) {
+        const qRect = el.rightDrawer.getBoundingClientRect();
+        droppedOnQueue =
+          e.clientX >= qRect.left &&
+          e.clientX <= qRect.right &&
+          e.clientY >= qRect.top &&
+          e.clientY <= qRect.bottom;
+      }
 
       const resolved = await api.resolvePaths(paths);
       if (resolved) ingestOpenedBundle(resolved, true, { append: droppedOnQueue });
