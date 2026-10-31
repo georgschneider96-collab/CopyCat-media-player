@@ -98,6 +98,7 @@
     hoveringLeftSidebar: false,
     hoveringRightDrawer: false,
     draggingQueueItem: false,
+    externalFileDragActive: false,
     dialogOpen: false,
     lastPauseAt: 0,
 
@@ -926,28 +927,81 @@
     });
   }
 
-  function appendItemsToQueue(items, { playFirstIfIdle = true, toast = true } = {}) {
+  function insertItemsIntoQueueAt(
+    items,
+    insertIndex,
+    { playFirstIfIdle = false, toast = true, isAppend = false } = {}
+  ) {
     if (!Array.isArray(items) || !items.length) {
       if (toast) showToast('No supported media files selected');
       return;
     }
 
     const isPlayerIdle = !getCurrentItem();
-    const firstNewIdx = state.queue.length;
-    state.queue.push(...items);
+    const idx = Math.max(0, Math.min(state.queue.length, insertIndex));
+    state.queue.splice(idx, 0, ...items);
+
+    // Keep currently playing Queue item index synchronized if files were inserted at or above it
+    if (state.playbackSource === 'queue' && state.queueIndex >= idx) {
+      state.queueIndex += items.length;
+    }
 
     renderLibraryList();
     renderRightDrawer();
     pushPlayerStatus();
 
     if (isPlayerIdle && playFirstIfIdle) {
-      loadQueueItemAtIndex(firstNewIdx, true);
+      loadQueueItemAtIndex(idx, true);
     } else if (toast) {
-      if (items.length === 1) {
-        showToast(`Queued: ${items[0].title || items[0].name}`);
+      if (isAppend) {
+        if (items.length === 1) {
+          showToast(`Queued: ${items[0].title || items[0].name}`);
+        } else {
+          showToast(`Added ${items.length} files to queue`);
+        }
+      } else if (items.length === 1) {
+        showToast(`Queued at #${idx + 1}: ${items[0].title || items[0].name}`);
       } else {
-        showToast(`Added ${items.length} files to queue`);
+        showToast(`Added ${items.length} files at #${idx + 1} in queue`);
       }
+    }
+  }
+
+  function appendItemsToQueue(items, { playFirstIfIdle = true, toast = true } = {}) {
+    insertItemsIntoQueueAt(items, state.queue.length, {
+      playFirstIfIdle,
+      toast,
+      isAppend: true
+    });
+  }
+
+  async function replaceQueueWithDroppedBundle(bundle) {
+    if (!bundle) return;
+    if (bundle.subtitleOnly) {
+      loadSubtitleData(bundle.subtitleOnly, true);
+      return;
+    }
+
+    const items = bundle.items || [];
+    if (!items.length) {
+      showToast('No supported media files found');
+      return;
+    }
+
+    if (bundle.folder && !state.libraryFolder) {
+      state.libraryFolder = bundle.folder;
+      el.libFolderLabel.textContent = bundle.folder.folderName || 'Folder';
+      el.folderCrumbText.textContent = bundle.folder.folderName || 'Folder';
+      renderSidebarShortcuts();
+    }
+
+    state.queue = items.slice();
+    await loadQueueItemAtIndex(0, true);
+
+    if (items.length === 1) {
+      showToast(`Playing: ${items[0].title || items[0].name}`);
+    } else {
+      showToast(`Queue refreshed (${items.length} files)`);
     }
   }
 
@@ -1383,7 +1437,7 @@
 
     if (state.drawerTab === 'queue') {
       if (!state.queue.length) {
-        el.drawerBody.innerHTML = `<div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:12px;">Queue is empty. Press <strong>+</strong> next to any file in a folder or click "+ Add Files" below to queue specific videos.</div>`;
+        el.drawerBody.innerHTML = `<div class="queue-empty-msg">Queue is empty.<br/>Drop files here, press <strong>+</strong> next to any file in a folder, or click "+ Add Files".</div>`;
         return;
       }
       const frag = document.createDocumentFragment();
@@ -1519,7 +1573,11 @@
 
   function togglePlay() {
     if (!getCurrentItem()) {
-      openFileDialog(false);
+      if (state.queue.length > 0) {
+        loadQueueItemAtIndex(0, true);
+      } else {
+        openFileDialog(false);
+      }
       return;
     }
     if (el.video.paused) playMedia();
@@ -1910,6 +1968,7 @@
       state.playing &&
       !state.hoveringRightDrawer &&
       !state.draggingQueueItem &&
+      !state.externalFileDragActive &&
       !state.dialogOpen
     ) {
       rightDrawerIdleTimer = setTimeout(() => {
@@ -1918,6 +1977,7 @@
           state.playing &&
           !state.hoveringRightDrawer &&
           !state.draggingQueueItem &&
+          !state.externalFileDragActive &&
           !state.dialogOpen
         ) {
           el.rightDrawer.classList.add('collapsed');
@@ -2902,51 +2962,223 @@
       }
     });
 
-    // 14. Drag & Drop Files / Folders / Subtitles Anywhere
-    let dragDepth = 0;
+    // 14. External File Drag & Drop: Auto-Open Queue Bar + Player Refresh vs. Positional Queue Insert
+    let wasQueueCollapsedBeforeExtDrag = false;
+    let externalDropSlot = 0;
+    let externalLastClientY = 0;
+    let externalOverQueue = false;
+    let externalDropLineEl = null;
+    let externalScrollRaf = null;
+
     const isExternalFileDrag = (ev) => Array.from(ev.dataTransfer?.types || []).includes('Files');
+
+    function isOverRightQueueZone(clientX, clientY, target) {
+      if (target?.closest?.('#right-drawer')) return true;
+      const drawerWidth = el.rightDrawer.offsetWidth || 280;
+      return (
+        clientX >= window.innerWidth - drawerWidth &&
+        clientX <= window.innerWidth &&
+        clientY >= 38 &&
+        clientY <= window.innerHeight - 50
+      );
+    }
+
+    function updateExternalQueueDropIndicator(clientY) {
+      const rows = Array.from(el.drawerBody.querySelectorAll('.queue-row'));
+      if (!rows.length) {
+        externalDropSlot = 0;
+        if (externalDropLineEl) externalDropLineEl.style.opacity = '0';
+        return;
+      }
+
+      let slot = rows.length;
+      for (let i = 0; i < rows.length; i++) {
+        const rRect = rows[i].getBoundingClientRect();
+        const midY = rRect.top + rRect.height / 2;
+        if (clientY < midY) {
+          slot = i;
+          break;
+        }
+      }
+      externalDropSlot = slot;
+
+      let lineTop;
+      if (slot === 0) {
+        lineTop = rows[0].getBoundingClientRect().top - 1;
+      } else if (slot >= rows.length) {
+        lineTop = rows[rows.length - 1].getBoundingClientRect().bottom + 1;
+      } else {
+        const prevBottom = rows[slot - 1].getBoundingClientRect().bottom;
+        const nextTop = rows[slot].getBoundingClientRect().top;
+        lineTop = (prevBottom + nextTop) / 2;
+      }
+
+      if (!externalDropLineEl) {
+        externalDropLineEl = document.createElement('div');
+        externalDropLineEl.className = 'queue-drop-line';
+        document.body.appendChild(externalDropLineEl);
+      }
+
+      const drawerWidth = el.rightDrawer.offsetWidth || 280;
+      const drawerRect = el.drawerBody.getBoundingClientRect();
+      const targetLeft = Math.min(drawerRect.left, window.innerWidth - drawerWidth) + 10;
+      const clampedTop = Math.max(drawerRect.top + 2, Math.min(drawerRect.bottom - 2, lineTop));
+
+      externalDropLineEl.style.left = `${Math.round(targetLeft)}px`;
+      externalDropLineEl.style.width = `${Math.max(40, Math.round(drawerWidth - 20))}px`;
+      externalDropLineEl.style.top = `${Math.round(clampedTop)}px`;
+      externalDropLineEl.style.opacity = '1';
+    }
+
+    function externalAutoScrollTick() {
+      if (!state.externalFileDragActive) {
+        externalScrollRaf = null;
+        return;
+      }
+      if (externalOverQueue) {
+        const drawerRect = el.drawerBody.getBoundingClientRect();
+        const edgeZone = 38;
+        let delta = 0;
+
+        if (externalLastClientY < drawerRect.top + edgeZone) {
+          delta = -Math.ceil(((drawerRect.top + edgeZone - externalLastClientY) / edgeZone) * 9);
+        } else if (externalLastClientY > drawerRect.bottom - edgeZone) {
+          delta = Math.ceil(((externalLastClientY - (drawerRect.bottom - edgeZone)) / edgeZone) * 9);
+        }
+
+        if (delta !== 0) {
+          const prevScroll = el.drawerBody.scrollTop;
+          el.drawerBody.scrollTop += delta;
+          if (el.drawerBody.scrollTop !== prevScroll) {
+            updateExternalQueueDropIndicator(externalLastClientY);
+          }
+        }
+      }
+      externalScrollRaf = requestAnimationFrame(externalAutoScrollTick);
+    }
+
+    function beginExternalFileDrag() {
+      if (state.externalFileDragActive) return;
+      state.externalFileDragActive = true;
+      wasQueueCollapsedBeforeExtDrag = el.rightDrawer.classList.contains('collapsed');
+
+      if (state.drawerTab !== 'queue') {
+        state.drawerTab = 'queue';
+        renderRightDrawer();
+      }
+      if (wasQueueCollapsedBeforeExtDrag) {
+        el.rightDrawer.classList.remove('collapsed');
+        el.btnQueueDrawer.classList.add('active');
+      }
+
+      el.dropOverlay.textContent = 'Drop on player to play & refresh Queue';
+      resetFullscreenIdle();
+      updateChromeSolidity();
+      externalScrollRaf = requestAnimationFrame(externalAutoScrollTick);
+    }
+
+    function endExternalFileDrag({ restoreCollapsed = false, hoveringQueue = false } = {}) {
+      if (!state.externalFileDragActive) return;
+      state.externalFileDragActive = false;
+      externalOverQueue = false;
+
+      if (externalScrollRaf) {
+        cancelAnimationFrame(externalScrollRaf);
+        externalScrollRaf = null;
+      }
+      if (externalDropLineEl) {
+        externalDropLineEl.remove();
+        externalDropLineEl = null;
+      }
+
+      el.rightDrawer.classList.remove('drop-target-active');
+      el.dropOverlay.classList.remove('active');
+
+      if (restoreCollapsed && wasQueueCollapsedBeforeExtDrag) {
+        el.rightDrawer.classList.add('collapsed');
+        el.btnQueueDrawer.classList.remove('active');
+        state.hoveringRightDrawer = false;
+      } else {
+        state.hoveringRightDrawer = hoveringQueue;
+      }
+
+      wasQueueCollapsedBeforeExtDrag = false;
+      updateChromeSolidity();
+      applyVideoAppearance();
+    }
+
     window.addEventListener('dragenter', (e) => {
       if (!isExternalFileDrag(e)) return;
       e.preventDefault();
-      dragDepth++;
-      el.dropOverlay.classList.add('active');
+      beginExternalFileDrag();
     });
+
     window.addEventListener('dragover', (e) => {
       if (!isExternalFileDrag(e)) return;
       e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+
+      beginExternalFileDrag();
+      externalLastClientY = e.clientY;
+      externalOverQueue = isOverRightQueueZone(e.clientX, e.clientY, e.target);
+
+      if (externalOverQueue) {
+        el.dropOverlay.classList.remove('active');
+        el.rightDrawer.classList.add('drop-target-active');
+        updateExternalQueueDropIndicator(e.clientY);
+      } else {
+        el.rightDrawer.classList.remove('drop-target-active');
+        if (externalDropLineEl) externalDropLineEl.style.opacity = '0';
+        el.dropOverlay.classList.add('active');
+      }
     });
+
     window.addEventListener('dragleave', (e) => {
-      if (!isExternalFileDrag(e)) return;
-      e.preventDefault();
-      dragDepth = Math.max(0, dragDepth - 1);
-      if (dragDepth === 0) el.dropOverlay.classList.remove('active');
+      if (!state.externalFileDragActive) return;
+      if (!e.relatedTarget || !document.documentElement.contains(e.relatedTarget)) {
+        endExternalFileDrag({ restoreCollapsed: true, hoveringQueue: false });
+      }
     });
+
     window.addEventListener('drop', async (e) => {
       e.preventDefault();
-      dragDepth = 0;
-      el.dropOverlay.classList.remove('active');
+      const droppedOnQueue = isOverRightQueueZone(e.clientX, e.clientY, e.target);
+      if (droppedOnQueue) updateExternalQueueDropIndicator(e.clientY);
+      const targetSlot = externalDropSlot;
+      endExternalFileDrag({ restoreCollapsed: false, hoveringQueue: droppedOnQueue });
 
       const files = Array.from(e.dataTransfer?.files || []);
       const paths = files.map((f) => api.getPathForFile(f)).filter(Boolean);
       if (!paths.length) return;
 
-      let droppedOnQueue = Boolean(e.target?.closest?.('#right-drawer'));
-      if (!droppedOnQueue && !el.rightDrawer.classList.contains('collapsed')) {
-        const qRect = el.rightDrawer.getBoundingClientRect();
-        droppedOnQueue =
-          e.clientX >= qRect.left &&
-          e.clientX <= qRect.right &&
-          e.clientY >= qRect.top &&
-          e.clientY <= qRect.bottom;
+      const resolved = await api.resolvePaths(paths);
+      if (!resolved) {
+        showToast('Unsupported file format');
+        return;
       }
 
-      const resolved = await api.resolvePaths(paths);
-      if (resolved) ingestOpenedBundle(resolved, true, { append: droppedOnQueue });
-      else showToast('Unsupported file format');
+      if (resolved.subtitleOnly) {
+        loadSubtitleData(resolved.subtitleOnly, true);
+        return;
+      }
+
+      if (droppedOnQueue) {
+        insertItemsIntoQueueAt(resolved.items, targetSlot, {
+          playFirstIfIdle: false,
+          toast: true
+        });
+      } else {
+        await replaceQueueWithDroppedBundle(resolved);
+      }
     });
 
     // 15. Keyboard Shortcuts & Fullscreen Mouse Activity
-    window.addEventListener('mousemove', resetFullscreenIdle);
+    window.addEventListener('mousemove', () => {
+      if (state.externalFileDragActive) {
+        endExternalFileDrag({ restoreCollapsed: true, hoveringQueue: false });
+      }
+      resetFullscreenIdle();
+    });
     window.addEventListener('resize', applyVideoAppearance);
     window.addEventListener('blur', () => {
       state.hoveringTopBar = false;

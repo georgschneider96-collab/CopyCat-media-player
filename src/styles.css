@@ -720,6 +720,25 @@ html, body {
   border-left-color: transparent;
   pointer-events: none;
 }
+.right-drawer.drop-target-active {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.1) 0%, #111111 100%);
+  border-left-color: var(--accent);
+  box-shadow: inset 2px 0 14px rgba(var(--accent-rgb), 0.18);
+}
+.queue-empty-msg {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1.5px dashed transparent;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.right-drawer.drop-target-active .queue-empty-msg {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+}
 .drawer-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-subtle);

@@ -746,20 +746,27 @@ ipcMain.handle('dialog:openSubtitle', async () => {
 ipcMain.handle('fs:resolvePaths', (_evt, paths) => {
   const valid = (paths || []).filter((p) => p && fs.existsSync(p));
   if (!valid.length) return null;
-  const stat0 = fs.statSync(valid[0]);
-  if (stat0.isDirectory()) {
-    const folder = scanMediaFolder(valid[0]);
-    return { items: folder.items, folder };
-  }
-  const mediaPaths = valid.filter((p) => {
+
+  const collectedMediaItems = [];
+  let primaryFolder = null;
+
+  for (const p of valid) {
     try {
-      return fs.statSync(p).isFile() && MEDIA_EXTENSIONS.has(path.extname(p).toLowerCase());
-    } catch {
-      return false;
-    }
-  });
+      const st = fs.statSync(p);
+      if (st.isDirectory()) {
+        const scanned = scanMediaFolder(p);
+        if (!primaryFolder) primaryFolder = scanned;
+        if (scanned.items?.length) {
+          collectedMediaItems.push(...scanned.items);
+        }
+      } else if (st.isFile() && MEDIA_EXTENSIONS.has(path.extname(p).toLowerCase())) {
+        collectedMediaItems.push(buildMediaItem(p));
+      }
+    } catch {}
+  }
+
   const subPaths = valid.filter((p) => SUB_EXTENSIONS.includes(path.extname(p).toLowerCase()));
-  if (!mediaPaths.length && subPaths.length) {
+  if (!collectedMediaItems.length && subPaths.length) {
     return {
       subtitleOnly: {
         filePath: subPaths[0],
@@ -768,10 +775,11 @@ ipcMain.handle('fs:resolvePaths', (_evt, paths) => {
       }
     };
   }
-  if (!mediaPaths.length) return null;
-  const items = mediaPaths.map(buildMediaItem);
-  const folder = scanMediaFolder(items[0].folderPath);
-  return { items, folder };
+  if (!collectedMediaItems.length) return null;
+  if (!primaryFolder) {
+    primaryFolder = scanMediaFolder(collectedMediaItems[0].folderPath);
+  }
+  return { items: collectedMediaItems, folder: primaryFolder };
 });
 
 ipcMain.handle('fs:scanFolder', (_evt, folderPath) => {
