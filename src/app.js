@@ -93,6 +93,7 @@
     hoveringBottomBar: false,
     hoveringLeftSidebar: false,
     hoveringRightDrawer: false,
+    draggingQueueItem: false,
     dialogOpen: false,
     lastPauseAt: 0,
 
@@ -1158,6 +1159,177 @@
     el.libList.appendChild(frag);
   }
 
+  function attachQueueRowDrag(row, item, fromIdx) {
+    row.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('.row-act-btn')) return;
+      e.preventDefault();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const initRect = row.getBoundingClientRect();
+      const offsetY = startY - initRect.top;
+      const rowWidth = initRect.width;
+
+      let started = false;
+      let currentSlot = fromIdx;
+      let lastClientX = startX;
+      let lastClientY = startY;
+      let ghostEl = null;
+      let dropLineEl = null;
+      let scrollRaf = null;
+
+      function updateDropPosition() {
+        if (!started || !dropLineEl || !ghostEl) return;
+
+        const drawerRect = el.drawerBody.getBoundingClientRect();
+        ghostEl.style.left = `${Math.round(drawerRect.left + 8)}px`;
+        ghostEl.style.top = `${Math.round(lastClientY - offsetY)}px`;
+
+        const rows = Array.from(el.drawerBody.querySelectorAll('.queue-row'));
+        if (!rows.length) return;
+
+        let slot = rows.length;
+        for (let i = 0; i < rows.length; i++) {
+          const rRect = rows[i].getBoundingClientRect();
+          const midY = rRect.top + rRect.height / 2;
+          if (lastClientY < midY) {
+            slot = i;
+            break;
+          }
+        }
+        currentSlot = slot;
+
+        let lineTop;
+        if (slot === 0) {
+          lineTop = rows[0].getBoundingClientRect().top - 1;
+        } else if (slot >= rows.length) {
+          lineTop = rows[rows.length - 1].getBoundingClientRect().bottom + 1;
+        } else {
+          const prevBottom = rows[slot - 1].getBoundingClientRect().bottom;
+          const nextTop = rows[slot].getBoundingClientRect().top;
+          lineTop = (prevBottom + nextTop) / 2;
+        }
+
+        const clampedTop = Math.max(drawerRect.top + 2, Math.min(drawerRect.bottom - 2, lineTop));
+        dropLineEl.style.left = `${Math.round(drawerRect.left + 10)}px`;
+        dropLineEl.style.width = `${Math.max(40, Math.round(drawerRect.width - 20))}px`;
+        dropLineEl.style.top = `${Math.round(clampedTop)}px`;
+        dropLineEl.style.opacity = (slot === fromIdx || slot === fromIdx + 1) ? '0.28' : '1';
+      }
+
+      function autoScrollTick() {
+        if (!started) return;
+        const drawerRect = el.drawerBody.getBoundingClientRect();
+        const edgeZone = 38;
+        let delta = 0;
+
+        if (lastClientY < drawerRect.top + edgeZone) {
+          delta = -Math.ceil(((drawerRect.top + edgeZone - lastClientY) / edgeZone) * 9);
+        } else if (lastClientY > drawerRect.bottom - edgeZone) {
+          delta = Math.ceil(((lastClientY - (drawerRect.bottom - edgeZone)) / edgeZone) * 9);
+        }
+
+        if (delta !== 0) {
+          const prevScroll = el.drawerBody.scrollTop;
+          el.drawerBody.scrollTop += delta;
+          if (el.drawerBody.scrollTop !== prevScroll) {
+            updateDropPosition();
+          }
+        }
+        scrollRaf = requestAnimationFrame(autoScrollTick);
+      }
+
+      function onPointerMove(ev) {
+        lastClientX = ev.clientX;
+        lastClientY = ev.clientY;
+
+        if (!started) {
+          if (state.queue.length <= 1) return;
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return;
+
+          started = true;
+          state.draggingQueueItem = true;
+          el.app.classList.add('queue-sorting');
+          row.classList.add('is-dragging');
+          syncSidebarAutoCollapse();
+
+          ghostEl = document.createElement('div');
+          ghostEl.className = 'queue-drag-ghost';
+          ghostEl.style.width = `${Math.round(rowWidth)}px`;
+          const badgeClone = document.createElement('div');
+          badgeClone.className = 'lib-item-badge';
+          badgeClone.style.borderColor = 'rgba(var(--accent-rgb), 0.5)';
+          badgeClone.style.color = 'var(--accent)';
+          badgeClone.textContent = String(fromIdx + 1);
+          const titleClone = document.createElement('div');
+          titleClone.className = 'queue-drag-ghost-name';
+          titleClone.textContent = item.title || item.name;
+          ghostEl.appendChild(badgeClone);
+          ghostEl.appendChild(titleClone);
+          document.body.appendChild(ghostEl);
+
+          dropLineEl = document.createElement('div');
+          dropLineEl.className = 'queue-drop-line';
+          document.body.appendChild(dropLineEl);
+
+          scrollRaf = requestAnimationFrame(autoScrollTick);
+        }
+
+        updateDropPosition();
+      }
+
+      function cleanup(commitDrop) {
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+        window.removeEventListener('keydown', onEscapeCancel);
+        if (scrollRaf) cancelAnimationFrame(scrollRaf);
+
+        if (ghostEl) ghostEl.remove();
+        if (dropLineEl) dropLineEl.remove();
+        row.classList.remove('is-dragging');
+        el.app.classList.remove('queue-sorting');
+
+        const wasStarted = started;
+        started = false;
+        state.draggingQueueItem = false;
+        syncSidebarAutoCollapse();
+
+        if (!wasStarted) {
+          if (commitDrop) loadMediaItemAtIndex(fromIdx, true);
+          return;
+        }
+
+        if (commitDrop) {
+          const toIdx = currentSlot <= fromIdx ? currentSlot : currentSlot - 1;
+          if (toIdx !== fromIdx) {
+            moveQueueItem(fromIdx, toIdx);
+          }
+        }
+      }
+
+      function onPointerUp() {
+        cleanup(true);
+      }
+
+      function onPointerCancel() {
+        cleanup(false);
+      }
+
+      function onEscapeCancel(ke) {
+        if (ke.key === 'Escape' && started) {
+          ke.stopPropagation();
+          cleanup(false);
+        }
+      }
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
+      window.addEventListener('keydown', onEscapeCancel, true);
+    });
+  }
+
   function renderRightDrawer() {
     el.tabDrawerQueue.textContent = `Queue (${state.queue.length})`;
     el.tabDrawerBookmarks.textContent = `Bookmarks (${state.bookmarks.length})`;
@@ -1174,8 +1346,12 @@
       const frag = document.createDocumentFragment();
       state.queue.forEach((item, idx) => {
         const row = document.createElement('div');
-        row.className = 'lib-item' + (idx === state.queueIndex ? ' playing' : '');
-        row.title = item.name;
+        row.className = 'lib-item queue-row' + (idx === state.queueIndex ? ' playing' : '');
+        row.title = `${item.name}\n(Click to play • Drag anywhere to reorder)`;
+
+        const grip = document.createElement('span');
+        grip.className = 'queue-grip';
+        grip.innerHTML = `<svg viewBox="0 0 10 16" width="10" height="14" fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="8" r="1.2"/><circle cx="7" cy="8" r="1.2"/><circle cx="3" cy="13" r="1.2"/><circle cx="7" cy="13" r="1.2"/></svg>`;
 
         const badge = document.createElement('div');
         badge.className = 'lib-item-badge';
@@ -1188,32 +1364,6 @@
         const actions = document.createElement('div');
         actions.className = 'row-actions';
 
-        if (idx > 0) {
-          const btnUp = document.createElement('button');
-          btnUp.type = 'button';
-          btnUp.className = 'row-act-btn';
-          btnUp.textContent = '↑';
-          btnUp.title = 'Move Up';
-          btnUp.addEventListener('click', (e) => {
-            e.stopPropagation();
-            moveQueueItem(idx, idx - 1);
-          });
-          actions.appendChild(btnUp);
-        }
-
-        if (idx < state.queue.length - 1) {
-          const btnDown = document.createElement('button');
-          btnDown.type = 'button';
-          btnDown.className = 'row-act-btn';
-          btnDown.textContent = '↓';
-          btnDown.title = 'Move Down';
-          btnDown.addEventListener('click', (e) => {
-            e.stopPropagation();
-            moveQueueItem(idx, idx + 1);
-          });
-          actions.appendChild(btnDown);
-        }
-
         const btnRm = document.createElement('button');
         btnRm.type = 'button';
         btnRm.className = 'row-act-btn danger';
@@ -1225,10 +1375,11 @@
         });
         actions.appendChild(btnRm);
 
+        row.appendChild(grip);
         row.appendChild(badge);
         row.appendChild(name);
         row.appendChild(actions);
-        row.addEventListener('click', () => loadMediaItemAtIndex(idx, true));
+        attachQueueRowDrag(row, item, idx);
         frag.appendChild(row);
       });
       el.drawerBody.appendChild(frag);
@@ -1683,6 +1834,7 @@
       rightOpen &&
       state.playing &&
       !state.hoveringRightDrawer &&
+      !state.draggingQueueItem &&
       !state.dialogOpen
     ) {
       rightDrawerIdleTimer = setTimeout(() => {
@@ -1690,6 +1842,7 @@
           !el.rightDrawer.classList.contains('collapsed') &&
           state.playing &&
           !state.hoveringRightDrawer &&
+          !state.draggingQueueItem &&
           !state.dialogOpen
         ) {
           el.rightDrawer.classList.add('collapsed');
@@ -2675,15 +2828,19 @@
 
     // 14. Drag & Drop Files / Folders / Subtitles Anywhere
     let dragDepth = 0;
+    const isExternalFileDrag = (ev) => Array.from(ev.dataTransfer?.types || []).includes('Files');
     window.addEventListener('dragenter', (e) => {
+      if (!isExternalFileDrag(e)) return;
       e.preventDefault();
       dragDepth++;
       el.dropOverlay.classList.add('active');
     });
     window.addEventListener('dragover', (e) => {
+      if (!isExternalFileDrag(e)) return;
       e.preventDefault();
     });
     window.addEventListener('dragleave', (e) => {
+      if (!isExternalFileDrag(e)) return;
       e.preventDefault();
       dragDepth = Math.max(0, dragDepth - 1);
       if (dragDepth === 0) el.dropOverlay.classList.remove('active');
