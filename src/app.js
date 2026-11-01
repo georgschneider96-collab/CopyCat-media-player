@@ -754,6 +754,8 @@
     pushPlayerStatus();
   }
 
+  let cachedAccentRgb = '224, 122, 22';
+
   function applyAccent(keyOrHex, persist = true) {
     const root = document.documentElement;
     if (ACCENT_PRESETS[keyOrHex]) {
@@ -763,6 +765,7 @@
       root.style.setProperty('--accent', p.hex);
       root.style.setProperty('--accent-hover', p.hover);
       root.style.setProperty('--accent-rgb', p.rgb);
+      cachedAccentRgb = p.rgb;
       el.inpCustomAccent.value = p.hex;
       el.lblActiveAccent.textContent = `${p.hex} (${p.label})`;
     } else if (typeof keyOrHex === 'string' && keyOrHex.startsWith('#')) {
@@ -771,7 +774,9 @@
       state.customAccentHex = hex;
       root.style.setProperty('--accent', hex);
       root.style.setProperty('--accent-hover', brightenHex(hex, 24));
-      root.style.setProperty('--accent-rgb', hexToRgbString(hex));
+      const rgb = hexToRgbString(hex);
+      root.style.setProperty('--accent-rgb', rgb);
+      cachedAccentRgb = rgb;
       el.inpCustomAccent.value = hex;
       el.lblActiveAccent.textContent = `${hex} (Custom)`;
     }
@@ -784,7 +789,29 @@
     pushPlayerStatus();
   }
 
-  function savePreferences() {
+  let savePrefsTimer = null;
+
+  function savePreferences(immediate = false) {
+    if (immediate) {
+      if (savePrefsTimer) {
+        clearTimeout(savePrefsTimer);
+        savePrefsTimer = null;
+      }
+      savePreferencesSync();
+      return;
+    }
+    if (savePrefsTimer) return;
+    savePrefsTimer = setTimeout(() => {
+      savePrefsTimer = null;
+      savePreferencesSync();
+    }, 250);
+  }
+
+  function savePreferencesSync() {
+    if (savePrefsTimer) {
+      clearTimeout(savePrefsTimer);
+      savePrefsTimer = null;
+    }
     if (!state.rememberState) {
       localStorage.removeItem(STORAGE_KEY);
       return;
@@ -2097,6 +2124,12 @@
       el.tabDrawerHistory.classList.toggle('active', state.drawerTab === 'history');
     }
 
+    if (el.rightDrawer.classList.contains('collapsed')) {
+      state.rightDrawerDirty = true;
+      return;
+    }
+    state.rightDrawerDirty = false;
+
     el.drawerBody.innerHTML = '';
 
     if (state.drawerTab === 'queue') {
@@ -2989,6 +3022,9 @@
     updateChromeSolidity();
   }
 
+  let lastElapsedStr = '';
+  let lastTotalStr = '';
+
   function updateTimelineUI() {
     const cur = getCurrentTime();
     const dur = getDuration();
@@ -3002,18 +3038,29 @@
       }
     }
 
-    el.timeElapsed.textContent = formatTime(cur, forceHrs);
+    const elapsedStr = formatTime(cur, forceHrs);
+    if (elapsedStr !== lastElapsedStr) {
+      el.timeElapsed.textContent = elapsedStr;
+      lastElapsedStr = elapsedStr;
+    }
     if (!Number.isFinite(dur) || dur <= 0) {
-      el.timeTotal.textContent = '00:00';
+      if (lastTotalStr !== '00:00') {
+        el.timeTotal.textContent = '00:00';
+        lastTotalStr = '00:00';
+      }
       el.seekbarFill.style.width = '0%';
       el.seekbarThumb.style.left = '0%';
       if (state.abLoop.active || state.abLoop.a !== null) renderAbLoopUI();
       return;
     }
 
-    el.timeTotal.textContent = state.showRemainingTime
+    const totalStr = state.showRemainingTime
       ? `-${formatTime(Math.max(0, dur - cur), forceHrs)}`
       : formatTime(dur, forceHrs);
+    if (totalStr !== lastTotalStr) {
+      el.timeTotal.textContent = totalStr;
+      lastTotalStr = totalStr;
+    }
 
     const pct = Math.max(0, Math.min(100, (cur / dur) * 100));
     el.seekbarFill.style.width = `${pct}%`;
@@ -3262,6 +3309,8 @@
     }
   }
 
+  let isSkipPromptVisible = false;
+
   function showSkipSegmentPrompt(seg, cur = getCurrentTime(), dur = getDuration()) {
     state.activeSkipSegment = seg;
     if (!el.btnSkipSegment) return;
@@ -3277,11 +3326,16 @@
     } else {
       el.skipSegmentLabel.textContent = `Skip ${seg.label || 'Segment'}`;
     }
-    el.btnSkipSegment.classList.remove('hidden');
+    if (!isSkipPromptVisible) {
+      el.btnSkipSegment.classList.remove('hidden');
+      isSkipPromptVisible = true;
+    }
   }
 
   function hideSkipSegmentPrompt() {
+    if (!isSkipPromptVisible && state.activeSkipSegment === null) return;
     state.activeSkipSegment = null;
+    isSkipPromptVisible = false;
     if (el.btnSkipSegment) {
       el.btnSkipSegment.classList.add('hidden');
     }
@@ -3349,6 +3403,8 @@
     }
   }
 
+  let isUpNextVisible = false;
+
   function showUpNextBanner(nextItem, remainingSec) {
     if (!el.upNextBanner) return;
     const title = nextItem.title || nextItem.name || (nextItem.filePath ? nextItem.filePath.split(/[\\/]/).pop() : 'Next File');
@@ -3359,10 +3415,15 @@
     if (el.upNextProgressFill) {
       el.upNextProgressFill.style.width = `${progressRatio * 100}%`;
     }
-    el.upNextBanner.classList.remove('hidden');
+    if (!isUpNextVisible) {
+      el.upNextBanner.classList.remove('hidden');
+      isUpNextVisible = true;
+    }
   }
 
   function hideUpNextBanner() {
+    if (!isUpNextVisible) return;
+    isUpNextVisible = false;
     if (el.upNextBanner) {
       el.upNextBanner.classList.add('hidden');
     }
@@ -3472,32 +3533,40 @@
     }
   }
 
+  let visCtx = null;
+  let cachedVisWaveData = null;
+  let cachedVisFreqData = null;
+
   function drawVisualizerLoop() {
     const canvas = el.visualizerCanvas;
     if (!canvas.classList.contains('visible') || el.video.paused || document.hidden) {
       visualizerRaf = null;
       return;
     }
-    const rect = canvas.getBoundingClientRect();
-    if (canvas.width !== Math.floor(rect.width) || canvas.height !== Math.floor(rect.height)) {
-      canvas.width = Math.floor(rect.width);
-      canvas.height = Math.floor(rect.height);
+    const cw = canvas.clientWidth || 300;
+    const ch = canvas.clientHeight || 150;
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
     }
 
-    const ctx = canvas.getContext('2d');
+    if (!visCtx) {
+      visCtx = canvas.getContext('2d');
+    }
+    const ctx = visCtx;
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
 
     if (analyserNode) {
-      const accentRgb = getComputedStyle(document.documentElement)
-        .getPropertyValue('--accent-rgb')
-        .trim() || '224, 122, 22';
+      const accentRgb = cachedAccentRgb || '224, 122, 22';
 
       if (state.visualizerStyle === 'waveform') {
         const bufferLength = analyserNode.fftSize;
-        const dataArray = new Uint8Array(bufferLength);
-        analyserNode.getByteTimeDomainData(dataArray);
+        if (!cachedVisWaveData || cachedVisWaveData.length !== bufferLength) {
+          cachedVisWaveData = new Uint8Array(bufferLength);
+        }
+        analyserNode.getByteTimeDomainData(cachedVisWaveData);
 
         ctx.lineWidth = 2.5;
         ctx.strokeStyle = `rgb(${accentRgb})`;
@@ -3508,7 +3577,7 @@
         const sliceWidth = w / bufferLength;
         let x = 0;
         for (let i = 0; i < bufferLength; i++) {
-          const v = dataArray[i] / 128.0;
+          const v = cachedVisWaveData[i] / 128.0;
           const y = (v * h) / 2;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
@@ -3518,11 +3587,13 @@
         ctx.shadowBlur = 0;
       } else if (state.visualizerStyle === 'aura') {
         const bins = analyserNode.frequencyBinCount;
-        const data = new Uint8Array(bins);
-        analyserNode.getByteFrequencyData(data);
+        if (!cachedVisFreqData || cachedVisFreqData.length !== bins) {
+          cachedVisFreqData = new Uint8Array(bins);
+        }
+        analyserNode.getByteFrequencyData(cachedVisFreqData);
 
         let sum = 0;
-        for (let i = 0; i < bins; i++) sum += data[i];
+        for (let i = 0; i < bins; i++) sum += cachedVisFreqData[i];
         const avg = sum / (bins || 1) / 255;
 
         const cx = w / 2;
@@ -3550,8 +3621,10 @@
         ctx.shadowBlur = 0;
       } else {
         const bins = analyserNode.frequencyBinCount;
-        const data = new Uint8Array(bins);
-        analyserNode.getByteFrequencyData(data);
+        if (!cachedVisFreqData || cachedVisFreqData.length !== bins) {
+          cachedVisFreqData = new Uint8Array(bins);
+        }
+        analyserNode.getByteFrequencyData(cachedVisFreqData);
 
         const barCount = 42;
         const gap = 5;
@@ -3561,7 +3634,7 @@
         const centerY = h / 2;
 
         for (let i = 0; i < barCount; i++) {
-          const val = data[i % bins] / 255;
+          const val = cachedVisFreqData[i % bins] / 255;
           const barH = Math.max(4, val * (h * 0.44));
           const x = startX + i * (barW + gap);
           ctx.fillStyle = `rgba(${accentRgb}, ${0.32 + val * 0.65})`;
@@ -4136,7 +4209,9 @@
   }
 
   function resetFullscreenIdle() {
-    el.app.classList.remove('fs-idle');
+    if (el.app.classList.contains('fs-idle')) {
+      el.app.classList.remove('fs-idle');
+    }
     clearTimeout(fsIdleTimer);
     if (state.isFullscreen && state.autoHideFs && state.playing) {
       fsIdleTimer = setTimeout(() => {
@@ -4949,7 +5024,11 @@
       const collapsed = el.rightDrawer.classList.toggle('collapsed');
       el.btnQueueDrawer.classList.toggle('active', !collapsed);
       state.rightOpenedByEdge = false;
-      if (collapsed) state.rightEdgeCooldownUntil = Date.now() + 450;
+      if (collapsed) {
+        state.rightEdgeCooldownUntil = Date.now() + 450;
+      } else if (state.rightDrawerDirty) {
+        renderRightDrawer();
+      }
       updateChromeSolidity();
     });
     document.querySelectorAll('[data-drawer-tab]').forEach((btn) => {
@@ -6056,6 +6135,7 @@
       if (wasQueueCollapsedBeforeExtDrag) {
         el.rightDrawer.classList.remove('collapsed');
         el.btnQueueDrawer.classList.add('active');
+        if (state.rightDrawerDirty) renderRightDrawer();
       }
 
       el.dropOverlay.textContent = 'Drop here to play video';
@@ -6272,6 +6352,7 @@
             state.rightOpenedByEdge = true;
             state.hoveringRightDrawer = true;
             rightEdgeOpenedAt = Date.now();
+            if (state.rightDrawerDirty) renderRightDrawer();
             updateChromeSolidity();
             resetFullscreenIdle();
 
@@ -6292,37 +6373,51 @@
       }
     };
 
+    let mouseMovePending = false;
+    let lastMouseMoveEvt = null;
+
     window.addEventListener('mousemove', (e) => {
       pointerInWindow = true;
       lastClientX = e.clientX;
       lastClientY = e.clientY;
-      if (state.externalFileDragActive) {
-        endExternalFileDrag({ restoreCollapsed: true, hoveringQueue: false });
-      }
-      if (!el.librarySidebar.classList.contains('collapsed') && Date.now() - leftEdgeOpenedAt > 260) {
-        const insideLeft = el.librarySidebar.contains(e.target);
-        if (state.hoveringLeftSidebar !== insideLeft) {
-          state.hoveringLeftSidebar = insideLeft;
-          syncSidebarAutoCollapse();
+      lastMouseMoveEvt = e;
+
+      if (mouseMovePending) return;
+      mouseMovePending = true;
+
+      requestAnimationFrame(() => {
+        mouseMovePending = false;
+        const evt = lastMouseMoveEvt;
+        if (!evt) return;
+
+        if (state.externalFileDragActive) {
+          endExternalFileDrag({ restoreCollapsed: true, hoveringQueue: false });
         }
-      }
-      if (!el.rightDrawer.classList.contains('collapsed') && Date.now() - rightEdgeOpenedAt > 260) {
-        const insideRight = el.rightDrawer.contains(e.target);
-        if (state.hoveringRightDrawer !== insideRight) {
-          state.hoveringRightDrawer = insideRight;
-          syncSidebarAutoCollapse();
+        if (!el.librarySidebar.classList.contains('collapsed') && Date.now() - leftEdgeOpenedAt > 260) {
+          const insideLeft = el.librarySidebar.contains(evt.target);
+          if (state.hoveringLeftSidebar !== insideLeft) {
+            state.hoveringLeftSidebar = insideLeft;
+            syncSidebarAutoCollapse();
+          }
         }
-      }
-      if (el.bottomPopover.classList.contains('open')) {
-        const insidePop = el.bottomPopover.contains(e.target);
-        if (state.hoveringBottomPopover !== insidePop) {
-          state.hoveringBottomPopover = insidePop;
-          syncSidebarAutoCollapse();
+        if (!el.rightDrawer.classList.contains('collapsed') && Date.now() - rightEdgeOpenedAt > 260) {
+          const insideRight = el.rightDrawer.contains(evt.target);
+          if (state.hoveringRightDrawer !== insideRight) {
+            state.hoveringRightDrawer = insideRight;
+            syncSidebarAutoCollapse();
+          }
         }
-      }
-      handleEdgeAutoOpen(e);
-      resetFullscreenIdle();
-    });
+        if (el.bottomPopover.classList.contains('open')) {
+          const insidePop = el.bottomPopover.contains(evt.target);
+          if (state.hoveringBottomPopover !== insidePop) {
+            state.hoveringBottomPopover = insidePop;
+            syncSidebarAutoCollapse();
+          }
+        }
+        handleEdgeAutoOpen(evt);
+        resetFullscreenIdle();
+      });
+    }, { passive: true });
     document.addEventListener('mouseleave', () => {
       pointerInWindow = false;
       clearEdgeHoverTimers();
@@ -6353,6 +6448,7 @@
       state.hoveringBottomPopover = false;
       updateChromeSolidity();
     });
+    window.addEventListener('beforeunload', () => savePreferencesSync());
 
     window.addEventListener('keydown', (e) => {
       resetFullscreenIdle();

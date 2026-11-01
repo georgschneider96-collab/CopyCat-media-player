@@ -225,7 +225,7 @@ function naturalCompare(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 }
 
-function findAutoSubtitle(mediaFilePath) {
+function findAutoSubtitle(mediaFilePath, directoryEntries = null) {
   try {
     const dir = path.dirname(mediaFilePath);
     const base = path.basename(mediaFilePath, path.extname(mediaFilePath));
@@ -235,15 +235,22 @@ function findAutoSubtitle(mediaFilePath) {
         return candidate;
       }
     }
-    const entries = fs.readdirSync(dir);
+    const entries = Array.isArray(directoryEntries) ? directoryEntries : fs.readdirSync(dir);
+    const baseLower = base.toLowerCase() + '.';
     const match = entries.find((f) => {
-      const lower = f.toLowerCase();
+      const name = typeof f === 'string' ? f : f?.name;
+      if (!name) return false;
+      const lower = name.toLowerCase();
       return (
-        lower.startsWith(base.toLowerCase() + '.') &&
+        lower.startsWith(baseLower) &&
         SUB_EXTENSIONS.some((ext) => lower.endsWith(ext))
       );
     });
-    return match ? path.join(dir, match) : null;
+    if (match) {
+      const matchName = typeof match === 'string' ? match : match.name;
+      return path.join(dir, matchName);
+    }
+    return null;
   } catch {
     return null;
   }
@@ -256,12 +263,12 @@ function toMediaUrl(filePath) {
   return `media:///${encodeURI(normalized).replace(/#/g, '%23').replace(/\?/g, '%3F')}`;
 }
 
-function buildMediaItem(filePath) {
+function buildMediaItem(filePath, directoryEntries = null) {
   const resolved = path.resolve(filePath);
   const ext = path.extname(resolved).toLowerCase();
   const isAudio = AUDIO_EXTENSIONS.has(ext);
   const folderPath = path.dirname(resolved);
-  const autoSubPath = findAutoSubtitle(resolved);
+  const autoSubPath = findAutoSubtitle(resolved, directoryEntries);
   const needsStream = detectNeedsStream(resolved, ext);
   return {
     filePath: resolved,
@@ -294,7 +301,7 @@ function scanMediaFolder(folderPath) {
       .filter((d) => d.isFile() && MEDIA_EXTENSIONS.has(path.extname(d.name).toLowerCase()))
       .map((d) => d.name)
       .sort(naturalCompare)
-      .map((name) => buildMediaItem(path.join(resolvedDir, name)));
+      .map((name) => buildMediaItem(path.join(resolvedDir, name), entries));
     const parentDir = path.dirname(resolvedDir);
     return {
       folderPath: resolvedDir,
@@ -584,6 +591,7 @@ function handleFfmpegStreamRequest(urlObj, req, res) {
     '-ac', '2',
     '-sn',
     '-dn',
+    '-avoid_negative_ts', 'make_zero',
     '-threads', '0',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
@@ -653,6 +661,9 @@ function handleFfmpegThumbRequest(urlObj, req, res) {
     '-loglevel', 'error',
     '-ss', timeSec.toFixed(2),
     '-i', filePath,
+    '-an',
+    '-sn',
+    '-dn',
     '-frames:v', '1',
     '-vf', 'scale=320:-2',
     '-q:v', '5',
