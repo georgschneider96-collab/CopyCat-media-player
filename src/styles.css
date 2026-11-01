@@ -795,6 +795,8 @@ html, body {
   z-index: 18;
   font-size: 22px;
   font-weight: 500;
+  contain: layout style;
+  will-change: transform;
   line-height: 1.38;
   color: #FFFFFF;
   padding: 5px 14px;
@@ -1062,6 +1064,8 @@ html, body {
   width: 0%;
   background: rgba(var(--accent-rgb), 0.30);
   transition: width 0.04s linear;
+  will-change: width;
+  contain: layout style;
 }
 
 /* Subtitle dialogue blocks rendered inside seekbar (08_subtitles.png) */
@@ -1092,6 +1096,8 @@ html, body {
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45);
   pointer-events: none;
   transition: transform 0.1s ease, height 0.1s ease;
+  will-change: left, transform;
+  contain: layout style;
 }
 .seekbar-track:hover .seekbar-thumb {
   transform: translateX(-50%) scaleY(1.1);
@@ -1113,6 +1119,8 @@ html, body {
   align-items: center;
   gap: 5px;
   pointer-events: none;
+  will-change: left, transform;
+  contain: layout style;
   z-index: 60;
 }
 .seek-hover-card.visible {

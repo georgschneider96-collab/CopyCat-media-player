@@ -533,6 +533,8 @@
     eqNodes[2].gain.value = gains[2];
   }
 
+  let lastMutedIconState = null;
+
   function applyVolumeToEngine() {
     const clamped = Math.max(0, Math.min(200, Math.round(state.volume)));
     state.volume = clamped;
@@ -549,9 +551,13 @@
     // Update cone slider UI (0..200% maps to 0..100% width; 100% sits at 50% tick)
     const fillPct = state.muted ? 0 : clamped / 2;
     el.volConeFill.style.width = `${fillPct}%`;
-    el.volConeSlider.classList.toggle('muted', state.muted || clamped === 0);
+    const isMuted = state.muted || clamped === 0;
+    el.volConeSlider.classList.toggle('muted', isMuted);
     el.volConeSlider.title = `Cone Volume Boost: ${state.muted ? 'Muted' : clamped + '%'} (Up to 200%)`;
-    el.btnMute.innerHTML = state.muted || clamped === 0 ? ICONS.speakerMute : ICONS.speaker;
+    if (isMuted !== lastMutedIconState) {
+      el.btnMute.innerHTML = isMuted ? ICONS.speakerMute : ICONS.speaker;
+      lastMutedIconState = isMuted;
+    }
 
     el.rngVolumePop.value = String(clamped);
     el.lblVolumePop.textContent = state.muted ? `Muted (${clamped}%)` : `${clamped}%`;
@@ -1119,10 +1125,12 @@
         cues.push({ start, end, text: textLines.join('\n') });
       }
     }
+    cues.sort((a, b) => a.start - b.start);
     return cues;
   }
 
   function loadSubtitleData(subObj, notify = true) {
+    lastActiveSubCue = null;
     if (!subObj || !subObj.content) {
       clearSubtitles();
       return;
@@ -1141,6 +1149,7 @@
   }
 
   function clearSubtitles() {
+    lastActiveSubCue = null;
     state.subCues = [];
     state.subTrackName = null;
     state.subOffsetMs = 0;
@@ -1179,18 +1188,52 @@
     el.seekbarSubBlocks.appendChild(frag);
   }
 
+  let lastActiveSubCue = null;
+
+  function findSubtitleCueAtTime(cues, t) {
+    if (!cues || !cues.length) return null;
+    let low = 0;
+    let high = cues.length - 1;
+    let idx = -1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      if (cues[mid].start <= t) {
+        idx = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    if (idx !== -1 && t <= cues[idx].end) {
+      return cues[idx];
+    }
+    if (idx > 0 && t <= cues[idx - 1].end && t >= cues[idx - 1].start) {
+      return cues[idx - 1];
+    }
+    return null;
+  }
+
   function updateActiveSubtitleCue() {
     if (!state.subEnabled || !state.subCues.length || !getCurrentItem()) {
-      el.subtitleOverlay.classList.remove('visible');
+      if (lastActiveSubCue !== null) {
+        lastActiveSubCue = null;
+        el.subtitleOverlay.classList.remove('visible');
+        el.subtitleOverlay.textContent = '';
+      }
       return;
     }
     const t = getCurrentTime() - state.subOffsetMs / 1000;
-    const active = state.subCues.find((c) => t >= c.start && t <= c.end);
+    const active = findSubtitleCueAtTime(state.subCues, t);
+    if (active === lastActiveSubCue) {
+      return;
+    }
+    lastActiveSubCue = active;
     if (active) {
       el.subtitleOverlay.textContent = active.text;
       el.subtitleOverlay.classList.add('visible');
     } else {
       el.subtitleOverlay.classList.remove('visible');
+      el.subtitleOverlay.textContent = '';
     }
   }
 
@@ -2420,7 +2463,15 @@
     }
   }
 
+  let streamSeekDebounceTimer = null;
+
   function seekToSeconds(targetSec, shouldPlayAfter = !el.video.paused) {
+    if (streamSeekDebounceTimer) {
+      clearTimeout(streamSeekDebounceTimer);
+      streamSeekDebounceTimer = null;
+    }
+    state.scrubPreviewTime = null;
+    lastActiveSubCue = null;
     const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
     const clamped = Math.max(0, Math.min(dur, targetSec));
@@ -2461,9 +2512,24 @@
   function seekByDelta(deltaSec) {
     const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
-    const target = Math.max(0, Math.min(dur, getCurrentTime() + deltaSec));
-    seekToSeconds(target, !el.video.paused);
+    const cur = getCurrentTime();
+    const target = Math.max(0, Math.min(dur, cur + deltaSec));
     showToast(`${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatTime(target)})`);
+
+    if (state.streamMode) {
+      state.scrubPreviewTime = target;
+      updateTimelineUI();
+      const wasPlaying = !el.video.paused;
+      if (streamSeekDebounceTimer) clearTimeout(streamSeekDebounceTimer);
+      streamSeekDebounceTimer = setTimeout(() => {
+        streamSeekDebounceTimer = null;
+        const finalTarget = state.scrubPreviewTime !== null ? state.scrubPreviewTime : target;
+        state.scrubPreviewTime = null;
+        seekToSeconds(finalTarget, wasPlaying);
+      }, 110);
+    } else {
+      seekToSeconds(target, !el.video.paused);
+    }
   }
 
   function setSpeed(nextSpeed, toast = true) {
@@ -2941,7 +3007,7 @@
       el.timeTotal.textContent = '00:00';
       el.seekbarFill.style.width = '0%';
       el.seekbarThumb.style.left = '0%';
-      renderAbLoopUI();
+      if (state.abLoop.active || state.abLoop.a !== null) renderAbLoopUI();
       return;
     }
 
@@ -2952,7 +3018,7 @@
     const pct = Math.max(0, Math.min(100, (cur / dur) * 100));
     el.seekbarFill.style.width = `${pct}%`;
     el.seekbarThumb.style.left = `${pct}%`;
-    renderAbLoopUI();
+    if (state.abLoop.active || state.abLoop.a !== null) renderAbLoopUI();
     updateActiveSubtitleCue();
     checkSegmentSkipping(cur, dur);
     checkUpNextCountdown(cur, dur);

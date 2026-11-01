@@ -595,6 +595,10 @@ function handleFfmpegStreamRequest(urlObj, req, res) {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'no-store'
   });
+  try {
+    req.socket?.setNoDelay?.(true);
+    res.socket?.setNoDelay?.(true);
+  } catch {}
 
   const proc = spawn(FFMPEG_PATH, args, { windowsHide: true });
   activeStreamProc = proc;
@@ -912,13 +916,15 @@ ipcMain.handle('win:exitFullscreenToDrag', (_evt, data = {}) => {
   broadcastWindowState();
   return { x: targetX, y: targetY, width, height };
 });
-ipcMain.handle('win:dragMove', (_evt, coords = {}) => {
+function applyDragMove(coords = {}) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   const { x, y } = coords;
   if (typeof x === 'number' && typeof y === 'number') {
     mainWindow.setPosition(Math.round(x), Math.round(y));
   }
-});
+}
+ipcMain.on('win:dragMove', (_evt, coords) => applyDragMove(coords));
+ipcMain.handle('win:dragMove', (_evt, coords) => applyDragMove(coords));
 ipcMain.handle('win:toggleAlwaysOnTop', () => {
   return applyAlwaysOnTop(!userAlwaysOnTop);
 });
