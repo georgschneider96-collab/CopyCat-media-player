@@ -2,7 +2,8 @@
 param(
     [string]$FilePath = "",
     [double]$Seek = -1,
-    [switch]$Close
+    [switch]$Close,
+    [switch]$Restore
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -41,13 +42,17 @@ if ($Close) {
 }
 
 function Dispatch-Actions {
-    if ($FilePath) {
+    if ($Restore) {
+        $restorePayload = @{ action = "restoreSession" }
+        if ($Seek -ge 0) { $restorePayload.seek = [double]$Seek }
+        Send-AiCommand $restorePayload | Out-Null
+    } elseif ($FilePath) {
         $resolved = (Resolve-Path $FilePath).Path
         $openPayload = @{ action = "openFile"; filePath = $resolved }
         if ($Seek -ge 0) { $openPayload.seek = [double]$Seek }
         Send-AiCommand $openPayload | Out-Null
     }
-    if ($Seek -ge 0) {
+    if (-not $Restore -and $Seek -ge 0) {
         Send-AiCommand @{ action = "seek"; value = [double]$Seek } | Out-Null
     }
     Send-AiCommand @{ action = "bringToFront" } | Out-Null

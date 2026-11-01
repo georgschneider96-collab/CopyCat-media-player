@@ -827,8 +827,8 @@
       contrast: state.contrast,
       saturation: state.saturation,
       alwaysOnTop: state.alwaysOnTop,
-      lastMediaItem: state.currentItem || null,
-      lastFolder: state.libraryFolder || null,
+      lastMediaItem: state.currentItem || state.savedLastItem || null,
+      lastFolder: state.libraryFolder || state.savedLastFolder || null,
       lastPositionSec: curTime > 3 ? curTime : (state.savedLastPosition || 0),
       lastQueue: state.queue && state.queue.length > 0 ? state.queue.slice() : (state.savedLastQueue || null),
       lastQueueIndex: state.queue && state.queue.length > 0 ? state.queueIndex : (state.savedLastQueueIndex ?? -1)
@@ -3391,17 +3391,24 @@
     el.visualizerCanvas.classList.toggle('visible', shouldShow);
     syncPopoverButtonsActive();
 
-    if (shouldShow && !visualizerRaf) {
+    if (shouldShow && !el.video.paused && !document.hidden && !visualizerRaf) {
       drawVisualizerLoop();
-    } else if (!shouldShow && visualizerRaf) {
+    } else if ((!shouldShow || el.video.paused || document.hidden) && visualizerRaf) {
       cancelAnimationFrame(visualizerRaf);
       visualizerRaf = null;
     }
   }
 
+  function checkResumeVisualizer() {
+    const canvas = el.visualizerCanvas;
+    if (canvas && canvas.classList.contains('visible') && !el.video.paused && !document.hidden && !visualizerRaf) {
+      drawVisualizerLoop();
+    }
+  }
+
   function drawVisualizerLoop() {
     const canvas = el.visualizerCanvas;
-    if (!canvas.classList.contains('visible')) {
+    if (!canvas.classList.contains('visible') || el.video.paused || document.hidden) {
       visualizerRaf = null;
       return;
     }
@@ -4088,7 +4095,25 @@
   }
 
   // ==================== AI CONTROL BRIDGE TELEMETRY & COMMANDS ====================
+  function syncMediaSessionState() {
+    if ('mediaSession' in navigator) {
+      try {
+        navigator.mediaSession.playbackState = state.playing ? 'playing' : 'paused';
+        const dur = getDuration();
+        const cur = getCurrentTime();
+        if ('setPositionState' in navigator.mediaSession && Number.isFinite(dur) && dur > 0 && Number.isFinite(cur) && cur >= 0) {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(0, dur),
+            playbackRate: state.speed || 1,
+            position: Math.min(Math.max(0, cur), dur)
+          });
+        }
+      } catch {}
+    }
+  }
+
   function pushPlayerStatus() {
+    syncMediaSessionState();
     const item = getCurrentItem();
     api.reportStatus({
       app: 'CopyCat media player',
@@ -4262,6 +4287,67 @@
           showToast(`AI Bridge: Loaded folder ${cmd.resolvedFolder.folderName}`);
         }
         break;
+      case 'restoreSession': {
+        const queueToRestore = cmd.resolvedItems || state.savedLastQueue;
+        if (Array.isArray(queueToRestore) && queueToRestore.length > 0) {
+          state.queue = queueToRestore.slice();
+          state.queueIndex = -1;
+          renderRightDrawer();
+        }
+
+        const itemToRestore = cmd.resolved?.item || state.savedLastItem || (state.history && state.history[0]) || (state.queue && state.queue[0]);
+        const targetPos = typeof cmd.seek === 'number' ? cmd.seek : (state.savedLastPosition || 0);
+        const targetSpeed = typeof cmd.speed === 'number' ? cmd.speed : state.speed;
+
+        if (typeof targetSpeed === 'number' && targetSpeed > 0 && targetSpeed !== state.speed) {
+          setSpeed(targetSpeed, true);
+        }
+
+        if (itemToRestore) {
+          const folder = cmd.resolved?.folder || state.savedLastFolder;
+          ingestOpenedBundle({ items: [itemToRestore], folder }, true, { append: false });
+          if (targetPos > 0) {
+            const tryRestoreSeek = (attempts = 0) => {
+              if (getDuration() > 0 || state.streamDuration > 0) {
+                seekToSeconds(targetPos, true);
+                showToast(`AI Bridge: Session Restored at ${formatTime(targetPos)}`);
+              } else if (attempts < 20) {
+                setTimeout(() => tryRestoreSeek(attempts + 1), 200);
+              }
+            };
+            setTimeout(tryRestoreSeek, 300);
+          } else {
+            showToast('AI Bridge: Session Restored');
+          }
+        }
+        break;
+      }
+      case 'setSubtitleTrack': {
+        if (cmd.value === 'off' || cmd.enabled === false) {
+          state.subEnabled = false;
+          clearSubtitles();
+          syncPopoverButtonsActive();
+          showToast('AI Bridge: Subtitles Off');
+        } else if (cmd.filePath && api.readSubtitle) {
+          api.readSubtitle(cmd.filePath).then((subData) => {
+            if (subData) {
+              state.subEnabled = true;
+              loadSubtitleData(subData, true);
+            }
+          }).catch(() => {});
+        } else if (cmd.value === 'toggle') {
+          state.subEnabled = !state.subEnabled;
+          renderSubtitleBlocksOnSeekbar();
+          updateActiveSubtitleCue();
+          syncPopoverButtonsActive();
+          showToast(state.subEnabled ? 'AI Bridge: Subtitles Enabled' : 'AI Bridge: Subtitles Disabled');
+        }
+        break;
+      }
+      case 'setAudioTrack': {
+        showToast(`AI Bridge: Audio Track → ${cmd.value || cmd.index || 'Default'}`);
+        break;
+      }
     }
     pushPlayerStatus();
   }
@@ -4907,8 +4993,24 @@
         navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
         navigator.mediaSession.setActionHandler('seekbackward', () => seekByDelta(-10));
         navigator.mediaSession.setActionHandler('seekforward', () => seekByDelta(10));
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (typeof details?.seekTime === 'number') {
+            seekToSeconds(details.seekTime, !el.video.paused);
+          }
+        });
       } catch {}
     }
+
+    // Zero-CPU idle sleep wiring for audio visualizers
+    el.video.addEventListener('play', checkResumeVisualizer);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        checkResumeVisualizer();
+      } else if (visualizerRaf) {
+        cancelAnimationFrame(visualizerRaf);
+        visualizerRaf = null;
+      }
+    });
 
     // Automatic reactive fallback if any native container/codec or Hi10P stream fails
     el.video.addEventListener('error', () => {

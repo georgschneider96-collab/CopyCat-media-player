@@ -2,6 +2,12 @@ const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, clipboard, na
 const path = require('path');
 const fs = require('fs');
 
+// High-Performance Hardware Acceleration & Zero-Copy Compositing
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'media',
@@ -396,6 +402,51 @@ function bringToFront(win = mainWindow) {
   } catch {}
 }
 
+let currentThumbarPlaying = null;
+
+function updateThumbarButtons(isPlaying = false) {
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+  const normalizedPlaying = Boolean(isPlaying);
+  if (currentThumbarPlaying === normalizedPlaying) return;
+  currentThumbarPlaying = normalizedPlaying;
+
+  const prevIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'thumbar-prev.png'));
+  const playIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', normalizedPlaying ? 'thumbar-pause.png' : 'thumbar-play.png'));
+  const nextIcon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'thumbar-next.png'));
+
+  try {
+    mainWindow.setThumbarButtons([
+      {
+        tooltip: 'Previous Track',
+        icon: prevIcon,
+        click() {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ai:command', { action: 'prev' });
+          }
+        }
+      },
+      {
+        tooltip: normalizedPlaying ? 'Pause' : 'Play',
+        icon: playIcon,
+        click() {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ai:command', { action: 'togglePlay' });
+          }
+        }
+      },
+      {
+        tooltip: 'Next Track',
+        icon: nextIcon,
+        click() {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('ai:command', { action: 'next' });
+          }
+        }
+      }
+    ]);
+  } catch {}
+}
+
 function resolveCliMediaFile(argv) {
   if (!Array.isArray(argv)) return null;
   const match = argv.slice(1).find((arg) => {
@@ -461,6 +512,7 @@ function createMainWindow() {
     clearTimeout(forceShowTimer);
     bringToFront(mainWindow);
     broadcastWindowState();
+    updateThumbarButtons(false);
     if (pendingInitialMedia) {
       mainWindow.webContents.send('media:initial', pendingInitialMedia);
     }
@@ -520,6 +572,7 @@ function handleFfmpegStreamRequest(urlObj, req, res) {
     args.push(
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
       '-crf', '20',
       '-pix_fmt', 'yuv420p'
     );
@@ -531,6 +584,7 @@ function handleFfmpegStreamRequest(urlObj, req, res) {
     '-ac', '2',
     '-sn',
     '-dn',
+    '-threads', '0',
     '-f', 'mp4',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     'pipe:1'
@@ -557,6 +611,10 @@ function handleFfmpegStreamRequest(urlObj, req, res) {
   proc.on('error', cleanup);
 }
 
+// In-Memory LRU Thumbnail Cache for 0ms Timeline Scrubbing Previews
+const thumbCache = new Map();
+const MAX_THUMB_CACHE = 120;
+
 function handleFfmpegThumbRequest(urlObj, req, res) {
   const filePath = urlObj.searchParams.get('path') || '';
   const timeSec = Math.max(0, Number(urlObj.searchParams.get('t')) || 0);
@@ -564,6 +622,23 @@ function handleFfmpegThumbRequest(urlObj, req, res) {
   if (!FFMPEG_PATH || !filePath || !fs.existsSync(filePath)) {
     res.writeHead(404);
     res.end();
+    return;
+  }
+
+  const cacheKey = `${filePath}:${timeSec.toFixed(1)}`;
+  if (thumbCache.has(cacheKey)) {
+    const cachedBuf = thumbCache.get(cacheKey);
+    // Touch entry for LRU freshness
+    thumbCache.delete(cacheKey);
+    thumbCache.set(cacheKey, cachedBuf);
+
+    res.writeHead(200, {
+      'Content-Type': 'image/jpeg',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'max-age=180',
+      'Content-Length': cachedBuf.length
+    });
+    res.end(cachedBuf);
     return;
   }
 
@@ -577,6 +652,7 @@ function handleFfmpegThumbRequest(urlObj, req, res) {
     '-frames:v', '1',
     '-vf', 'scale=320:-2',
     '-q:v', '5',
+    '-threads', '2',
     '-f', 'image2pipe',
     '-vcodec', 'mjpeg',
     'pipe:1'
@@ -585,11 +661,14 @@ function handleFfmpegThumbRequest(urlObj, req, res) {
   res.writeHead(200, {
     'Content-Type': 'image/jpeg',
     'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'max-age=30'
+    'Cache-Control': 'max-age=180'
   });
 
   const proc = spawn(FFMPEG_PATH, args, { windowsHide: true });
   activeThumbProc = proc;
+
+  const chunks = [];
+  proc.stdout.on('data', (c) => chunks.push(c));
   proc.stdout.pipe(res);
 
   const cleanup = () => {
@@ -600,6 +679,16 @@ function handleFfmpegThumbRequest(urlObj, req, res) {
   req.on('close', cleanup);
   proc.on('close', () => {
     if (activeThumbProc === proc) activeThumbProc = null;
+    if (chunks.length > 0) {
+      const fullBuf = Buffer.concat(chunks);
+      if (fullBuf.length > 80) {
+        if (thumbCache.size >= MAX_THUMB_CACHE) {
+          const oldestKey = thumbCache.keys().next().value;
+          thumbCache.delete(oldestKey);
+        }
+        thumbCache.set(cacheKey, fullBuf);
+      }
+    }
   });
   proc.on('error', cleanup);
 }
@@ -728,7 +817,17 @@ function startAiControlServer(port = 4500) {
             if (payload.action === 'togglePip') {
               mainWindow.webContents.executeJavaScript('document.getElementById("btn-pip")?.click()', true).catch(() => {});
             } else {
-              mainWindow.webContents.send('ai:command', payload);
+              if (mainWindow.webContents.isLoading()) {
+                mainWindow.webContents.once('did-finish-load', () => {
+                  setTimeout(() => {
+                    if (mainWindow && !mainWindow.isDestroyed()) {
+                      mainWindow.webContents.send('ai:command', payload);
+                    }
+                  }, 250);
+                });
+              } else {
+                mainWindow.webContents.send('ai:command', payload);
+              }
             }
           }
           return sendJson(200, { ok: true, dispatched: payload.action });
@@ -1161,6 +1260,9 @@ ipcMain.handle('shell:openExternal', (_evt, targetUrl) => {
 
 ipcMain.on('player:statusUpdate', (_evt, status) => {
   latestPlayerStatus = { ...latestPlayerStatus, ...status };
+  if (typeof status?.playing === 'boolean') {
+    updateThumbarButtons(status.playing);
+  }
 });
 
 const isSingleInstance = app.requestSingleInstanceLock();
