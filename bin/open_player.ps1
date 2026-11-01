@@ -1,7 +1,8 @@
 # CopyCat media player - Reliable Interactive Desktop Summoner for AI & Scripts
 param(
     [string]$FilePath = "",
-    [double]$Seek = -1
+    [double]$Seek = -1,
+    [switch]$Close
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -27,6 +28,16 @@ function Send-AiCommand([hashtable]$payload) {
     } catch {
         return $false
     }
+}
+
+if ($Close) {
+    if (Test-AiBridge) {
+        Send-AiCommand @{ action = "close" } | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
+    Stop-Process -Name electron -Force -ErrorAction SilentlyContinue
+    Write-Host "SUCCESS: CopyCat media player closed." -ForegroundColor Green
+    exit 0
 }
 
 function Dispatch-Actions {

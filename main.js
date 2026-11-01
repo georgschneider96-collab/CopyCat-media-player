@@ -707,6 +707,19 @@ function startAiControlServer(port = 4500) {
             payload.resolvedFolder = scanMediaFolder(payload.folderPath);
           }
 
+          if (payload.action === 'quit' || payload.action === 'close') {
+            sendJson(200, { ok: true, dispatched: payload.action });
+            setTimeout(() => {
+              try {
+                if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+                else app.quit();
+              } catch {
+                app.quit();
+              }
+            }, 100);
+            return;
+          }
+
           if (mainWindow && !mainWindow.isDestroyed()) {
             if (payload.action === 'bringToFront' || payload.action === 'show' || payload.action === 'focus') {
               bringToFront(mainWindow);
