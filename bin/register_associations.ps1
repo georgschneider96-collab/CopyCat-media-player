@@ -231,7 +231,26 @@ foreach ($ext in $allExtensions) {
     Set-ItemProperty -Path $explExtList -Name 'MRUList' -Value 'abc'
 }
 
-# 9. Notify Windows Shell
+# 9. Register copycat:// Custom URL Protocol
+$urlKey = "HKCU:\Software\Classes\copycat"
+New-Item -Path $urlKey -Force | Out-Null
+Set-ItemProperty -Path $urlKey -Name '(Default)' -Value 'URL:CopyCat Protocol'
+Set-ItemProperty -Path $urlKey -Name 'URL Protocol' -Value ''
+$urlCmd = "$urlKey\shell\open\command"
+New-Item -Path $urlCmd -Force | Out-Null
+Set-ItemProperty -Path $urlCmd -Name '(Default)' -Value $openCommand
+
+# 10. Register Interactive Task for Instant AI / Background Desktop Launch
+try {
+    $taskExe = if (Test-Path (Join-Path $appDir "Launch_CopyCat.exe")) { (Join-Path $appDir "Launch_CopyCat.exe") } else { $exePath }
+    $action = New-ScheduledTaskAction -Execute $taskExe -WorkingDirectory $appDir
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances Parallel
+    Register-ScheduledTask -TaskName "LaunchCopyCat" -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Host "Interactive desktop launch task 'LaunchCopyCat' registered for $taskExe." -ForegroundColor DarkCyan
+} catch {}
+
+# 11. Notify Windows Shell
 try {
     [ShellNotify]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
 } catch {

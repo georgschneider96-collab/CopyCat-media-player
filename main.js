@@ -450,7 +450,15 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
+  const forceShowTimer = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      bringToFront(mainWindow);
+      broadcastWindowState();
+    }
+  }, 1200);
+
   mainWindow.once('ready-to-show', () => {
+    clearTimeout(forceShowTimer);
     bringToFront(mainWindow);
     broadcastWindowState();
     if (pendingInitialMedia) {
@@ -700,9 +708,9 @@ function startAiControlServer(port = 4500) {
           }
 
           if (mainWindow && !mainWindow.isDestroyed()) {
-            if (payload.action === 'bringToFront') {
+            if (payload.action === 'bringToFront' || payload.action === 'show' || payload.action === 'focus') {
               bringToFront(mainWindow);
-              return sendJson(200, { ok: true, dispatched: 'bringToFront' });
+              return sendJson(200, { ok: true, dispatched: payload.action });
             }
             if (payload.action === 'togglePip') {
               mainWindow.webContents.executeJavaScript('document.getElementById("btn-pip")?.click()', true).catch(() => {});
