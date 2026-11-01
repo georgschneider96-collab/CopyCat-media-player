@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, clipboard, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, clipboard, nativeImage, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -734,17 +734,70 @@ function startAiControlServer(port = 4500) {
 }
 
 // IPC Handlers
-ipcMain.handle('win:minimize', () => mainWindow?.minimize());
+ipcMain.handle('win:minimize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(false);
+  }
+  mainWindow.minimize();
+  broadcastWindowState();
+});
 ipcMain.handle('win:maximize', () => {
   if (!mainWindow) return;
-  if (mainWindow.isMaximized()) mainWindow.unmaximize();
-  else mainWindow.maximize();
+  if (mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(false);
+  } else if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow.maximize();
+  }
   broadcastWindowState();
 });
 ipcMain.handle('win:toggleFullscreen', () => {
   if (!mainWindow) return;
   mainWindow.setFullScreen(!mainWindow.isFullScreen());
   broadcastWindowState();
+});
+ipcMain.handle('win:exitFullscreenToDrag', (_evt, data = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const { screenX, screenY, ratioX } = data;
+  if (mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(false);
+  }
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  }
+  let width = 1180;
+  let height = 700;
+  try {
+    const normal = mainWindow.getNormalBounds();
+    if (normal && normal.width && normal.height) {
+      width = normal.width;
+      height = normal.height;
+    }
+  } catch {
+    const bounds = mainWindow.getBounds();
+    width = bounds.width || 1180;
+    height = bounds.height || 700;
+  }
+  const rX = typeof ratioX === 'number' && ratioX >= 0 && ratioX <= 1 ? ratioX : 0.5;
+  const targetX = Math.round(screenX - width * rX);
+  const targetY = Math.round(screenY - 20);
+  mainWindow.setBounds({
+    x: targetX,
+    y: targetY,
+    width,
+    height
+  });
+  broadcastWindowState();
+  return { x: targetX, y: targetY, width, height };
+});
+ipcMain.handle('win:dragMove', (_evt, coords = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const { x, y } = coords;
+  if (typeof x === 'number' && typeof y === 'number') {
+    mainWindow.setPosition(Math.round(x), Math.round(y));
+  }
 });
 ipcMain.handle('win:toggleAlwaysOnTop', () => {
   return applyAlwaysOnTop(!userAlwaysOnTop);
@@ -1017,20 +1070,49 @@ ipcMain.handle('media:getInitial', () => {
   return payload;
 });
 
-ipcMain.handle('app:setDefaultPlayer', () => {
-  try {
-    const regScript = path.join(__dirname, 'bin', 'register_associations.ps1');
-    if (fs.existsSync(regScript)) {
-      const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', regScript], {
-        windowsHide: true,
-        encoding: 'utf8'
-      });
-      return { ok: result.status === 0, error: result.stderr };
-    }
-    return { ok: false, error: 'register_associations.ps1 script not found' };
-  } catch (err) {
-    return { ok: false, error: err.message };
+function getAssociationsScriptPath() {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'bin', 'register_associations.ps1'),
+    path.join(__dirname, 'bin', 'register_associations.ps1'),
+    path.join(__dirname, '..', 'bin', 'register_associations.ps1')
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
   }
+  return null;
+}
+
+function runAssociationsRegistration(targetExe = process.execPath) {
+  return new Promise((resolve) => {
+    try {
+      const regScript = getAssociationsScriptPath();
+      if (!regScript) {
+        return resolve({ ok: false, error: 'register_associations.ps1 script not found' });
+      }
+      const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', regScript];
+      if (targetExe && typeof targetExe === 'string' && fs.existsSync(targetExe)) {
+        args.push('-TargetExe', targetExe);
+      }
+      const child = spawn('powershell.exe', args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      let stderr = '';
+      child.stderr.on('data', (d) => { stderr += d.toString(); });
+      child.on('close', (code) => {
+        resolve({ ok: code === 0, error: stderr });
+      });
+      child.on('error', (err) => {
+        resolve({ ok: false, error: err.message });
+      });
+    } catch (err) {
+      resolve({ ok: false, error: err.message });
+    }
+  });
+}
+
+ipcMain.handle('app:setDefaultPlayer', () => {
+  return runAssociationsRegistration(process.execPath);
 });
 
 ipcMain.handle('app:openDefaultAppsSettings', () => {
@@ -1079,6 +1161,7 @@ if (!isSingleInstance) {
   });
 
   app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
     protocol.handle('media', (request) => {
       try {
         let pathname = decodeURIComponent(request.url.replace(/^media:\/\/\/?/i, ''));
@@ -1093,6 +1176,9 @@ if (!isSingleInstance) {
 
     startAiControlServer(4500);
     createMainWindow();
+    setTimeout(() => {
+      runAssociationsRegistration(process.execPath);
+    }, 1500);
   });
 }
 

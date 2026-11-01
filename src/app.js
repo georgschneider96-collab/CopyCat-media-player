@@ -67,7 +67,9 @@
     { id: 'toggleNightMode', label: 'Toggle Night Mode (DRC)', category: 'Audio', defaults: ['KeyH'] },
     { id: 'toggleGhostMode', label: 'Toggle Ghost Window Mode', category: 'Interface', defaults: ['KeyG'] },
     { id: 'snapshotClipboard', label: 'Copy Snapshot to Clipboard', category: 'Tools', defaults: ['Alt+KeyS'] },
-    { id: 'skipIntroCredits', label: 'Skip Intro / Outro / Segment', category: 'Playback', defaults: ['Tab'] }
+    { id: 'skipIntroCredits', label: 'Skip Intro / Outro / Segment', category: 'Playback', defaults: ['Tab'] },
+    { id: 'toggleStopAfterCurrent', label: 'Stop After Current Episode', category: 'Playback', defaults: ['KeyE'] },
+    { id: 'bossKey', label: 'Boss Key (Mute & Minimize)', category: 'System', defaults: ['F12'] }
   ];
 
   function cloneDefaultKeybindings() {
@@ -110,6 +112,8 @@
     nightMode: false,
     audioDelayMs: 0,
     showRemainingTime: true,
+    stopAfterCurrent: false,
+    sleepTimer: { minutes: 0, targetTime: 0, timerId: null, intervalId: null },
 
     // Universal FFmpeg Live Stream state (for MPEG-TS .mp4, MKV, AVI, AC3, Hi10P, etc.)
     hasFfmpeg: true,
@@ -418,7 +422,9 @@
     selSkipMode: $('sel-skip-mode'),
     selPopSkipMode: $('sel-pop-skip-mode'),
     seekbarChapters: $('seekbar-chapters'),
-    holdSpeedBadge: $('hold-speed-badge')
+    holdSpeedBadge: $('hold-speed-badge'),
+    selSleepTimer: $('sel-sleep-timer'),
+    sleepTimerDesc: $('sleep-timer-desc')
   };
 
   // ==================== UNIFIED TIME HELPERS ====================
@@ -950,6 +956,7 @@
     if (el.selEqPreset) el.selEqPreset.value = state.eqPreset;
     if (el.selSkipMode) el.selSkipMode.value = state.skipMode;
     if (el.selPopSkipMode) el.selPopSkipMode.value = state.skipMode;
+    if (el.selSleepTimer) el.selSleepTimer.value = String(state.sleepTimer?.minutes || 0);
     if (el.rngSubSize) el.rngSubSize.value = String(state.subSizePx);
     if (el.lblSubSize) el.lblSubSize.textContent = `${state.subSizePx}px`;
     if (el.subtitleOverlay) el.subtitleOverlay.style.fontSize = `${state.subSizePx}px`;
@@ -1020,6 +1027,8 @@
     state.speedChipsVisible = ['0.5', '0.75', '1', '1.25', '1.5', '2'];
     state.skipMode = 'prompt';
     state.watchedQueuePaths = [];
+    state.stopAfterCurrent = false;
+    setSleepTimer(0);
 
     state.hotkeySettings = { ...DEFAULT_HOTKEY_SETTINGS };
     state.keybindings = cloneDefaultKeybindings();
@@ -3139,7 +3148,16 @@
       state.lastSkippedSegmentId = activeSeg.id;
       hideSkipSegmentPrompt();
       if (activeSeg.skipTarget >= dur - 1 && !activeSeg.hasAfterCredits) {
-        playNext();
+        if (state.stopAfterCurrent) {
+          state.stopAfterCurrent = false;
+          pauseMedia();
+          seekToSeconds(dur, false);
+          showToast('Playback stopped (Stop After Episode)');
+          updateTransportUI();
+          pushPlayerStatus();
+        } else {
+          playNext();
+        }
       } else {
         seekToSeconds(activeSeg.skipTarget, true);
         showToast(activeSeg.hasAfterCredits ? 'Jumped to After-Credits Scene' : `Auto-Skipped ${activeSeg.label}`);
@@ -3152,7 +3170,16 @@
         state.lastSkippedSegmentId = activeSeg.id;
         hideSkipSegmentPrompt();
         if (activeSeg.skipTarget >= dur - 1 && !activeSeg.hasAfterCredits) {
-          playNext();
+          if (state.stopAfterCurrent) {
+            state.stopAfterCurrent = false;
+            pauseMedia();
+            seekToSeconds(dur, false);
+            showToast('Playback stopped (Stop After Episode)');
+            updateTransportUI();
+            pushPlayerStatus();
+          } else {
+            playNext();
+          }
         } else {
           seekToSeconds(activeSeg.skipTarget, true);
           showToast(activeSeg.hasAfterCredits ? 'Jumped to After-Credits Scene' : `Auto-Skipped ${activeSeg.label}`);
@@ -3209,7 +3236,16 @@
       }
     }
     if (target >= dur - 1 && !seg.hasAfterCredits) {
-      playNext();
+      if (state.stopAfterCurrent) {
+        state.stopAfterCurrent = false;
+        pauseMedia();
+        seekToSeconds(dur, false);
+        showToast('Playback stopped (Stop After Episode)');
+        updateTransportUI();
+        pushPlayerStatus();
+      } else {
+        playNext();
+      }
     } else {
       seekToSeconds(target, true);
       if (seg.hasAfterCredits) {
@@ -3225,7 +3261,7 @@
   }
 
   function checkUpNextCountdown(cur, dur) {
-    if (dur <= 5.0) {
+    if (dur <= 5.0 || state.stopAfterCurrent) {
       hideUpNextBanner();
       return;
     }
@@ -3264,6 +3300,88 @@
     if (el.upNextBanner) {
       el.upNextBanner.classList.add('hidden');
     }
+  }
+
+  // ==================== STOP AFTER CURRENT & SLEEP TIMER ====================
+  function toggleStopAfterCurrent(forceState) {
+    state.stopAfterCurrent = typeof forceState === 'boolean' ? forceState : !state.stopAfterCurrent;
+    showToast(state.stopAfterCurrent ? 'Stop After Episode: ON' : 'Stop After Episode: OFF');
+    pushPlayerStatus();
+  }
+
+  function setSleepTimer(minutes) {
+    if (state.sleepTimer && state.sleepTimer.timerId) {
+      clearTimeout(state.sleepTimer.timerId);
+    }
+    if (state.sleepTimer && state.sleepTimer.intervalId) {
+      clearInterval(state.sleepTimer.intervalId);
+    }
+    const mins = parseInt(minutes, 10) || 0;
+    if (mins <= 0) {
+      state.sleepTimer = { minutes: 0, targetTime: 0, timerId: null, intervalId: null };
+      if (el.sleepTimerDesc) {
+        el.sleepTimerDesc.textContent = 'Automatically pause playback after a set duration';
+      }
+      if (el.selSleepTimer) {
+        el.selSleepTimer.value = '0';
+      }
+      showToast('Sleep Timer: Off');
+      pushPlayerStatus();
+      return;
+    }
+
+    const targetTime = Date.now() + mins * 60 * 1000;
+    const updateDesc = () => {
+      const remainingSec = Math.max(0, Math.round((targetTime - Date.now()) / 1000));
+      const remainingMin = Math.ceil(remainingSec / 60);
+      if (el.sleepTimerDesc) {
+        if (remainingSec > 60) {
+          el.sleepTimerDesc.textContent = `Active: ~${remainingMin} min remaining`;
+        } else if (remainingSec > 0) {
+          el.sleepTimerDesc.textContent = `Active: ${remainingSec}s remaining`;
+        } else {
+          el.sleepTimerDesc.textContent = 'Automatically pause playback after a set duration';
+        }
+      }
+    };
+
+    updateDesc();
+    const intervalId = setInterval(updateDesc, 1000);
+    const timerId = setTimeout(() => {
+      if (state.sleepTimer && state.sleepTimer.intervalId) {
+        clearInterval(state.sleepTimer.intervalId);
+      }
+      state.sleepTimer = { minutes: 0, targetTime: 0, timerId: null, intervalId: null };
+      if (el.selSleepTimer) el.selSleepTimer.value = '0';
+      if (el.sleepTimerDesc) el.sleepTimerDesc.textContent = 'Automatically pause playback after a set duration';
+      pauseMedia();
+      showToast('Sleep Timer: Playback Paused');
+      pushPlayerStatus();
+    }, mins * 60 * 1000);
+
+    state.sleepTimer = { minutes: mins, targetTime, timerId, intervalId };
+    if (el.selSleepTimer) el.selSleepTimer.value = String(mins);
+    showToast(`Sleep Timer: ${mins}m`);
+    pushPlayerStatus();
+  }
+
+  function triggerBossKey() {
+    pauseMedia();
+    state.muted = true;
+    applyVolumeToEngine();
+    updateTransportUI();
+    savePreferences();
+    pushPlayerStatus();
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    }
+    if (state.isFullscreen) {
+      api.toggleFullscreen().catch(() => {});
+    }
+    if (api && api.minimize) {
+      api.minimize();
+    }
+    showToast('Boss Key: Muted & Minimized');
   }
 
   // ==================== AUDIO WAVEFORM VISUALIZER ====================
@@ -3496,6 +3614,7 @@
     const hasMedia = Boolean(getCurrentItem());
     el.app.classList.toggle('has-media', hasMedia);
     el.app.classList.toggle('is-maximized', Boolean(state.isMaximized));
+    el.app.classList.toggle('is-fullscreen', Boolean(state.isFullscreen));
 
     const leftSidebarOpen = !el.librarySidebar.classList.contains('collapsed');
     const rightQueueOpen = !el.rightDrawer.classList.contains('collapsed');
@@ -3917,6 +4036,12 @@
       case 'skipIntroCredits':
         triggerCurrentSegmentSkip();
         break;
+      case 'toggleStopAfterCurrent':
+        toggleStopAfterCurrent();
+        break;
+      case 'bossKey':
+        triggerBossKey();
+        break;
     }
   }
 
@@ -3980,6 +4105,8 @@
       playbackSource: state.playbackSource || 'idle',
       queueLength: state.queue.length,
       queuedNextIndex: state.queuedNextIndex,
+      stopAfterCurrent: Boolean(state.stopAfterCurrent),
+      sleepTimerMinutes: state.sleepTimer?.minutes || 0,
       streamEngine: state.streamMode ? 'ffmpeg-live' : 'native'
     });
   }
@@ -3998,6 +4125,15 @@
       case 'togglePlay':
         togglePlay();
         showToast('AI Bridge: Toggle Play');
+        break;
+      case 'toggleStopAfterCurrent':
+        toggleStopAfterCurrent(cmd.enabled);
+        break;
+      case 'bossKey':
+        triggerBossKey();
+        break;
+      case 'setSleepTimer':
+        setSleepTimer(cmd.minutes);
         break;
       case 'stop':
         pauseMedia();
@@ -4294,6 +4430,109 @@
     el.btnFullscreen.addEventListener('click', () => api.toggleFullscreen());
     el.btnClose.addEventListener('click', () => api.close());
     el.btnPip.addEventListener('click', togglePictureInPicture);
+    if (el.topBar) {
+      el.topBar.addEventListener('dblclick', (e) => {
+        if (e.target.closest('button, .icon-btn, .folder-crumb-btn')) return;
+        api.maximize();
+      });
+
+      // Drag-from-fullscreen handler
+      let fsDragActive = false;
+      let fsDragStart = null;
+      let fsDragOffset = { x: 0, y: 0 };
+      let dragMoveRaf = null;
+      let pendingDragMove = null;
+
+      el.topBar.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('button, .icon-btn, .folder-crumb-btn')) return;
+
+        if (state.isFullscreen) {
+          fsDragStart = {
+            screenX: e.screenX,
+            screenY: e.screenY,
+            ratioX: e.clientX / Math.max(1, window.innerWidth)
+          };
+          fsDragActive = false;
+        }
+      });
+
+      window.addEventListener('pointermove', async (e) => {
+        if (!fsDragStart) return;
+        if (e.buttons === 0) {
+          if (dragMoveRaf) {
+            cancelAnimationFrame(dragMoveRaf);
+            dragMoveRaf = null;
+          }
+          pendingDragMove = null;
+          fsDragStart = null;
+          fsDragActive = false;
+          return;
+        }
+
+        if (!fsDragActive) {
+          const dist = Math.hypot(e.screenX - fsDragStart.screenX, e.screenY - fsDragStart.screenY);
+          if (dist >= 6) {
+            fsDragActive = true;
+            try {
+              const res = await api.exitFullscreenToDrag({
+                screenX: e.screenX,
+                screenY: e.screenY,
+                ratioX: fsDragStart.ratioX
+              });
+              if (res) {
+                fsDragOffset = {
+                  x: e.screenX - res.x,
+                  y: e.screenY - res.y
+                };
+              }
+            } catch (err) {
+              console.error('Failed to exit fullscreen to drag:', err);
+            }
+          }
+        } else {
+          pendingDragMove = {
+            x: e.screenX - fsDragOffset.x,
+            y: e.screenY - fsDragOffset.y
+          };
+          if (!dragMoveRaf) {
+            dragMoveRaf = requestAnimationFrame(() => {
+              if (pendingDragMove) {
+                api.dragMove(pendingDragMove);
+              }
+              dragMoveRaf = null;
+            });
+          }
+        }
+      });
+
+      window.addEventListener('pointerup', (e) => {
+        if (dragMoveRaf) {
+          cancelAnimationFrame(dragMoveRaf);
+          dragMoveRaf = null;
+        }
+        pendingDragMove = null;
+        if (fsDragActive) {
+          if (e.screenY <= 4) {
+            api.maximize();
+          }
+        }
+        fsDragStart = null;
+        fsDragActive = false;
+      });
+
+      window.addEventListener('pointercancel', (e) => {
+        if (dragMoveRaf) {
+          cancelAnimationFrame(dragMoveRaf);
+          dragMoveRaf = null;
+        }
+        pendingDragMove = null;
+        if (e.buttons === 0) {
+          fsDragStart = null;
+          fsDragActive = false;
+        }
+      });
+    }
 
     api.onWindowState((ws) => {
       state.isMaximized = ws.maximized;
@@ -4668,6 +4907,14 @@
     el.video.addEventListener('ended', () => {
       if (state.playbackSource === 'queue' && state.currentItem && state.currentItem.filePath) {
         markQueueItemWatched(state.currentItem.filePath);
+      }
+      if (state.stopAfterCurrent) {
+        state.stopAfterCurrent = false;
+        pauseMedia();
+        showToast('Playback stopped (Stop After Episode)');
+        updateTransportUI();
+        pushPlayerStatus();
+        return;
       }
       if (state.repeatMode === 'one' || state.loop) {
         if (state.streamMode) {
@@ -5342,6 +5589,11 @@
     if (el.selPopSkipMode) {
       el.selPopSkipMode.addEventListener('change', () => onSkipModeChanged(el.selPopSkipMode.value));
     }
+    if (el.selSleepTimer) {
+      el.selSleepTimer.addEventListener('change', () => {
+        setSleepTimer(parseInt(el.selSleepTimer.value, 10));
+      });
+    }
 
     el.btnCopyAiCmd.addEventListener('click', () => {
       navigator.clipboard.writeText(el.aiSampleCmd.textContent).then(() => {
@@ -5960,6 +6212,10 @@
           if (el.bottomPopover.contains(e.target)) {
             closeBottomPopover();
           }
+        } else if (e.code === 'F12') {
+          e.preventDefault();
+          e.target.blur();
+          triggerBossKey();
         }
         return;
       }

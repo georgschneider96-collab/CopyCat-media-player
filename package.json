@@ -1,7 +1,7 @@
 {
   "name": "copycat-media-player",
   "productName": "CopyCat media player",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "VLC media player CopyCat based on the redesign of Juxtopposed",
   "main": "main.js",
   "scripts": {
@@ -29,6 +29,29 @@
       "createStartMenuShortcut": true,
       "shortcutName": "CopyCat media player"
     },
+    "fileAssociations": [
+      { "ext": "mp4", "name": "MP4 Video", "description": "MP4 Video File", "role": "Viewer" },
+      { "ext": "mkv", "name": "Matroska Video", "description": "Matroska Video File", "role": "Viewer" },
+      { "ext": "ts", "name": "MPEG-TS Video", "description": "MPEG Transport Stream Video", "role": "Viewer" },
+      { "ext": "m2ts", "name": "M2TS Video", "description": "M2TS Video File", "role": "Viewer" },
+      { "ext": "webm", "name": "WebM Video", "description": "WebM Video File", "role": "Viewer" },
+      { "ext": "avi", "name": "AVI Video", "description": "Audio Video Interleave File", "role": "Viewer" },
+      { "ext": "mov", "name": "QuickTime Video", "description": "QuickTime Movie", "role": "Viewer" },
+      { "ext": "wmv", "name": "WMV Video", "description": "Windows Media Video", "role": "Viewer" },
+      { "ext": "flv", "name": "FLV Video", "description": "Flash Video File", "role": "Viewer" },
+      { "ext": "m4v", "name": "M4V Video", "description": "M4V Video File", "role": "Viewer" },
+      { "ext": "mpg", "name": "MPEG Video", "description": "MPEG Video File", "role": "Viewer" },
+      { "ext": "mpeg", "name": "MPEG Video", "description": "MPEG Video File", "role": "Viewer" },
+      { "ext": "vob", "name": "DVD Video", "description": "DVD Video File", "role": "Viewer" },
+      { "ext": "3gp", "name": "3GP Video", "description": "3GP Video File", "role": "Viewer" },
+      { "ext": "mp3", "name": "MP3 Audio", "description": "MP3 Audio File", "role": "Viewer" },
+      { "ext": "flac", "name": "FLAC Audio", "description": "Free Lossless Audio Codec", "role": "Viewer" },
+      { "ext": "wav", "name": "WAV Audio", "description": "Waveform Audio File", "role": "Viewer" },
+      { "ext": "ogg", "name": "Ogg Audio", "description": "Ogg Vorbis Audio", "role": "Viewer" },
+      { "ext": "m4a", "name": "M4A Audio", "description": "M4A Audio File", "role": "Viewer" },
+      { "ext": "aac", "name": "AAC Audio", "description": "Advanced Audio Coding", "role": "Viewer" },
+      { "ext": "opus", "name": "Opus Audio", "description": "Opus Audio File", "role": "Viewer" }
+    ],
     "files": [
       "main.js",
       "preload.js",

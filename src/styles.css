@@ -93,18 +93,30 @@ html, body {
   align-items: center;
   padding: 0 8px 0 10px;
   -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
   z-index: 40;
   transition: opacity 0.25s ease, transform 0.25s ease, background 0.18s ease, border-color 0.18s ease, backdrop-filter 0.18s ease;
 }
 
-.top-left, .top-right {
+.top-left,
+.top-right,
+.top-center {
+  -webkit-app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.top-left {
   display: flex;
   align-items: center;
   gap: 3px;
-  -webkit-app-region: no-drag;
 }
 
 .top-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   justify-self: end;
 }
 
@@ -118,6 +130,22 @@ html, body {
   text-overflow: ellipsis;
   max-width: 48vw;
   padding: 0 12px;
+  cursor: default;
+}
+
+/* Make ONLY the actual interactive controls non-draggable so the rest of the top bar is freely draggable */
+.top-bar button,
+.top-bar .icon-btn,
+.top-bar .folder-crumb-btn {
+  -webkit-app-region: no-drag;
+}
+
+/* While in fullscreen mode, disable native app-region so DOM drag handlers capture smooth un-fullscreen dragging */
+#app.is-fullscreen .top-bar,
+#app.is-fullscreen .top-left,
+#app.is-fullscreen .top-right,
+#app.is-fullscreen .top-center {
+  -webkit-app-region: no-drag !important;
 }
 
 .v-divider {
