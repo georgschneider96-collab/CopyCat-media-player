@@ -1796,6 +1796,11 @@
   }
 
   function renderLibraryList() {
+    if (el.librarySidebar.classList.contains('collapsed')) {
+      state.libraryDirty = true;
+      return;
+    }
+    state.libraryDirty = false;
     el.libList.innerHTML = '';
     const folderItems = state.libraryFolder?.items || [];
     const subfolders = state.libraryFolder?.subfolders || [];
@@ -2661,7 +2666,10 @@
   }
 
   function applyVideoAppearance() {
-    el.video.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) saturation(${state.saturation}%)`;
+    const isDefaultFilter = state.brightness === 100 && state.contrast === 100 && state.saturation === 100;
+    el.video.style.filter = isDefaultFilter
+      ? 'none'
+      : `brightness(${state.brightness}%) contrast(${state.contrast}%) saturation(${state.saturation}%)`;
     el.lblBrightness.textContent = `${state.brightness}%`;
     el.lblContrast.textContent = `${state.contrast}%`;
     el.lblSaturation.textContent = `${state.saturation}%`;
@@ -4945,7 +4953,11 @@
       const collapsed = el.librarySidebar.classList.toggle('collapsed');
       el.btnSidebar.classList.toggle('active', !collapsed);
       state.leftOpenedByEdge = false;
-      if (collapsed) state.leftEdgeCooldownUntil = Date.now() + 450;
+      if (collapsed) {
+        state.leftEdgeCooldownUntil = Date.now() + 450;
+      } else if (state.libraryDirty) {
+        renderLibraryList();
+      }
       updateChromeSolidity();
     });
 
@@ -4954,7 +4966,11 @@
         const collapsed = el.librarySidebar.classList.toggle('collapsed');
         el.btnSidebar.classList.toggle('active', !collapsed);
         state.leftOpenedByEdge = false;
-        if (collapsed) state.leftEdgeCooldownUntil = Date.now() + 450;
+        if (collapsed) {
+          state.leftEdgeCooldownUntil = Date.now() + 450;
+        } else if (state.libraryDirty) {
+          renderLibraryList();
+        }
         updateChromeSolidity();
       } else {
         openFolderDialog();
@@ -5008,9 +5024,14 @@
     el.menuSettings.addEventListener('click', () => toggleSettingsModal(true));
 
     // 7. Library Sidebar & Empty State actions
+    let libSearchTimer = null;
     el.libSearchInput.addEventListener('input', () => {
       state.libraryFilter = el.libSearchInput.value;
-      renderLibraryList();
+      if (libSearchTimer) clearTimeout(libSearchTimer);
+      libSearchTimer = setTimeout(() => {
+        libSearchTimer = null;
+        renderLibraryList();
+      }, 120);
     });
     el.libSearchInput.addEventListener('focus', syncSidebarAutoCollapse);
     el.libSearchInput.addEventListener('blur', syncSidebarAutoCollapse);
@@ -5366,19 +5387,19 @@
     let isScrubbing = false;
     let wasPlayingBeforeScrub = false;
 
-    const calcSeekRatio = (clientX) => {
-      const rect = el.seekbarTrack.getBoundingClientRect();
+    const calcSeekRatio = (clientX, trackRect = null) => {
+      const rect = trackRect || el.seekbarTrack.getBoundingClientRect();
       return Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
     };
 
-    const updateHoverPreview = (clientX) => {
+    const updateHoverPreview = (clientX, trackRect = null) => {
       const dur = getDuration();
       if (!Number.isFinite(dur) || dur <= 0 || !getCurrentItem()) {
         el.seekHoverCard.classList.remove('visible');
         return;
       }
-      const rect = el.seekbarTrack.getBoundingClientRect();
-      const ratio = calcSeekRatio(clientX);
+      const rect = trackRect || el.seekbarTrack.getBoundingClientRect();
+      const ratio = calcSeekRatio(clientX, rect);
       const hoverSec = ratio * dur;
 
       const cardHalf = 90;
@@ -5400,22 +5421,24 @@
       wasPlayingBeforeScrub = !el.video.paused;
       el.seekbarTrack.setPointerCapture(e.pointerId);
 
-      const targetSec = calcSeekRatio(e.clientX) * dur;
+      const rect = el.seekbarTrack.getBoundingClientRect();
+      const targetSec = calcSeekRatio(e.clientX, rect) * dur;
       if (state.streamMode) {
         state.scrubPreviewTime = targetSec;
         updateTimelineUI();
       } else {
         seekToSeconds(targetSec, wasPlayingBeforeScrub);
       }
-      updateHoverPreview(e.clientX);
+      updateHoverPreview(e.clientX, rect);
     });
 
     el.seekbarTrack.addEventListener('pointermove', (e) => {
-      updateHoverPreview(e.clientX);
+      const rect = el.seekbarTrack.getBoundingClientRect();
+      updateHoverPreview(e.clientX, rect);
       if (!isScrubbing) return;
       const dur = getDuration();
       if (dur <= 0) return;
-      const targetSec = calcSeekRatio(e.clientX) * dur;
+      const targetSec = calcSeekRatio(e.clientX, rect) * dur;
       if (state.streamMode) {
         state.scrubPreviewTime = targetSec;
         updateTimelineUI();
@@ -6307,6 +6330,7 @@
             state.leftOpenedByEdge = true;
             state.hoveringLeftSidebar = true;
             leftEdgeOpenedAt = Date.now();
+            if (state.libraryDirty) renderLibraryList();
             updateChromeSolidity();
             resetFullscreenIdle();
 
@@ -6426,15 +6450,8 @@
       state.hoveringBottomPopover = false;
       syncSidebarAutoCollapse();
     });
-    window.addEventListener('resize', async () => {
+    window.addEventListener('resize', () => {
       applyVideoAppearance();
-      try {
-        const ws = await api.getWindowState();
-        if (ws && typeof ws.maximized === 'boolean' && state.isMaximized !== ws.maximized) {
-          state.isMaximized = ws.maximized;
-          updateChromeSolidity();
-        }
-      } catch (err) {}
     });
     window.addEventListener('blur', () => {
       stopHold2x('space');
