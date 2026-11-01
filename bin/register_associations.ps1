@@ -89,6 +89,7 @@ Set-ItemProperty -Path $aCmd -Name '(Default)' -Value $openCommand
 $registeredAppNames = @(
     "CopyCat media player.exe",
     $portableUploadName,
+    "CopyCat-media-player-1.0.6-portable.exe",
     "CopyCat-media-player-1.0.5-portable.exe",
     "Launch_CopyCat.exe"
 )
