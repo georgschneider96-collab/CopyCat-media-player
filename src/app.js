@@ -4150,9 +4150,17 @@
         break;
       case 'seek':
         if (typeof cmd.delta === 'number') seekByDelta(cmd.delta);
-        else if (typeof cmd.value === 'number' && getDuration() > 0) {
-          seekToSeconds(cmd.value, !el.video.paused);
-          showToast(`AI Bridge: Seek → ${formatTime(cmd.value)}`);
+        else if (typeof cmd.value === 'number') {
+          const target = cmd.value;
+          const trySeek = (attempts = 0) => {
+            if (getDuration() > 0 || state.streamDuration > 0) {
+              seekToSeconds(target, true);
+              showToast(`AI Bridge: Seek → ${formatTime(target)}`);
+            } else if (attempts < 15) {
+              setTimeout(() => trySeek(attempts + 1), 200);
+            }
+          };
+          trySeek();
         }
         break;
       case 'volume':
@@ -4228,6 +4236,18 @@
       case 'openFile':
         if (cmd.resolved) {
           ingestOpenedBundle({ items: [cmd.resolved.item], folder: cmd.resolved.folder }, true, { append: false });
+          if (typeof cmd.seek === 'number' && cmd.seek >= 0) {
+            const targetSeek = cmd.seek;
+            const tryOpenSeek = (attempts = 0) => {
+              if (getDuration() > 0 || state.streamDuration > 0) {
+                seekToSeconds(targetSeek, true);
+                showToast(`AI Bridge: Seek → ${formatTime(targetSeek)}`);
+              } else if (attempts < 20) {
+                setTimeout(() => tryOpenSeek(attempts + 1), 200);
+              }
+            };
+            setTimeout(tryOpenSeek, 250);
+          }
           showToast(`AI Bridge: Opened ${cmd.resolved.item.name}`);
         }
         break;

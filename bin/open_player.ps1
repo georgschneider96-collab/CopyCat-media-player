@@ -1,6 +1,7 @@
 # CopyCat media player - Reliable Interactive Desktop Summoner for AI & Scripts
 param(
-    [string]$FilePath = ""
+    [string]$FilePath = "",
+    [double]$Seek = -1
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -18,10 +19,8 @@ function Test-AiBridge {
     }
 }
 
-function Send-AiCommand([string]$action, [string]$path = "") {
+function Send-AiCommand([hashtable]$payload) {
     try {
-        $payload = @{ action = $action }
-        if ($path) { $payload.filePath = (Resolve-Path $path).Path }
         $json = $payload | ConvertTo-Json -Compress
         $res = Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Body $json -ContentType "application/json" -TimeoutSec 2 -ErrorAction Stop
         return $res.ok
@@ -30,12 +29,22 @@ function Send-AiCommand([string]$action, [string]$path = "") {
     }
 }
 
+function Dispatch-Actions {
+    if ($FilePath) {
+        $resolved = (Resolve-Path $FilePath).Path
+        $openPayload = @{ action = "openFile"; filePath = $resolved }
+        if ($Seek -ge 0) { $openPayload.seek = [double]$Seek }
+        Send-AiCommand $openPayload | Out-Null
+    }
+    if ($Seek -ge 0) {
+        Send-AiCommand @{ action = "seek"; value = [double]$Seek } | Out-Null
+    }
+    Send-AiCommand @{ action = "bringToFront" } | Out-Null
+}
+
 # 1. If player is already running, activate it immediately
 if (Test-AiBridge) {
-    if ($FilePath) {
-        Send-AiCommand -action "openFile" -path $FilePath | Out-Null
-    }
-    Send-AiCommand -action "bringToFront" | Out-Null
+    Dispatch-Actions
     Write-Host "SUCCESS: CopyCat media player brought to front and active on screen." -ForegroundColor Green
     exit 0
 }
@@ -48,7 +57,6 @@ if (Test-Path $launcherExe) {
         Start-Process -FilePath $launcherExe
     }
 } else {
-    # Fallback to Task Scheduler directly
     Start-ScheduledTask -TaskName "LaunchCopyCat" -ErrorAction SilentlyContinue
 }
 
@@ -63,13 +71,10 @@ for ($i = 0; $i -lt 15; $i++) {
 }
 
 if ($ready) {
-    if ($FilePath) {
-        Send-AiCommand -action "openFile" -path $FilePath | Out-Null
-    }
-    Send-AiCommand -action "bringToFront" | Out-Null
+    Dispatch-Actions
     Write-Host "SUCCESS: CopyCat media player opened successfully on the interactive desktop." -ForegroundColor Green
     exit 0
 } else {
-    Write-Host "WARNING: Launch triggered, but HTTP bridge did not respond within 5 seconds. The player process is starting up." -ForegroundColor Yellow
+    Write-Host "WARNING: Launch triggered, but HTTP bridge did not respond within 5 seconds." -ForegroundColor Yellow
     exit 0
 }
