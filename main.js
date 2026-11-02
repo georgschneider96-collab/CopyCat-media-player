@@ -24,15 +24,18 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-process.on('uncaughtException', (err) => {
+function logCrash(type, details) {
   try {
-    fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] uncaughtException: ${err.stack || err.message}\n`);
+    const logDir = app?.getPath ? app.getPath('userData') : __dirname;
+    fs.appendFileSync(path.join(logDir, 'crash.log'), `[${new Date().toISOString()}] ${type}: ${details}\n`);
   } catch {}
+}
+
+process.on('uncaughtException', (err) => {
+  logCrash('uncaughtException', err.stack || err.message);
 });
 process.on('unhandledRejection', (reason) => {
-  try {
-    fs.appendFileSync(path.join(__dirname, 'crash.log'), `[${new Date().toISOString()}] unhandledRejection: ${reason?.stack || reason}\n`);
-  } catch {}
+  logCrash('unhandledRejection', reason?.stack || reason);
 });
 const http = require('http');
 const { spawn, spawnSync, execFile } = require('child_process');
@@ -114,7 +117,11 @@ const FFPROBE_PATH = resolveMediaTool('ffprobe');
 function killActiveStreamProc() {
   if (activeStreamProc) {
     try {
-      activeStreamProc.kill('SIGKILL');
+      if (process.platform === 'win32' && activeStreamProc.pid) {
+        spawnSync('taskkill', ['/pid', String(activeStreamProc.pid), '/T', '/F'], { windowsHide: true });
+      } else {
+        activeStreamProc.kill('SIGKILL');
+      }
     } catch {}
     activeStreamProc = null;
   }
@@ -123,7 +130,11 @@ function killActiveStreamProc() {
 function killActiveThumbProc() {
   if (activeThumbProc) {
     try {
-      activeThumbProc.kill('SIGKILL');
+      if (process.platform === 'win32' && activeThumbProc.pid) {
+        spawnSync('taskkill', ['/pid', String(activeThumbProc.pid), '/T', '/F'], { windowsHide: true });
+      } else {
+        activeThumbProc.kill('SIGKILL');
+      }
     } catch {}
     activeThumbProc = null;
   }
@@ -500,7 +511,9 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-    console.log(`[Renderer ${level}] ${message} (${sourceId}:${line})`);
+    if (level >= 2 || process.env.COPYCAT_DEBUG) {
+      console.log(`[Renderer ${level}] ${message} (${sourceId}:${line})`);
+    }
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

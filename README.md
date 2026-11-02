@@ -72,9 +72,11 @@
 | `Space` / `K` | Toggle Play / Pause *(Hold Space >220ms for 2.0x Speed)* |
 | `F` / Double-Click | Toggle Fullscreen |
 | `M` | Toggle Audio Mute |
+| `Z` / `A` | **Cycle Aspect Ratio** *(Contain, Cover, Stretch, 16:9, 4:3, 21:9)* |
 | `←` / `→` | Seek -5s / +5s *(Shift for ±15s, coalesced multi-tap)* |
 | `↑` / `↓` | Volume +5% / -5% *(Boost up to 200%)* |
 | `[` / `]` | Playback Speed -0.25x / +0.25x |
+| `Tab` | Skip Intro / Outro / Segment *(Full Binge Mode available)* |
 | `E` | Toggle "Stop After Current Episode" |
 | `P` | Toggle Always-on-Top Picture-in-Picture (PiP) |
 | `B` | Add Timestamp Bookmark |
