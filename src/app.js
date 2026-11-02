@@ -6212,7 +6212,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         }
         hideUpdatePromptBanner();
         if (state.availableUpdate) renderUpdateDetails(state.availableUpdate);
-        showToast(`Skipped ${state.availableUpdate?.latestVersion || 'this version'}. Option remains in Preferences → Updates.`);
+        showToast(`Don't Ask Again set for ${state.availableUpdate?.latestVersion || 'this version'}. Option remains in Preferences → Updates.`);
       });
     }
 
