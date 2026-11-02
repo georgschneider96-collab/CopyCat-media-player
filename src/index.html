@@ -850,9 +850,9 @@
             <!-- Panel: AI Control Bridge -->
             <div class="settings-panel" data-settings-panel="ai" style="display:none;flex-direction:column;gap:14px;">
               <div>
-                <div class="settings-section-title">Local AI Assistant Bridge</div>
+                <div class="settings-section-title">Local AI Assistant Bridge &amp; Automation</div>
                 <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
-                  Any AI coding assistant (Antigravity, Claude, Cursor, Windsurf, Copilot, Codex) can read <strong style="color:var(--text-primary);">AI_CONTEXT.md</strong> in your project folder or control CopyCat media player live over HTTP:
+                  Any AI assistant (Antigravity, Claude, Cursor, Copilot, ChatGPT) can control CopyCat media player live over HTTP and launch playback directly onto your interactive desktop.
                 </div>
               </div>
 
@@ -860,14 +860,26 @@
                 Endpoint: http://127.0.0.1:4500
                 Status:   GET  http://127.0.0.1:4500/api/status
                 Control:  POST http://127.0.0.1:4500/api/control
+                CLI:      copycat [filePath]
+              </div>
+
+              <div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">🚀 How AIs Launch Without Background Sandbox Termination:</div>
+                <div class="code-box" id="ai-launch-trick-box" style="font-size:11px;line-height:1.45;"># From any AI terminal on Windows, use explorer or the copycat CLI:
+copycat "C:\path\to\video.mp4"
+
+# Or via Windows Explorer (bypasses service desktop sandbox):
+Start-Process explorer.exe "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe"</div>
               </div>
 
               <div>
                 <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">PowerShell Live Control Example:</div>
-                <div class="code-box" id="ai-sample-cmd">Invoke-RestMethod -Method Post -Uri http://127.0.0.1:4500/api/control -ContentType 'application/json' -Body '{"action":"setAccent","value":"cyan"}'</div>
+                <div class="code-box" id="ai-sample-cmd">Invoke-RestMethod -Method Post -Uri http://127.0.0.1:4500/api/control -ContentType 'application/json' -Body '{"action":"openFile","filePath":"C:\\Videos\\sample.mp4"}'</div>
               </div>
 
-              <div style="display:flex;gap:8px;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="lib-add-btn" id="btn-copy-full-ai-prompt" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;">📋 Copy Prompt for AI Assistant</button>
+                <button class="lib-add-btn" id="btn-install-ai-skill">⚡ Reinstall AI Skill &amp; CLI</button>
                 <button class="lib-add-btn" id="btn-copy-ai-cmd">Copy Sample Command</button>
               </div>
             </div>

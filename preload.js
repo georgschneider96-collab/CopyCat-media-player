@@ -43,6 +43,7 @@ const copycatApi = {
   hasDesktopShortcut: () => ipcRenderer.invoke('shortcut:hasDesktop'),
   createDesktopShortcut: () => ipcRenderer.invoke('shortcut:createDesktop'),
   setDefaultPlayer: () => ipcRenderer.invoke('app:setDefaultPlayer'),
+  installAiIntegration: () => ipcRenderer.invoke('app:installAiIntegration'),
   openDefaultAppsSettings: () => ipcRenderer.invoke('app:openDefaultAppsSettings'),
 
   // Live telemetry + AI bridge

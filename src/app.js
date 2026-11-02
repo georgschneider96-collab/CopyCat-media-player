@@ -378,6 +378,8 @@
     aiEndpointBox: $('ai-endpoint-box'),
     aiSampleCmd: $('ai-sample-cmd'),
     btnCopyAiCmd: $('btn-copy-ai-cmd'),
+    btnCopyFullAiPrompt: $('btn-copy-full-ai-prompt'),
+    btnInstallAiSkill: $('btn-install-ai-skill'),
 
     inpTuneVol: $('inp-tune-vol'),
     inpTuneSeekSmall: $('inp-tune-seek-small'),
@@ -5885,11 +5887,47 @@
       });
     }
 
-    el.btnCopyAiCmd.addEventListener('click', () => {
-      navigator.clipboard.writeText(el.aiSampleCmd.textContent).then(() => {
-        showToast('Copied PowerShell AI Control command');
+    if (el.btnCopyAiCmd) {
+      el.btnCopyAiCmd.addEventListener('click', () => {
+        navigator.clipboard.writeText(el.aiSampleCmd.textContent).then(() => {
+          showToast('Copied PowerShell AI Control command');
+        });
       });
-    });
+    }
+
+    if (el.btnCopyFullAiPrompt) {
+      el.btnCopyFullAiPrompt.addEventListener('click', () => {
+        const promptText = `You can control CopyCat Media Player on this PC via its local HTTP bridge at http://127.0.0.1:4500.
+
+IMPORTANT: Do not launch CopyCat with Start-Process directly, because background service terminals are blocked by Windows from creating interactive GUI desktop windows.
+
+Instead, launch or open media on my desktop using:
+copycat "C:\\path\\to\\video.mp4"
+
+Or launch the app via Windows Explorer:
+Start-Process explorer.exe "$env:LOCALAPPDATA\\Programs\\copycat-media-player\\CopyCat media player.exe"
+
+Wait 2 seconds, then send playback or speed commands via HTTP:
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"openFile","filePath":"C:\\\\path\\\\to\\\\video.mp4"}'
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"speed","value":1.25}'`;
+        navigator.clipboard.writeText(promptText).then(() => {
+          showToast('Copied ready-to-paste AI Prompt to clipboard!');
+        });
+      });
+    }
+
+    if (el.btnInstallAiSkill) {
+      el.btnInstallAiSkill.addEventListener('click', async () => {
+        if (!api.installAiIntegration) return;
+        showToast('Installing AI Skill & CLI command...');
+        const res = await api.installAiIntegration();
+        if (res && res.ok) {
+          showToast('AI Skill "copycat-player" and CLI "copycat" installed!');
+        } else {
+          showToast('AI integration updated');
+        }
+      });
+    }
 
     // Desktop Shortcut creation handlers
     async function triggerCreateShortcut() {

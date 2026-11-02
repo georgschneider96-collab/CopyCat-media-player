@@ -244,14 +244,170 @@ Set-ItemProperty -Path $urlCmd -Name '(Default)' -Value $openCommand
 # 10. Register Interactive Task for Instant AI / Background Desktop Launch
 try {
     $taskExe = if (Test-Path (Join-Path $appDir "Launch_CopyCat.exe")) { (Join-Path $appDir "Launch_CopyCat.exe") } else { $exePath }
-    $action = New-ScheduledTaskAction -Execute $taskExe -WorkingDirectory $appDir
+    $workDir = Split-Path -Parent $taskExe
+    $action = New-ScheduledTaskAction -Execute $taskExe -WorkingDirectory $workDir
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances Parallel
     Register-ScheduledTask -TaskName "LaunchCopyCat" -Action $action -Principal $principal -Settings $settings -Force | Out-Null
     Write-Host "Interactive desktop launch task 'LaunchCopyCat' registered for $taskExe." -ForegroundColor DarkCyan
 } catch {}
 
-# 11. Notify Windows Shell
+# 11. Register Global 'copycat' CLI Command in WindowsApps (%PATH%)
+try {
+    $winAppsDir = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+    if (Test-Path $winAppsDir) {
+        $cmdTarget = Join-Path $winAppsDir "copycat.cmd"
+        $ps1Target = Join-Path $winAppsDir "copycat.ps1"
+        $safeExe = $exePath.Replace("'", "''")
+
+        $ps1Script = @'
+param(
+    [string]$FilePath = "",
+    [double]$Seek = -1,
+    [switch]$Close,
+    [switch]$Restore
+)
+
+$ErrorActionPreference = 'SilentlyContinue'
+
+function Test-Bridge {
+    try {
+        $res = Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/status" -TimeoutSec 1 -ErrorAction Stop
+        return ($res -and $res.app -match "CopyCat")
+    } catch {
+        return $false
+    }
+}
+
+function Send-Command([hashtable]$payload) {
+    try {
+        $json = $payload | ConvertTo-Json -Compress
+        $res = Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Body $json -ContentType "application/json" -TimeoutSec 2 -ErrorAction Stop
+        return $res.ok
+    } catch {
+        return $false
+    }
+}
+
+if ($Close) {
+    if (Test-Bridge) {
+        Send-Command @{ action = "close" } | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
+    Stop-Process -Name electron -Force -ErrorAction SilentlyContinue
+    Write-Host "[CopyCat] Player closed." -ForegroundColor Green
+    exit 0
+}
+
+$candidates = @(
+    "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe",
+    "C:\Users\Schual\Desktop\VLCopyCAT\Launch_CopyCat.exe",
+    (Get-ChildItem "C:\Users\Schual\Desktop\CopyCatUpload\*portable.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1)
+)
+
+$targetExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+if (-not (Test-Bridge)) {
+    if (Get-ScheduledTask -TaskName "LaunchCopyCat" -ErrorAction SilentlyContinue) {
+        schtasks.exe /run /tn "LaunchCopyCat" | Out-Null
+    } elseif ($targetExe) {
+        Start-Process explorer.exe $targetExe
+    }
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Milliseconds 250
+        if (Test-Bridge) { break }
+    }
+}
+
+if (Test-Bridge) {
+    if ($FilePath -and (Test-Path $FilePath)) {
+        $resolved = (Resolve-Path $FilePath).Path
+        $body = @{ action = "openFile"; filePath = $resolved }
+        if ($Seek -ge 0) { $body.seek = [double]$Seek }
+        Send-Command $body | Out-Null
+        Send-Command @{ action = "bringToFront" } | Out-Null
+        Write-Host "[CopyCat] Playing: $resolved" -ForegroundColor Green
+    } else {
+        Send-Command @{ action = "bringToFront" } | Out-Null
+        Write-Host "[CopyCat] Active on desktop (http://127.0.0.1:4500)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "[CopyCat] Error: Player could not be launched on interactive desktop." -ForegroundColor Red
+}
+'@
+        Set-Content -Path $ps1Target -Value $ps1Script -Encoding UTF8 -Force
+        Set-Content -Path $cmdTarget -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0copycat.ps1`" %*" -Encoding Ascii -Force
+        Write-Host "CLI command 'copycat' registered in $winAppsDir" -ForegroundColor DarkCyan
+    }
+} catch {}
+
+# 12. Register Global Antigravity AI Skill (if Antigravity is installed)
+try {
+    $geminiDir = Join-Path $env:USERPROFILE ".gemini"
+    if (Test-Path $geminiDir) {
+        $skillDir = Join-Path $geminiDir "config\skills\copycat-player"
+        if (-not (Test-Path $skillDir)) {
+            New-Item -Path $skillDir -ItemType Directory -Force | Out-Null
+        }
+        $skillFile = Join-Path $skillDir "SKILL.md"
+        $skillContent = @'
+---
+name: copycat-player
+description: >-
+  Play, pause, seek, control, or open video and audio files in CopyCat Media Player,
+  or launch CopyCat onto the interactive Windows desktop from an AI assistant or terminal.
+---
+
+# CopyCat Media Player AI Integration Guide
+
+CopyCat Media Player is a desktop media player running on this PC. It features a local REST API bridge on `http://127.0.0.1:4500`.
+
+## ⚠️ Important: Launching on Windows from an AI Terminal
+When running inside an AI assistant terminal or background sandbox, NEVER use `Start-Process "CopyCat media player.exe"` directly. Windows automatically blocks background processes from creating interactive desktop windows on your screen.
+
+### How to Launch the Player Onto the Interactive Desktop
+Run any of these commands in PowerShell:
+
+```powershell
+# Method 1 (Universal CLI command on PATH):
+copycat "C:\path\to\video.mp4"
+
+# Method 2 (Via Windows Explorer shell - forces interactive desktop spawn):
+Start-Process explorer.exe "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe"
+
+# Method 3 (Via Task Scheduler):
+schtasks.exe /run /tn "LaunchCopyCat"
+```
+
+## How to Play Media and Control Playback via HTTP
+Once running, the player listens on `http://127.0.0.1:4500`.
+
+### 1. Open and Play a File
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"openFile","filePath":"C:\\path\\to\\video.mp4"}'
+```
+
+### 2. Set Playback Speed (e.g. 1.25x)
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"speed","value":1.25}'
+```
+
+### 3. Check Current Status
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/status"
+```
+
+### 4. Close the Player When Done
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"close"}'
+```
+'@
+        Set-Content -Path $skillFile -Value $skillContent -Encoding UTF8 -Force
+        Write-Host "Global Antigravity skill 'copycat-player' registered at $skillFile" -ForegroundColor DarkCyan
+    }
+} catch {}
+
+# 13. Notify Windows Shell
 try {
     [ShellNotify]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
 } catch {

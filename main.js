@@ -1254,6 +1254,10 @@ ipcMain.handle('app:setDefaultPlayer', () => {
   return runAssociationsRegistration(process.execPath);
 });
 
+ipcMain.handle('app:installAiIntegration', () => {
+  return runAssociationsRegistration(process.execPath);
+});
+
 ipcMain.handle('app:openDefaultAppsSettings', () => {
   try {
     shell.openExternal('ms-settings:defaultapps');
