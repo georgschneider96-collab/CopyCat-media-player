@@ -299,10 +299,14 @@ if ($Close) {
     exit 0
 }
 
+$regCmd = (Get-ItemProperty "HKCU:\Software\Classes\CopyCat.Video\shell\open\command" -ErrorAction SilentlyContinue).'(Default)'
+$regExe = if ($regCmd -match '^\s*"([^"]+)"') { $matches[1] } else { "" }
+
 $candidates = @(
     "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe",
-    "C:\Users\Schual\Desktop\VLCopyCAT\Launch_CopyCat.exe",
-    (Get-ChildItem "C:\Users\Schual\Desktop\CopyCatUpload\*portable.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1)
+    $regExe,
+    (Get-ChildItem -Path "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads" -Filter "*CopyCat*.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1),
+    "C:\Users\Schual\Desktop\VLCopyCAT\Launch_CopyCat.exe"
 )
 
 $targetExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
@@ -311,9 +315,9 @@ if (-not (Test-Bridge)) {
     if (Get-ScheduledTask -TaskName "LaunchCopyCat" -ErrorAction SilentlyContinue) {
         schtasks.exe /run /tn "LaunchCopyCat" | Out-Null
     } elseif ($targetExe) {
-        Start-Process explorer.exe $targetExe
+        Start-Process explorer.exe "`"$targetExe`""
     }
-    for ($i = 0; $i -lt 15; $i++) {
+    for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 250
         if (Test-Bridge) { break }
     }

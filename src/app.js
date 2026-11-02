@@ -53,6 +53,7 @@
     { id: 'toggleSub', label: 'Toggle Subtitles', category: 'Subtitles', defaults: ['KeyC'] },
     { id: 'addBookmark', label: 'Add Bookmark', category: 'Bookmarks', defaults: ['KeyB'] },
     { id: 'snapshot', label: 'Save Snapshot (PNG)', category: 'Tools', defaults: ['Shift+KeyS'] },
+    { id: 'cycleAspect', label: 'Cycle Aspect Ratio', category: 'Playback', defaults: ['KeyZ', 'KeyA'] },
     { id: 'openFile', label: 'Open File', category: 'File', defaults: ['Ctrl+KeyO'] },
     { id: 'openFolder', label: 'Open Folder', category: 'File', defaults: ['Ctrl+KeyF'] },
     { id: 'queueFiles', label: 'Enqueue Files', category: 'File', defaults: ['Ctrl+Shift+KeyO'] },
@@ -232,6 +233,7 @@
     menuOpenFolder: $('menu-open-folder'),
     menuOpenSub: $('menu-open-sub'),
     menuSnapshot: $('menu-snapshot'),
+    menuCycleAspect: $('menu-cycle-aspect'),
     menuReveal: $('menu-reveal'),
     menuAlwaysTop: $('menu-always-top'),
     menuAlwaysTopLabel: $('menu-always-top-label'),
@@ -2735,6 +2737,34 @@
     }
   }
 
+  const ASPECT_RATIO_PRESETS = [
+    { id: 'contain', label: 'Contain (Original Aspect)' },
+    { id: 'cover', label: 'Cover (Crop Black Bars)' },
+    { id: 'fill', label: 'Stretch to Window' },
+    { id: '16:9', label: 'Force 16:9 Widescreen' },
+    { id: '4:3', label: 'Force 4:3 Standard' },
+    { id: '21:9', label: 'Force 21:9 Ultrawide' }
+  ];
+
+  function setAspectRatio(fitMode, showOsd = true) {
+    const valid = ASPECT_RATIO_PRESETS.find((p) => p.id === fitMode);
+    state.videoFit = valid ? valid.id : 'contain';
+    applyVideoAppearance();
+    savePreferences();
+    if (el.selVideoFit) el.selVideoFit.value = state.videoFit;
+    if (showOsd) {
+      const label = valid ? valid.label : 'Contain (Original Aspect)';
+      showToast(`Aspect Ratio: ${label}`);
+    }
+  }
+
+  function cycleAspectRatio() {
+    const currentIndex = ASPECT_RATIO_PRESETS.findIndex((p) => p.id === state.videoFit);
+    const nextIndex = (currentIndex + 1) % ASPECT_RATIO_PRESETS.length;
+    const nextPreset = ASPECT_RATIO_PRESETS[nextIndex];
+    setAspectRatio(nextPreset.id, true);
+  }
+
   async function captureSnapshot() {
     const item = getCurrentItem();
     if (!item || item.isAudio || !el.video.videoWidth) {
@@ -4231,6 +4261,9 @@
       case 'bossKey':
         triggerBossKey();
         break;
+      case 'cycleAspect':
+        cycleAspectRatio();
+        break;
     }
   }
 
@@ -4340,6 +4373,12 @@
         break;
       case 'bossKey':
         triggerBossKey();
+        break;
+      case 'cycleAspect':
+        cycleAspectRatio();
+        break;
+      case 'setAspect':
+        setAspectRatio(cmd.value);
         break;
       case 'setSleepTimer':
         setSleepTimer(cmd.minutes);
@@ -5037,6 +5076,13 @@
       updateChromeSolidity();
       captureSnapshot();
     });
+    if (el.menuCycleAspect) {
+      el.menuCycleAspect.addEventListener('click', () => {
+        el.headerMenu.classList.remove('open');
+        updateChromeSolidity();
+        cycleAspectRatio();
+      });
+    }
     el.menuReveal.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
       updateChromeSolidity();
@@ -5592,9 +5638,7 @@
     el.btnPopSnapshot.addEventListener('click', captureSnapshot);
 
     el.selVideoFit.addEventListener('change', () => {
-      state.videoFit = el.selVideoFit.value;
-      applyVideoAppearance();
-      savePreferences();
+      setAspectRatio(el.selVideoFit.value, false);
       showToast(`Video Fit: ${el.selVideoFit.options[el.selVideoFit.selectedIndex].text}`);
     });
     el.rngBrightness.addEventListener('input', () => {
