@@ -46,6 +46,14 @@ const copycatApi = {
   installAiIntegration: () => ipcRenderer.invoke('app:installAiIntegration'),
   openDefaultAppsSettings: () => ipcRenderer.invoke('app:openDefaultAppsSettings'),
 
+  // Auto-Updater
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  downloadAndInstallUpdate: (asset) => ipcRenderer.invoke('updater:downloadAndInstall', asset),
+  onUpdateAvailable: (cb) => ipcRenderer.on('updater:available', (_e, data) => cb(data)),
+  onUpdateDownloadProgress: (cb) => ipcRenderer.on('updater:downloadProgress', (_e, p) => cb(p)),
+  onUpdateDownloadComplete: (cb) => ipcRenderer.on('updater:downloadComplete', (_e, d) => cb(d)),
+  onUpdateError: (cb) => ipcRenderer.on('updater:error', (_e, err) => cb(err)),
+
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),
   onWindowState: (cb) => ipcRenderer.on('win:state', (_e, state) => cb(state)),

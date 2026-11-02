@@ -149,6 +149,32 @@
           </div>
         </div>
 
+        <!-- New Version Update Prompt Banner -->
+        <div class="shortcut-banner" id="update-prompt-banner" style="z-index:45;">
+          <div class="shortcut-banner-icon" id="update-prompt-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent);width:22px;height:22px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </div>
+          <div class="shortcut-banner-body" id="update-prompt-body">
+            <div class="shortcut-banner-title" id="update-prompt-title">Update Available: v1.0.7</div>
+            <div class="shortcut-banner-desc" id="update-prompt-desc">A new version of CopyCat media player is available on GitHub.</div>
+            <div class="update-progress-wrap" id="update-banner-progress-wrap" style="display:none;margin-top:6px;">
+              <div class="update-progress-bar" style="height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
+                <div class="update-progress-fill" id="update-banner-progress-fill" style="width:0%;height:100%;background:var(--accent);transition:width 0.2s ease;"></div>
+              </div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:4px;" id="update-banner-progress-text">Downloading... 0%</div>
+            </div>
+          </div>
+          <div class="shortcut-banner-actions" id="update-prompt-actions">
+            <button class="primary-pill-btn" id="btn-update-now" type="button" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;">Update Now</button>
+            <button class="ghost-pill-btn" id="btn-update-later" type="button" style="padding:4px 10px;font-size:11px;">Later</button>
+            <button class="lib-mini-link" id="btn-update-skip" type="button" style="text-align:center;font-size:10.5px;color:var(--text-muted);background:none;border:none;cursor:pointer;padding:2px 0;">Not Now</button>
+          </div>
+        </div>
+
         <!-- Resume Playback Prompt Banner -->
         <div class="shortcut-banner" id="resume-prompt-banner" style="z-index:42;">
           <div class="shortcut-banner-icon" id="resume-prompt-icon"></div>
@@ -507,6 +533,14 @@
           <button class="settings-nav-btn" data-settings-tab="inspiration">
             <span class="nav-dot"></span>
             <span>Inspiration</span>
+          </button>
+          <div class="settings-group-lbl" id="settings-group-updates-lbl" style="display:none;margin-top:8px;">Software Updates</div>
+          <button class="settings-nav-btn" id="nav-btn-updates" data-settings-tab="updates" style="display:none;">
+            <span class="nav-dot" style="background:var(--accent);"></span>
+            <span style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+              <span>Updates</span>
+              <span id="settings-update-badge" style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:10px;background:var(--accent);color:#fff;letter-spacing:0.4px;">NEW</span>
+            </span>
           </button>
         </nav>
 
@@ -929,6 +963,54 @@ Start-Process explorer.exe "$env:LOCALAPPDATA\Programs\copycat-media-player\Copy
                     </svg>
                   </div>
                 </a>
+              </div>
+            </div>
+
+            <!-- Panel: Software Updates -->
+            <div class="settings-panel" data-settings-panel="updates" style="display:none;flex-direction:column;gap:18px;">
+              <div>
+                <div class="settings-section-title">Software Updates</div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
+                  Keep CopyCat media player up to date with the latest performance enhancements, codec improvements, and features.
+                </div>
+              </div>
+
+              <!-- Update Info Card -->
+              <div class="update-card" id="update-card" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:14px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                  <div>
+                    <div style="font-size:14px;font-weight:600;color:var(--text-primary);" id="update-card-title">CopyCat Update Available</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="update-card-versions">Current: v1.0.6 → Latest: v1.0.7</div>
+                  </div>
+                  <span class="update-status-pill" id="update-status-pill" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:12px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);">Update Ready</span>
+                </div>
+
+                <!-- Release Notes / Changelog Box -->
+                <div id="update-card-notes-wrap">
+                  <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">What's New in this Version:</div>
+                  <div class="code-box" id="update-card-notes" style="max-height:180px;overflow-y:auto;font-family:inherit;font-size:11.5px;line-height:1.5;white-space:pre-wrap;background:rgba(0,0,0,0.35);"></div>
+                </div>
+
+                <!-- Progress Bar inside settings -->
+                <div class="update-progress-wrap" id="update-card-progress-wrap" style="display:none;">
+                  <div class="update-progress-bar" style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+                    <div class="update-progress-fill" id="update-card-progress-fill" style="width:0%;height:100%;background:var(--accent);transition:width 0.2s ease;"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    <span id="update-card-progress-text">Downloading update... 0%</span>
+                    <span id="update-card-progress-bytes">0 MB / 0 MB</span>
+                  </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="display:flex;align-items:center;gap:10px;margin-top:2px;">
+                  <button class="primary-pill-btn" id="btn-settings-update-now" type="button" style="background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;padding:7px 18px;font-size:12.5px;">
+                    ⚡ Update Now
+                  </button>
+                  <button class="ghost-pill-btn" id="btn-settings-check-updates" type="button" style="padding:7px 14px;font-size:12px;">
+                    🔄 Check for Updates
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -100,6 +100,8 @@
     history: [],             // [{ filePath, name, title, duration, lastPlayedAt }]
     drawerTab: 'queue',      // 'queue' | 'bookmarks' | 'history'
     dismissShortcutPrompt: false,
+    ignoredUpdateVersion: null,
+    availableUpdate: null,
 
     playing: false,
     volume: 100,             // 0..200 (200% cone boost)
@@ -261,6 +263,19 @@
     btnBannerCreateShortcut: $('btn-banner-create-shortcut'),
     btnBannerDismissShortcut: $('btn-banner-dismiss-shortcut'),
 
+    updatePromptBanner: $('update-prompt-banner'),
+    updatePromptIcon: $('update-prompt-icon'),
+    updatePromptBody: $('update-prompt-body'),
+    updatePromptTitle: $('update-prompt-title'),
+    updatePromptDesc: $('update-prompt-desc'),
+    updateBannerProgressWrap: $('update-banner-progress-wrap'),
+    updateBannerProgressFill: $('update-banner-progress-fill'),
+    updateBannerProgressText: $('update-banner-progress-text'),
+    updatePromptActions: $('update-prompt-actions'),
+    btnUpdateNow: $('btn-update-now'),
+    btnUpdateLater: $('btn-update-later'),
+    btnUpdateSkip: $('btn-update-skip'),
+
     resumePromptBanner: $('resume-prompt-banner'),
     resumePromptIcon: $('resume-prompt-icon'),
     resumePromptDesc: $('resume-prompt-desc'),
@@ -380,6 +395,22 @@
     btnCopyAiCmd: $('btn-copy-ai-cmd'),
     btnCopyFullAiPrompt: $('btn-copy-full-ai-prompt'),
     btnInstallAiSkill: $('btn-install-ai-skill'),
+
+    navBtnUpdates: $('nav-btn-updates'),
+    settingsGroupUpdatesLbl: $('settings-group-updates-lbl'),
+    settingsUpdateBadge: $('settings-update-badge'),
+    updateCard: $('update-card'),
+    updateCardTitle: $('update-card-title'),
+    updateCardVersions: $('update-card-versions'),
+    updateStatusPill: $('update-status-pill'),
+    updateCardNotesWrap: $('update-card-notes-wrap'),
+    updateCardNotes: $('update-card-notes'),
+    updateCardProgressWrap: $('update-card-progress-wrap'),
+    updateCardProgressFill: $('update-card-progress-fill'),
+    updateCardProgressText: $('update-card-progress-text'),
+    updateCardProgressBytes: $('update-card-progress-bytes'),
+    btnSettingsUpdateNow: $('btn-settings-update-now'),
+    btnSettingsCheckUpdates: $('btn-settings-check-updates'),
 
     inpTuneVol: $('inp-tune-vol'),
     inpTuneSeekSmall: $('inp-tune-seek-small'),
@@ -843,6 +874,7 @@
       showRemainingTime: state.showRemainingTime,
       sidebarShortcuts: state.sidebarShortcuts,
       dismissShortcutPrompt: state.dismissShortcutPrompt,
+      ignoredUpdateVersion: state.ignoredUpdateVersion,
       keybindings: state.keybindings,
       hotkeySettings: state.hotkeySettings,
       repeatMode: state.repeatMode,
@@ -888,6 +920,7 @@
       if (typeof d.showHoverThumb === 'boolean') state.showHoverThumb = d.showHoverThumb;
       if (typeof d.autoHideFs === 'boolean') state.autoHideFs = d.autoHideFs;
       if (typeof d.dismissShortcutPrompt === 'boolean') state.dismissShortcutPrompt = d.dismissShortcutPrompt;
+      if (typeof d.ignoredUpdateVersion === 'string') state.ignoredUpdateVersion = d.ignoredUpdateVersion;
       if (d.folderPlaybackV3 && typeof d.autoLoadFolder === 'boolean') {
         state.autoLoadFolder = d.autoLoadFolder;
       } else {
@@ -6013,6 +6046,207 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     if (btnOpenDefaultApps) {
       btnOpenDefaultApps.addEventListener('click', () => {
         if (api.openDefaultAppsSettings) api.openDefaultAppsSettings();
+      });
+    }
+
+    // ==================== GITHUB AUTO-UPDATER LOGIC ====================
+    let sessionDismissedUpdate = false;
+    let isDownloadingUpdate = false;
+
+    function renderUpdateDetails(updateInfo) {
+      if (!updateInfo) return;
+      state.availableUpdate = updateInfo;
+
+      // Reveal Updates tab in Settings
+      if (el.navBtnUpdates) el.navBtnUpdates.style.display = 'flex';
+      if (el.settingsGroupUpdatesLbl) el.settingsGroupUpdatesLbl.style.display = 'block';
+
+      if (updateInfo.updateAvailable) {
+        if (el.settingsUpdateBadge) el.settingsUpdateBadge.style.display = 'inline-block';
+        if (el.updateCardTitle) el.updateCardTitle.textContent = `CopyCat Update Available: ${updateInfo.latestVersion}`;
+        if (el.updateCardVersions) el.updateCardVersions.textContent = `Current: ${updateInfo.currentVersion} ➔ Latest: ${updateInfo.latestVersion}`;
+        if (el.updateStatusPill) {
+          el.updateStatusPill.textContent = 'Update Ready';
+          el.updateStatusPill.style.color = 'var(--accent)';
+          el.updateStatusPill.style.background = 'rgba(var(--accent-rgb), 0.18)';
+        }
+        if (el.updateCardNotesWrap) el.updateCardNotesWrap.style.display = 'block';
+        if (el.updateCardNotes) {
+          el.updateCardNotes.textContent = updateInfo.releaseNotes || 'Performance optimizations, bug fixes, and improvements.';
+        }
+        if (el.btnSettingsUpdateNow) {
+          el.btnSettingsUpdateNow.style.display = 'inline-flex';
+          el.btnSettingsUpdateNow.disabled = false;
+        }
+      } else {
+        if (el.settingsUpdateBadge) el.settingsUpdateBadge.style.display = 'none';
+        if (el.updateCardTitle) el.updateCardTitle.textContent = 'CopyCat Media Player is Up to Date';
+        if (el.updateCardVersions) el.updateCardVersions.textContent = `Installed Version: ${updateInfo.currentVersion}`;
+        if (el.updateStatusPill) {
+          el.updateStatusPill.textContent = 'Latest Version ✓';
+          el.updateStatusPill.style.color = '#34D399';
+          el.updateStatusPill.style.background = 'rgba(52, 211, 153, 0.18)';
+        }
+        if (el.updateCardNotesWrap) el.updateCardNotesWrap.style.display = 'none';
+        if (el.btnSettingsUpdateNow) el.btnSettingsUpdateNow.style.display = 'none';
+      }
+    }
+
+    function showUpdatePromptBanner(updateInfo) {
+      if (!updateInfo || !updateInfo.updateAvailable) return;
+      if (sessionDismissedUpdate) return;
+      // If user previously selected "Not Now" / Skip for this specific version, suppress startup prompt
+      if (state.ignoredUpdateVersion === updateInfo.latestVersion) {
+        renderUpdateDetails(updateInfo);
+        return;
+      }
+
+      renderUpdateDetails(updateInfo);
+
+      if (el.updatePromptTitle) {
+        el.updatePromptTitle.textContent = `Update Available: ${updateInfo.latestVersion}`;
+      }
+      if (el.updatePromptDesc) {
+        const sizeMb = updateInfo.asset?.size ? ` (${(updateInfo.asset.size / (1024 * 1024)).toFixed(1)} MB)` : '';
+        el.updatePromptDesc.textContent = `A new version of CopyCat media player is available${sizeMb}.`;
+      }
+      if (el.updatePromptBanner) {
+        el.updatePromptBanner.classList.add('visible');
+      }
+    }
+
+    function hideUpdatePromptBanner() {
+      if (el.updatePromptBanner) {
+        el.updatePromptBanner.classList.remove('visible');
+      }
+    }
+
+    async function triggerUpdateDownload() {
+      if (isDownloadingUpdate) return;
+      const targetUpdate = state.availableUpdate;
+      if (!targetUpdate || !targetUpdate.asset) {
+        showToast('No update package found for download');
+        return;
+      }
+
+      isDownloadingUpdate = true;
+      if (el.btnUpdateNow) el.btnUpdateNow.disabled = true;
+      if (el.btnSettingsUpdateNow) el.btnSettingsUpdateNow.disabled = true;
+
+      // Show progress in banner
+      if (el.updateBannerProgressWrap) el.updateBannerProgressWrap.style.display = 'block';
+      if (el.updatePromptActions) el.updatePromptActions.style.display = 'none';
+
+      // Show progress in settings card
+      if (el.updateCardProgressWrap) el.updateCardProgressWrap.style.display = 'block';
+
+      showToast(`Downloading update ${targetUpdate.latestVersion}...`);
+
+      if (api.downloadAndInstallUpdate) {
+        const res = await api.downloadAndInstallUpdate(targetUpdate.asset);
+        if (!res || !res.ok) {
+          isDownloadingUpdate = false;
+          showToast(`Update error: ${res?.error || 'failed to download'}`);
+          if (el.btnUpdateNow) el.btnUpdateNow.disabled = false;
+          if (el.btnSettingsUpdateNow) el.btnSettingsUpdateNow.disabled = false;
+          if (el.updatePromptActions) el.updatePromptActions.style.display = 'flex';
+          if (el.updateBannerProgressWrap) el.updateBannerProgressWrap.style.display = 'none';
+          if (el.updateCardProgressWrap) el.updateCardProgressWrap.style.display = 'none';
+        }
+      }
+    }
+
+    if (api.onUpdateDownloadProgress) {
+      api.onUpdateDownloadProgress((progress) => {
+        const percent = Math.min(100, Math.max(0, progress.percent || 0));
+        const transMb = ((progress.transferred || 0) / (1024 * 1024)).toFixed(1);
+        const totalMb = ((progress.total || 0) / (1024 * 1024)).toFixed(1);
+
+        if (el.updateBannerProgressFill) el.updateBannerProgressFill.style.width = `${percent}%`;
+        if (el.updateBannerProgressText) el.updateBannerProgressText.textContent = `Downloading... ${percent}% (${transMb} MB / ${totalMb} MB)`;
+
+        if (el.updateCardProgressFill) el.updateCardProgressFill.style.width = `${percent}%`;
+        if (el.updateCardProgressText) el.updateCardProgressText.textContent = `Downloading update... ${percent}%`;
+        if (el.updateCardProgressBytes) el.updateCardProgressBytes.textContent = `${transMb} MB / ${totalMb} MB`;
+      });
+    }
+
+    if (api.onUpdateDownloadComplete) {
+      api.onUpdateDownloadComplete(() => {
+        if (el.updateBannerProgressText) el.updateBannerProgressText.textContent = 'Download complete! Starting installer...';
+        if (el.updateCardProgressText) el.updateCardProgressText.textContent = 'Download complete! Launching installer...';
+        showToast('Download complete. Launching installer...');
+      });
+    }
+
+    if (api.onUpdateError) {
+      api.onUpdateError((err) => {
+        isDownloadingUpdate = false;
+        showToast(`Update error: ${err?.error || 'Download failed'}`);
+        if (el.btnUpdateNow) el.btnUpdateNow.disabled = false;
+        if (el.btnSettingsUpdateNow) el.btnSettingsUpdateNow.disabled = false;
+        if (el.updatePromptActions) el.updatePromptActions.style.display = 'flex';
+        if (el.updateBannerProgressWrap) el.updateBannerProgressWrap.style.display = 'none';
+        if (el.updateCardProgressWrap) el.updateCardProgressWrap.style.display = 'none';
+      });
+    }
+
+    if (el.btnUpdateNow) {
+      el.btnUpdateNow.addEventListener('click', triggerUpdateDownload);
+    }
+
+    if (el.btnUpdateLater) {
+      el.btnUpdateLater.addEventListener('click', () => {
+        sessionDismissedUpdate = true;
+        hideUpdatePromptBanner();
+        if (state.availableUpdate) renderUpdateDetails(state.availableUpdate);
+        showToast('Update postponed. Option available in Preferences → Updates.');
+      });
+    }
+
+    if (el.btnUpdateSkip) {
+      el.btnUpdateSkip.addEventListener('click', () => {
+        if (state.availableUpdate?.latestVersion) {
+          state.ignoredUpdateVersion = state.availableUpdate.latestVersion;
+          savePreferences();
+        }
+        hideUpdatePromptBanner();
+        if (state.availableUpdate) renderUpdateDetails(state.availableUpdate);
+        showToast(`Skipped ${state.availableUpdate?.latestVersion || 'this version'}. Option remains in Preferences → Updates.`);
+      });
+    }
+
+    if (el.btnSettingsUpdateNow) {
+      el.btnSettingsUpdateNow.addEventListener('click', triggerUpdateDownload);
+    }
+
+    if (el.btnSettingsCheckUpdates) {
+      el.btnSettingsCheckUpdates.addEventListener('click', async () => {
+        el.btnSettingsCheckUpdates.disabled = true;
+        el.btnSettingsCheckUpdates.textContent = 'Checking...';
+        showToast('Checking for updates on GitHub...');
+        try {
+          if (api.checkForUpdates) {
+            const res = await api.checkForUpdates();
+            renderUpdateDetails(res);
+            if (res && res.updateAvailable) {
+              showToast(`Update available: ${res.latestVersion}`);
+            } else {
+              showToast(`You are on the latest version (${res?.currentVersion || 'v1.0.6'})`);
+            }
+          }
+        } catch (e) {
+          showToast(`Check failed: ${e.message}`);
+        } finally {
+          el.btnSettingsCheckUpdates.disabled = false;
+          el.btnSettingsCheckUpdates.textContent = '🔄 Check for Updates';
+        }
+      });
+    }
+
+    if (api.onUpdateAvailable) {
+      api.onUpdateAvailable((updateInfo) => {
+        showUpdatePromptBanner(updateInfo);
       });
     }
 

@@ -1648,6 +1648,23 @@ html, body {
 #queue-prompt-banner.stacked-above {
   bottom: calc(var(--bottom-h) + 92px);
 }
+#update-prompt-banner {
+  z-index: 45;
+}
+#update-prompt-banner.stacked-above {
+  bottom: calc(var(--bottom-h) + 110px);
+}
+.update-progress-bar {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.update-progress-fill {
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
 @keyframes bannerSlideUp {
   from {
     opacity: 0;
