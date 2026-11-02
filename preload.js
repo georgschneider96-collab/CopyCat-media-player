@@ -57,6 +57,8 @@ const copycatApi = {
   // Live telemetry + AI bridge
   reportStatus: (status) => ipcRenderer.send('player:statusUpdate', status),
   onWindowState: (cb) => ipcRenderer.on('win:state', (_e, state) => cb(state)),
+  onWindowMinimize: (cb) => ipcRenderer.on('win:minimize', () => cb()),
+  onWindowRestore: (cb) => ipcRenderer.on('win:restore', () => cb()),
   onPipExitRequested: (cb) => ipcRenderer.on('pip:exitRequested', () => cb()),
   onAiCommand: (cb) => ipcRenderer.on('ai:command', (_e, cmd) => cb(cmd)),
   onInitialMedia: (cb) => ipcRenderer.on('media:initial', (_e, data) => cb(data)),

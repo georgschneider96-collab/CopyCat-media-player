@@ -98,6 +98,7 @@
           <div class="lib-search-row">
             <span id="lib-search-icon"></span>
             <input type="text" id="lib-search-input" placeholder="Search folder media..." autocomplete="off" />
+            <button type="button" class="lib-search-clear" id="btn-lib-search-clear" title="Clear search" style="display:none;">×</button>
           </div>
           <div class="lib-toolbar">
             <span id="lib-folder-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">No folder loaded</span>
@@ -163,7 +164,7 @@
             </svg>
           </div>
           <div class="shortcut-banner-body" id="update-prompt-body">
-            <div class="shortcut-banner-title" id="update-prompt-title">Update Available: v1.0.7</div>
+            <div class="shortcut-banner-title" id="update-prompt-title">Update Available: v1.0.8</div>
             <div class="shortcut-banner-desc" id="update-prompt-desc">A new version of CopyCat media player is available on GitHub.</div>
             <div class="update-progress-wrap" id="update-banner-progress-wrap" style="display:none;margin-top:6px;">
               <div class="update-progress-bar" style="height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;">
@@ -825,6 +826,14 @@
                 </div>
                 <button class="jux-switch" id="sw-resume-playback" type="button" style="flex-shrink:0;"></button>
               </div>
+
+              <div class="pop-row">
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Auto-Pause When Minimized</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Automatically pause playback when minimized to the taskbar, and resume upon restoring</div>
+                </div>
+                <button class="jux-switch on" id="sw-auto-pause-minimize" type="button" style="flex-shrink:0;"></button>
+              </div>
             </div>
 
             <!-- Panel: Keyboard Shortcuts -->
@@ -984,7 +993,7 @@ Start-Process explorer.exe "$env:LOCALAPPDATA\Programs\copycat-media-player\Copy
                 <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                   <div>
                     <div style="font-size:14px;font-weight:600;color:var(--text-primary);" id="update-card-title">CopyCat Update Available</div>
-                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="update-card-versions">Current: v1.0.6 → Latest: v1.0.7</div>
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="update-card-versions">Current: v1.0.7 → Latest: v1.0.8</div>
                   </div>
                   <span class="update-status-pill" id="update-status-pill" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:12px;background:rgba(var(--accent-rgb),0.18);color:var(--accent);">Update Ready</span>
                 </div>

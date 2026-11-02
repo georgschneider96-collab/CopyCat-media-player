@@ -15,6 +15,8 @@ $portableUploadName = if ($portableUpload) { $portableUpload.Name } else { "Copy
 
 $candidateExes = @(
     $TargetExe,
+    "$env:ProgramFiles\CopyCat media player\CopyCat media player.exe",
+    "${env:ProgramFiles(x86)}\CopyCat media player\CopyCat media player.exe",
     "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe",
     $portableUploadPath,
     (Join-Path $appDir "dist\win-unpacked\CopyCat media player.exe"),
@@ -303,6 +305,8 @@ $regCmd = (Get-ItemProperty "HKCU:\Software\Classes\CopyCat.Video\shell\open\com
 $regExe = if ($regCmd -match '^\s*"([^"]+)"') { $matches[1] } else { "" }
 
 $candidates = @(
+    "$env:ProgramFiles\CopyCat media player\CopyCat media player.exe",
+    "${env:ProgramFiles(x86)}\CopyCat media player\CopyCat media player.exe",
     "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe",
     $regExe,
     (Get-ChildItem -Path "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads" -Filter "*CopyCat*.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1),
@@ -315,7 +319,8 @@ if (-not (Test-Bridge)) {
     if (Get-ScheduledTask -TaskName "LaunchCopyCat" -ErrorAction SilentlyContinue) {
         schtasks.exe /run /tn "LaunchCopyCat" | Out-Null
     } elseif ($targetExe) {
-        Start-Process explorer.exe "`"$targetExe`""
+        $shell = New-Object -ComObject Shell.Application
+        $shell.ShellExecute($targetExe, "", "", "open", 1)
     }
     for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 250
@@ -373,11 +378,11 @@ When running inside an AI assistant terminal or background sandbox, NEVER use `S
 Run any of these commands in PowerShell:
 
 ```powershell
-# Method 1 (Universal CLI command on PATH):
-copycat "C:\path\to\video.mp4"
+# Method 1 (Universal Shell COM invocation - works from any terminal or sandbox):
+(New-Object -ComObject Shell.Application).ShellExecute("C:\path\to\CopyCat media player.exe", "C:\path\to\video.mp4", "", "open", 1)
 
-# Method 2 (Via Windows Explorer shell - forces interactive desktop spawn):
-Start-Process explorer.exe "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe"
+# Method 2 (Universal CLI command on PATH):
+copycat "C:\path\to\video.mp4"
 
 # Method 3 (Via Task Scheduler):
 schtasks.exe /run /tn "LaunchCopyCat"

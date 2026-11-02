@@ -48,6 +48,7 @@
 ### 🎯 Power-User Tools & Playback Controls
 - **Live Hover Scrubbing**: Floating live thumbnail preview card with LRU frame caching for instant scrubbing precision.
 - **Hold for 2.0x Speed**: Press and hold `Space` or long-press the video canvas to smoothly boost playback to 2.0x with an animated HUD badge; release to restore normal speed.
+- **Auto-Pause When Minimized**: Automatically pauses playback upon minimizing to the taskbar and resumes upon restoring (with Picture-in-Picture immunity and pre-paused persistence).
 - **Stop After Current Episode (`E`)**: Complete the current file cleanly and stop playback automatically without advancing down the queue.
 - **Automated Sleep Timer**: Configurable graceful sleep timer (15m to 120m) with live status readout.
 - **Instant Boss Key (`F12`)**: Silences audio, pauses playback, exits fullscreen/PiP, and minimizes the window instantly.

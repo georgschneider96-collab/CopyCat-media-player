@@ -157,6 +157,7 @@
     autoLoadSub: true,
     rememberState: true,
     resumeLastVideo: false,
+    autoPauseOnMinimize: true,
     seekbarThumbStyle: 'pill', // 'cone' | 'paw' | 'pill'
     visualizerStyle: 'bars',   // 'bars' | 'waveform' | 'aura'
     isGhostMode: false,
@@ -190,6 +191,9 @@
     // Window & chrome interaction state
     isFullscreen: false,
     isMaximized: false,
+    isMinimized: false,
+    wasPlayingBeforeMinimize: false,
+    bossKeySuppressedResume: false,
     aiPort: 4500,
     hoveringTopBar: false,
     hoveringBottomBar: false,
@@ -245,6 +249,7 @@
     libQuickTabs: $('lib-quick-tabs'),
     libSearchIcon: $('lib-search-icon'),
     libSearchInput: $('lib-search-input'),
+    btnLibSearchClear: $('btn-lib-search-clear'),
     libFolderLabel: $('lib-folder-label'),
     btnLibOpenFolder: $('btn-lib-open-folder'),
     btnLibOpenFiles: $('btn-lib-open-files'),
@@ -391,6 +396,7 @@
     swAutoloadSub: $('sw-autoload-sub'),
     swRememberState: $('sw-remember-state'),
     swResumePlayback: $('sw-resume-playback'),
+    swAutoPauseMinimize: $('sw-auto-pause-minimize'),
     btnCreateDesktopShortcut: $('btn-create-desktop-shortcut'),
     aiEndpointBox: $('ai-endpoint-box'),
     aiSampleCmd: $('ai-sample-cmd'),
@@ -864,6 +870,7 @@
       autoLoadSub: state.autoLoadSub,
       rememberState: state.rememberState,
       resumeLastVideo: state.resumeLastVideo,
+      autoPauseOnMinimize: state.autoPauseOnMinimize,
       subTimelineBlocks: state.subTimelineBlocks,
       subSizePx: state.subSizePx,
       subEnabled: state.subEnabled,
@@ -931,6 +938,7 @@
       if (typeof d.autoLoadSub === 'boolean') state.autoLoadSub = d.autoLoadSub;
       if (typeof d.rememberState === 'boolean') state.rememberState = d.rememberState;
       if (typeof d.resumeLastVideo === 'boolean') state.resumeLastVideo = d.resumeLastVideo;
+      if (typeof d.autoPauseOnMinimize === 'boolean') state.autoPauseOnMinimize = d.autoPauseOnMinimize;
       if (typeof d.subTimelineBlocks === 'boolean') state.subTimelineBlocks = d.subTimelineBlocks;
       if (typeof d.subSizePx === 'number') state.subSizePx = d.subSizePx;
       if (typeof d.subEnabled === 'boolean') state.subEnabled = d.subEnabled;
@@ -1022,6 +1030,7 @@
     if (el.swAutoloadSub) el.swAutoloadSub.classList.toggle('on', state.autoLoadSub);
     if (el.swRememberState) el.swRememberState.classList.toggle('on', state.rememberState);
     if (el.swResumePlayback) el.swResumePlayback.classList.toggle('on', Boolean(state.resumeLastVideo));
+    if (el.swAutoPauseMinimize) el.swAutoPauseMinimize.classList.toggle('on', Boolean(state.autoPauseOnMinimize));
 
     if (el.selEqPreset) el.selEqPreset.value = state.eqPreset;
     if (el.selSkipMode) el.selSkipMode.value = state.skipMode;
@@ -1787,11 +1796,16 @@
     renderRightDrawer();
   }
 
-  async function navigateLibraryToFolder(folderPath) {
+  async function navigateLibraryToFolder(folderPath, preserveFilter = false) {
     if (!folderPath) return;
     const scanned = await api.scanFolder(folderPath);
     if (!scanned) return;
     state.libraryFolder = scanned;
+    if (!preserveFilter) {
+      state.libraryFilter = '';
+      if (el.libSearchInput) el.libSearchInput.value = '';
+      if (el.btnLibSearchClear) el.btnLibSearchClear.style.display = 'none';
+    }
     el.libFolderLabel.textContent = scanned.folderName || 'Folder';
     el.libFolderLabel.title = scanned.folderPath || '';
     renderSidebarShortcuts();
@@ -1854,7 +1868,7 @@
     const frag = document.createDocumentFragment();
 
     // Parent folder ".." row when browsing a folder
-    if (state.libraryFolder && parentPath && !q) {
+    if (state.libraryFolder && parentPath) {
       const upRow = document.createElement('div');
       upRow.className = 'lib-item';
       upRow.title = `Up to ${parentPath}`;
@@ -1945,9 +1959,27 @@
     if (!filteredDirs.length && !filteredFiles.length) {
       const empty = document.createElement('div');
       empty.style.cssText = 'padding:22px 12px;text-align:center;color:var(--text-muted);font-size:12px;';
-      empty.textContent = state.libraryFolder
-        ? 'No matching media or subfolders here.'
-        : 'Select a shortcut above or click "+ Folder" to browse.';
+      if (q) {
+        const msg = document.createElement('div');
+        msg.textContent = `No matching media or subfolders for "${q}".`;
+        const btnClear = document.createElement('button');
+        btnClear.type = 'button';
+        btnClear.className = 'lib-mini-link';
+        btnClear.style.cssText = 'margin-top:8px;cursor:pointer;display:inline-block;';
+        btnClear.textContent = 'Clear search';
+        btnClear.addEventListener('click', () => {
+          state.libraryFilter = '';
+          if (el.libSearchInput) el.libSearchInput.value = '';
+          if (el.btnLibSearchClear) el.btnLibSearchClear.style.display = 'none';
+          renderLibraryList();
+        });
+        empty.appendChild(msg);
+        empty.appendChild(btnClear);
+      } else {
+        empty.textContent = state.libraryFolder
+          ? 'No media files or subfolders here.'
+          : 'Select a shortcut above or click "+ Folder" to browse.';
+      }
       frag.appendChild(empty);
     }
 
@@ -2420,6 +2452,8 @@
   }
 
   // ==================== PLAYBACK & VIDEO CONTROLS ====================
+  let isAutoPausingForMinimize = false;
+
   function playMedia() {
     if (!getCurrentItem()) return;
     ensureAudioGraph();
@@ -2427,6 +2461,9 @@
   }
 
   function pauseMedia() {
+    if (!isAutoPausingForMinimize) {
+      state.wasPlayingBeforeMinimize = false;
+    }
     el.video.pause();
   }
 
@@ -3566,6 +3603,8 @@
   }
 
   function triggerBossKey() {
+    state.bossKeySuppressedResume = true;
+    state.wasPlayingBeforeMinimize = false;
     pauseMedia();
     state.muted = true;
     applyVolumeToEngine();
@@ -4380,10 +4419,17 @@
       case 'setAspect':
         setAspectRatio(cmd.value);
         break;
+      case 'snapshot':
+        captureSnapshot();
+        break;
+      case 'snapshotClipboard':
+        copySnapshotToClipboard();
+        break;
       case 'setSleepTimer':
         setSleepTimer(cmd.minutes);
         break;
       case 'stop':
+        state.wasPlayingBeforeMinimize = false;
         pauseMedia();
         seekToSeconds(0, false);
         showToast('AI Bridge: Stop');
@@ -4863,10 +4909,54 @@
       });
     }
 
+    function handleWindowMinimized() {
+      const isPip = Boolean(document.pictureInPictureElement);
+      if (state.autoPauseOnMinimize && !isPip) {
+        if (state.playing || !el.video.paused) {
+          state.wasPlayingBeforeMinimize = true;
+          isAutoPausingForMinimize = true;
+          pauseMedia();
+          isAutoPausingForMinimize = false;
+          showToast('Auto-Paused (Window Minimized)');
+        }
+      }
+    }
+
+    function handleWindowRestored() {
+      if (state.bossKeySuppressedResume) {
+        state.bossKeySuppressedResume = false;
+        state.wasPlayingBeforeMinimize = false;
+        return;
+      }
+      if (state.autoPauseOnMinimize && state.wasPlayingBeforeMinimize && !document.pictureInPictureElement) {
+        state.wasPlayingBeforeMinimize = false;
+        if (el.video.paused) {
+          playMedia();
+          showToast('Resumed Playback');
+        }
+      }
+    }
+
+    if (api.onWindowMinimize) {
+      api.onWindowMinimize(handleWindowMinimized);
+    }
+    if (api.onWindowRestore) {
+      api.onWindowRestore(handleWindowRestored);
+    }
+
     api.onWindowState((ws) => {
       state.isMaximized = ws.maximized;
       state.isFullscreen = ws.fullscreen;
       state.alwaysOnTop = ws.alwaysOnTop;
+      if (typeof ws.minimized === 'boolean') {
+        const wasMin = Boolean(state.isMinimized);
+        state.isMinimized = ws.minimized;
+        if (!wasMin && state.isMinimized) {
+          handleWindowMinimized();
+        } else if (wasMin && !state.isMinimized) {
+          handleWindowRestored();
+        }
+      }
       if (typeof ws.hasFfmpeg === 'boolean') state.hasFfmpeg = ws.hasFfmpeg;
       if (ws.aiPort && ws.aiPort !== state.aiPort) {
         state.aiPort = ws.aiPort;
@@ -5108,12 +5198,24 @@
     let libSearchTimer = null;
     el.libSearchInput.addEventListener('input', () => {
       state.libraryFilter = el.libSearchInput.value;
+      if (el.btnLibSearchClear) {
+        el.btnLibSearchClear.style.display = el.libSearchInput.value ? 'inline-flex' : 'none';
+      }
       if (libSearchTimer) clearTimeout(libSearchTimer);
       libSearchTimer = setTimeout(() => {
         libSearchTimer = null;
         renderLibraryList();
       }, 120);
     });
+    if (el.btnLibSearchClear) {
+      el.btnLibSearchClear.addEventListener('click', () => {
+        state.libraryFilter = '';
+        el.libSearchInput.value = '';
+        el.btnLibSearchClear.style.display = 'none';
+        el.libSearchInput.focus();
+        renderLibraryList();
+      });
+    }
     el.libSearchInput.addEventListener('focus', syncSidebarAutoCollapse);
     el.libSearchInput.addEventListener('blur', syncSidebarAutoCollapse);
     el.btnLibOpenFolder.addEventListener('click', () => openFolderDialog({ browseOnly: true }));
@@ -5274,6 +5376,7 @@
     });
 
     el.video.addEventListener('ended', () => {
+      state.wasPlayingBeforeMinimize = false;
       if (state.playbackSource === 'queue' && state.currentItem && state.currentItem.filePath) {
         markQueueItemWatched(state.currentItem.filePath);
       }
@@ -5910,6 +6013,14 @@
         showToast(state.resumeLastVideo ? 'Resume on Startup: Enabled' : 'Resume on Startup: Disabled (Starts with clean Cat)');
       });
     }
+    if (el.swAutoPauseMinimize) {
+      el.swAutoPauseMinimize.addEventListener('click', () => {
+        state.autoPauseOnMinimize = !state.autoPauseOnMinimize;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.autoPauseOnMinimize ? 'Auto-Pause on Minimize: Enabled' : 'Auto-Pause on Minimize: Disabled');
+      });
+    }
 
     if (el.btnSkipSegment) {
       el.btnSkipSegment.addEventListener('click', (e) => {
@@ -5978,11 +6089,11 @@
 
 IMPORTANT: Do not launch CopyCat with Start-Process directly, because background service terminals are blocked by Windows from creating interactive GUI desktop windows.
 
-Instead, launch or open media on my desktop using:
-copycat "C:\\path\\to\\video.mp4"
+Instead, launch or open media onto my visible desktop using:
+(New-Object -ComObject Shell.Application).ShellExecute("C:\\path\\to\\CopyCat media player.exe", "C:\\path\\to\\video.mp4", "", "open", 1)
 
-Or launch the app via Windows Explorer:
-Start-Process explorer.exe "$env:LOCALAPPDATA\\Programs\\copycat-media-player\\CopyCat media player.exe"
+Or use the global CLI command:
+copycat "C:\\path\\to\\video.mp4"
 
 Wait 2 seconds, then send playback or speed commands via HTTP:
 Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -ContentType "application/json" -Body '{"action":"openFile","filePath":"C:\\\\path\\\\to\\\\video.mp4"}'
