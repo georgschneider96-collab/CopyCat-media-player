@@ -310,7 +310,7 @@ $candidates = @(
     "$env:LOCALAPPDATA\Programs\copycat-media-player\CopyCat media player.exe",
     $regExe,
     (Get-ChildItem -Path "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads" -Filter "*CopyCat*.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1),
-    "C:\Users\Schual\Desktop\VLCopyCAT\Launch_CopyCat.exe"
+    "$safeExe"
 )
 
 $targetExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1

@@ -12,23 +12,32 @@ Zero build-step complexity: edit any file in `src/` and press `Ctrl + R` inside 
 ## 2. File Structure
 ```text
 CopyCat media player/
-├── package.json        # Electron app manifest (`npm start`, `npm run dist`)
-├── main.js             # Electron Main Process: frameless window, native file/folder dialogs,
-│                       #   desktop shortcut manager, auto-subtitles, and Local AI HTTP API (port 4500)
-├── preload.js          # Electron Preload: exposes `window.vlcopycat` IPC bridge securely
-├── AI_CONTEXT.md       # This architecture & AI control reference
-├── README.md           # User quick-start, hotkeys, and customization guide
+├── package.json          # Electron app manifest (`npm start`, `npm run dist`)
+├── main.js               # Electron Main Process: app lifecycle, single instance lock, window creation
+├── preload.js            # Electron Preload: exposes `window.copycat` / `window.vlcopycat` IPC bridge securely
+├── AI_CONTEXT.md         # This architecture & AI control reference
+├── README.md             # User quick-start, hotkeys, and customization guide
+├── export_notebooklm.ps1 # Exports complete project into CopyCat-Gesamtprojekt.txt
 ├── assets/
-│   ├── icon.ico        # Multi-resolution Windows icon (16, 24, 32, 48, 64, 128, 256px)
-│   └── cat_icon.svg    # Source vector cat design
+│   ├── icon.ico          # Multi-resolution Windows icon (16, 24, 32, 48, 64, 128, 256px)
+│   └── cat_icon.svg      # Source vector cat design
 └── src/
-    ├── index.html      # Player DOM: Top Header, Left Library Sidebar, Center Video Stage,
-    │                   #   Right Queue/Bookmarks Drawer, Bottom Bar, Popovers & Settings Modal
-    ├── styles.css      # Design tokens (--accent, --accent-rgb), 9 color themes, cat iconography,
-    │                   #   Juxtopposed [ON|OFF] switches, seekbar & glassmorphic surfaces
-    ├── icons.js        # Crisp inline vector SVGs matching the redesign's iconography & custom cat
-    └── app.js          # Core Player State, Web Audio 200% Gain + EQ + Visualizer, offscreen
-                        #   hover-thumbnail generator, SRT/VTT subtitle engine & AI IPC handler
+    ├── main/
+    │   ├── container.js      # Lightweight IoC ServiceContainer & WindowManager (Dependency Injection)
+    │   ├── stream-manager.js # Dedicated FFmpeg live streaming & thumbnail preview worker manager
+    │   ├── logger.js         # Structured, prefixed logger (`[VLCopyCat:...]`) with file backup
+    │   ├── session.js        # Windows session, Taskbar thumbar buttons, desktop shortcuts & AI breakout
+    │   ├── updater.js        # GitHub Releases auto-updater, asset stream downloader & installer runner
+    │   ├── media-resolver.js # FFmpeg/FFprobe binary path resolution, header-byte sniffing & folder scanning
+    │   ├── ipc.js            # Declarative IPC Registry with input validation & injected services
+    │   └── server.js         # Local HTTP Server (`127.0.0.1:4500`) with dynamic CommandRegistry
+    ├── index.html        # Player DOM: Top Header, Left Library Sidebar, Center Video Stage,
+    │                     #   Right Queue/Bookmarks Drawer, Bottom Bar, Popovers & Settings Modal
+    ├── styles.css        # Design tokens (--accent, --accent-rgb), 9 color themes, cat iconography,
+    │                     #   Juxtopposed [ON|OFF] switches, seekbar & glassmorphic surfaces
+    ├── icons.js          # Crisp inline vector SVGs matching the redesign's iconography & custom cat
+    └── app.js            # Core Player State, Web Audio 200% Gain + EQ + Visualizer, offscreen
+                          #   hover-thumbnail generator, SRT/VTT subtitle engine & AI IPC handler
 ```
 
 ## 3. Design System & Theme Variables (`src/styles.css`)

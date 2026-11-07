@@ -5,3 +5,5 @@ dist/
 Thumbs.db
 bin/ffmpeg.exe
 bin/ffprobe.exe
+CopyCat-media-player-*.exe
+*.zip

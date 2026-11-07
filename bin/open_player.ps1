@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = 'SilentlyContinue'
 
 $appDir = Split-Path -Parent $PSScriptRoot
-if (-not $appDir) { $appDir = "C:\Users\Schual\Desktop\VLCopyCAT" }
+if (-not $appDir) { $appDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path }
 $launcherExe = Join-Path $appDir "Launch_CopyCat.exe"
 
 function Test-AiBridge {
