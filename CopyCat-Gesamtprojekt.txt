@@ -1,6 +1,6 @@
 ================================================================================
 # PROJEKT-GESAMTDOKUMENTATION: VLCopyCat / CopyCat Media Player
-Aktualisiert am: 2026-11-19 00:59:52
+Aktualisiert am: 2026-11-19 01:13:46
 Enthaltene Dateien (20):
   - ./package.json
   - ./main.js
@@ -32,7 +32,7 @@ Enthaltene Dateien (20):
 {
   "name": "copycat-media-player",
   "productName": "CopyCat media player",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "VLC media player CopyCat based on the redesign of Juxtopposed",
   "main": "main.js",
   "scripts": {
