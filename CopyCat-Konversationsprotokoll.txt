@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T21:21:28Z
-Gesamtanzahl Turns: 415 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 22:33:03
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T21:52:07Z
+Gesamtanzahl Turns: 418 Dialogschritte
+Zuletzt aktualisiert: 2026-11-20 22:53:43
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23350,7 +23350,87 @@ A complete, write-protected backup has been created:
 BENUTZER:
 when I select a language and subtitle as long as the autoplay contionues or I select a file in the same folder or I jump in the queue the setting should stay the same
 
-[Hintergrund-Aktionen: read_file (42), run_command (40), edit_file (13)]
+[Hintergrund-Aktionen: run_command (46), read_file (42), edit_file (13)]
+
+ANTIGRAVITY / ASSISTENT:
+### Language & Subtitle Session Persistence Implemented
+
+Your selected audio language and subtitle track / visibility preferences now persist across continuous playback, folder navigation, and queue jumps:
+
+---
+
+### Key Changes & Behavior
+
+1. **Audio Language Persistence (`state.activeSessionAudioLang`)**:
+   - Whenever an audio track is selected via the Audio dropdown (`#sel-audio-track`), the `KeyB` shortcut (`cycleAudioTrack()`), or the header/context menus, CopyCat detects and remembers the chosen language code (e.g. `'ja'`, `'en'`, `'de'`) and track name.
+   - When the next episode or file starts playing (via automatic autoplay `ended`, clicking another file in the same folder, or jumping in the Queue with `N`/`P`), [src/app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L1120-L1155) scans the new media file's audio streams and automatically activates the matching track.
+
+2. **Subtitle Language & Visibility State Persistence (`state.activeSessionSubLang`, `state.userExplicitSubState`)**:
+   - **Explicit Subtitles Off**: If you toggle subtitles off using shortcut `C`, click the `#sw-sub-enabled` switch, or select `"Off / External"` in the dropdown, subtitles remain **OFF** across subsequent episodes and queue items—even if default autoplay subtitles are enabled in settings.
+   - **Track & Language Memory**: When you select a specific embedded subtitle track or load an external subtitle file (e.g. English, German, Japanese), CopyCat records the language code. On following files, it automatically searches the new video's embedded subtitle streams (`probe.subtitleTracks`), companion subtitle files, or text tracks for that exact language and loads it seamlessly without disruptive toasts.
+   - **Default Fallback**: If you have not manually touched audio or subtitles during a session, CopyCat continues to respect your preferences configured in Settings $\rightarrow$ Playback & Files (`#sw-autoplay-subtitles` and `#sel-preferred-audio-lang`).
+
+3. **Strict UI & Code Integrity**:
+   - No modifications were made to [src/index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html) or [src/styles.css](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/styles.css).
+   - Added automated regression tests in [tests/test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js#L642-L720) to verify language and subtitle state persistence across playlist and folder autoplay.
+   - All **49/49 automated tests passed** cleanly.
+   - Synced and pushed to GitHub repository (`origin/master`, commit `62802db`).
+
+
+--------------------------------------------------------------------------------
+[DIALOG #416] | Schritt 23027 | Zeitstempel: 2026-11-20T21:47:13Z
+--------------------------------------------------------------------------------
+BENUTZER:
+dont tell me you made a new release on github...
+
+[Hintergrund-Aktionen: run_command (2)]
+
+ANTIGRAVITY / ASSISTENT:
+No, **no new release was made.**
+
+The latest GitHub release is still **v1.3.1** from earlier. 
+
+The audio and subtitle persistence changes were only saved as a regular commit on the `master` branch—no new version was bumped, no tag was created, and no GitHub release was published.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #417] | Schritt 23033 | Zeitstempel: 2026-11-20T21:49:46Z
+--------------------------------------------------------------------------------
+BENUTZER:
+https://onianime.hu/watch/bleach-utuu8/1 take a look if copycat could download from this website
+
+[Hintergrund-Aktionen: read_file (4), run_command (1), invoke_subagent (1)]
+
+ANTIGRAVITY / ASSISTENT:
+I have launched an inspection of https://onianime.hu/watch/bleach-utuu8/1 to analyze how the player and video streams are embedded. I'll report the exact technical findings as soon as the analysis completes.
+
+Inspection of [https://onianime.hu/watch/bleach-utuu8/1](https://onianime.hu/watch/bleach-utuu8/1) shows the following:
+
+### 1. The Watch Page Requires Authentication
+The site gates the watch page behind a mandatory login screen (**"Üdv újra / Jelentkezz be az OniAnime fiókodba"**). The API endpoint `https://onianime.hu/api/users/me` returns `401 Unauthorized` for unauthenticated visitors, and no `<iframe>`, `<video>` tag, or media stream requests (`.m3u8`, `.mp4`) are loaded on the page until you sign in.
+
+![OniAnime Login Screen](file:///C:/Users/Schual/.gemini/antigravity/brain/fb4f3e06-9c9c-4258-8fbf-fedb3b540a07/browser_evidence/b72d47c0-dd6d-4ab1-a2da-5c0d2ff13b61/final_step_4.png)
+
+---
+
+### 2. Can CopyCat Download From It?
+
+* **Via the page URL directly (`Ctrl+N`)**: **Not directly without login cookies.** CopyCat's automatic background sniffer opens the URL in a sandboxed Electron session. Because that session has no active login cookies, it hits the login wall and cannot extract the stream.
+* **Via the direct stream / embed URL**: **Yes.** If you are logged in on your browser, open DevTools (`F12` $\rightarrow$ **Network** tab $\rightarrow$ filter by `m3u8` or `mp4`), and copy the underlying video stream URL (or the embed player URL), you can paste it directly into CopyCat's **Stream & Downloader** modal (`Ctrl+N`). CopyCat will fetch the segments and download the episode with FFmpeg.
+
+---
+
+### Next Step
+If you log into your OniAnime account in the browser, let me know and we can inspect the exact player host (e.g. Vidmoly, Vidoza, Sibnet, custom HLS) to see if session cookies or automated extractor support can be added.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #418] | Schritt 23050 | Zeitstempel: 2026-11-20T21:52:07Z
+--------------------------------------------------------------------------------
+BENUTZER:
+alright there is no way. alright I'd like to watch anime in hungarian dub and sub is there a way to do that?
+
+[Hintergrund-Aktionen: read_file (6), run_command (4), edit_file (4)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

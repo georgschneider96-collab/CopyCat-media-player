@@ -726,6 +726,7 @@
     en: /en|eng|english/i,
     ja: /ja|jpn|japanese/i,
     de: /de|deu|ger|german|deutsch/i,
+    hu: /hu|hun|hungarian|magyar/i,
     es: /es|spa|spanish|español/i,
     fr: /fr|fre|fra|french|français/i,
     it: /it|ita|italian|italiano/i,
@@ -802,6 +803,8 @@
           return isDub ? 'English (Dub)' : 'English';
         } else if (/ger|deu|de/i.test(lang)) {
           return 'German';
+        } else if (/hungarian|magyar|hun|hu/i.test(lang)) {
+          return 'Hungarian';
         } else if (/fra|fre|fr/i.test(lang)) {
           return 'French';
         } else if (/spa|es/i.test(lang)) {
@@ -816,6 +819,7 @@
       }
       if (/japanese|ja-jp|jpn/i.test(name)) return 'Japanese (Original)';
       if (/english|en-us|eng/i.test(name)) return 'English (Dub)';
+      if (/hungarian|magyar|hun/i.test(name)) return 'Hungarian';
       return name;
     };
 
@@ -953,6 +957,7 @@
     let label = active?.name || `Track ${targetIdx + 1}`;
     if (/japanese|ja/i.test(label) || /jpn/i.test(active?.lang || '')) label = 'Japanese';
     else if (/english|en/i.test(label) || /eng/i.test(active?.lang || '')) label = 'English';
+    else if (/hungarian|magyar|hun|hu/i.test(label) || /hun|hu/i.test(active?.lang || '')) label = 'Hungarian';
 
     if (isUserInitiated && active) {
       const detectedLang = detectLanguageCodeFromTrack(active);
@@ -993,6 +998,7 @@
     if (/[\u0600-\u06ff]/.test(clean)) return { name: 'Arabic', lang: 'ara' };
     if (/[\u4e00-\u9fa5]/.test(clean)) return { name: 'Chinese', lang: 'chi' };
 
+    const huMatches = (clean.match(/\b(hogy|nem|egy|van|volt|lesz|mert|csak|még|már|vagy|mint|kell|tudom|lehet|ebben|abban|akkor|most|mindig|nagyon|után|senki|semmi)\b/gi) || []).length;
     const idMatches = (clean.match(/\b(yang|dan|di|ini|itu|tidak|ada|dari|untuk|kamu|aku|dia|kita|mereka|bisa|sudah|dengan|akan|apa|pada|saya|kau|kami|jangan|bukan)\b/gi) || []).length;
     const deMatches = (clean.match(/\b(und|der|die|das|ich|nicht|sie|ein|eine|ist|wir|haben|mit|dem|den|aber|wie|dass|sich|oder|wenn)\b/gi) || []).length;
     const esMatches = (clean.match(/\b(que|de|no|el|la|es|un|una|los|las|por|con|para|yo|pero|está|como|más|este|esta)\b/gi) || []).length;
@@ -1002,6 +1008,7 @@
     const enMatches = (clean.match(/\b(the|and|you|that|was|for|are|with|his|they|this|have|from|one|had|not|but|what|all|were|when|your|can|there|out|about)\b/gi) || []).length;
 
     const scores = [
+      { name: 'Hungarian', lang: 'hun', score: huMatches },
       { name: 'English', lang: 'eng', score: enMatches },
       { name: 'Indonesian', lang: 'ind', score: idMatches },
       { name: 'German', lang: 'ger', score: deMatches },
