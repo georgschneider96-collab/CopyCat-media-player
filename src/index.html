@@ -23,6 +23,10 @@
           <span id="icon-folder-crumb"></span>
           <span id="folder-crumb-text">Open Folder</span>
         </button>
+        <button class="folder-crumb-btn" id="btn-header-stream" title="Direct Stream &amp; Network URL (Ctrl+N)">
+          <span id="icon-header-stream"></span>
+          <span>Stream</span>
+        </button>
       </div>
 
       <div class="top-center" id="media-title">CopyCat media player</div>
@@ -62,6 +66,10 @@
       <button class="menu-item" id="menu-open-sub">
         <span>Load Subtitle (.srt / .vtt)...</span>
         <span class="menu-shortcut"></span>
+      </button>
+      <button class="menu-item" id="menu-cycle-audio">
+        <span>Cycle Audio Track (Dual Audio)</span>
+        <span class="menu-shortcut">B</span>
       </button>
       <button class="menu-item" id="menu-open-stream">
         <span>Open Network Stream &amp; Downloader...</span>
@@ -114,8 +122,11 @@
             <button type="button" class="lib-search-clear" id="btn-lib-search-clear" title="Clear search" style="display:none;">×</button>
           </div>
           <div class="lib-toolbar">
-            <span id="lib-folder-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">No folder loaded</span>
-            <div style="display:flex;gap:4px;">
+            <div class="lib-folder-header" id="lib-folder-header" style="display:none;">
+              <span class="lib-folder-header-icon" id="lib-folder-header-icon"></span>
+              <span id="lib-folder-label" class="lib-folder-label" title=""></span>
+            </div>
+            <div class="lib-toolbar-actions">
               <button class="lib-add-btn" id="btn-lib-open-folder" title="Browse a folder in sidebar">+ Folder</button>
               <button class="lib-add-btn" id="btn-lib-open-files" title="Add specific file(s) to Queue">+ Queue</button>
             </div>
@@ -126,7 +137,7 @@
 
       <!-- Center Video & Visualizer Stage -->
       <section class="video-stage" id="video-stage">
-        <video id="main-video" preload="metadata"></video>
+        <video id="main-video" preload="auto"></video>
         <canvas id="visualizer-canvas"></canvas>
 
         <!-- Empty Welcome Screen -->
@@ -219,7 +230,11 @@
 
         <!-- Floating Skip Segment Button (Opening / Ending / Credits / Jump to After-Credits) -->
         <button class="skip-segment-btn hidden" id="btn-skip-segment" type="button" title="Skip Segment (Tab)">
-          <span class="skip-segment-icon">⏩</span>
+          <span class="skip-segment-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="display:block;">
+              <path d="M5 4v16l10-8L5 4zm11 0v16h3V4h-3z"/>
+            </svg>
+          </span>
           <span class="skip-segment-label" id="skip-segment-label">Skip Opening</span>
           <span class="skip-segment-hotkey">Tab</span>
         </button>
@@ -276,7 +291,7 @@
         <div class="drawer-body" id="drawer-body"></div>
         <div class="drawer-footer">
           <button class="lib-add-btn" id="btn-drawer-add" title="Add one or multiple files to Queue">+ Add Files</button>
-          <button class="lib-add-btn" id="btn-drawer-bookmark">+ Bookmark (B)</button>
+          <button class="lib-add-btn" id="btn-drawer-bookmark" title="Add Bookmark at current timestamp (Ctrl+B)">+ Bookmark (Ctrl+B)</button>
           <button class="lib-add-btn" id="btn-drawer-clear">Clear</button>
         </div>
       </aside>
@@ -295,11 +310,6 @@
       <div class="time-label" id="time-elapsed" title="Elapsed Time">00:00</div>
 
       <div class="seekbar-shell">
-        <div class="sub-sync-mini" id="sub-sync-mini">
-          <button class="mini-accent-btn" id="btn-sub-earlier" title="Subtitles -50ms">-</button>
-          <button class="mini-accent-btn" id="btn-sub-later" title="Subtitles +50ms">+</button>
-        </div>
-
         <div class="seekbar-track" id="seekbar-track">
           <div class="seekbar-fill-clip">
             <div class="seekbar-fill" id="seekbar-fill"></div>
@@ -345,14 +355,121 @@
     <!-- ==================== 4-TAB BOTTOM SETTINGS POPOVER ==================== -->
     <div class="bottom-popover" id="bottom-popover">
       <div class="pop-tabs">
-        <button class="pop-tab active" data-pop-tab="playback">Playback</button>
-        <button class="pop-tab" data-pop-tab="video">Video</button>
-        <button class="pop-tab" data-pop-tab="audio">Audio</button>
+        <button class="pop-tab active" data-pop-tab="audio">Audio</button>
         <button class="pop-tab" data-pop-tab="subtitles">Subtitles</button>
+        <button class="pop-tab" data-pop-tab="playback">Playback</button>
+        <button class="pop-tab" data-pop-tab="video">Video</button>
       </div>
 
-      <!-- Tab 1: Playback -->
-      <div class="pop-panel active" data-pop-panel="playback">
+      <!-- Tab 1: Audio -->
+      <div class="pop-panel active" data-pop-panel="audio">
+        <!-- Audio Track Selector (Dual Audio & Multi-Track) -->
+        <div class="pop-row" id="row-audio-track">
+          <div>
+            <div class="pop-label">Audio Track</div>
+            <div style="font-size:10.5px;color:var(--text-muted);" id="lbl-audio-track-sub">Select voice / audio stream</div>
+          </div>
+          <select class="jux-select" id="sel-audio-track" style="min-width:140px;max-width:190px;">
+            <option value="0">Default Audio</option>
+          </select>
+        </div>
+        <div class="pop-section-divider"></div>
+
+        <div class="pop-row">
+          <span class="pop-label">Cone Volume Boost</span>
+          <span id="lbl-volume-pop" style="font-weight:600;color:var(--accent);">100%</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-volume-pop" min="0" max="200" step="1" value="100" />
+
+        <div class="pop-row">
+          <div>
+            <div class="pop-label">Night Mode (DRC)</div>
+            <div style="font-size:10.5px;color:var(--text-muted);">Compress range to balance quiet dialogue &amp; explosions</div>
+          </div>
+          <button class="jux-switch" id="sw-night-mode" type="button"></button>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Equalizer Profile</span>
+          <select class="jux-select" id="sel-eq-preset">
+            <option value="flat">Flat (Studio)</option>
+            <option value="bass">Bass Boost</option>
+            <option value="cinema">Cinema Wide</option>
+            <option value="vocal">Vocal Clarity</option>
+            <option value="night">Night Softener</option>
+          </select>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Audio Waveform Visualizer</span>
+          <button class="jux-switch" id="sw-visualizer" type="button"></button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Subtitles -->
+      <div class="pop-panel" data-pop-panel="subtitles">
+        <div class="pop-row">
+          <span class="pop-label">Show Subtitles</span>
+          <button class="jux-switch on" id="sw-sub-enabled" type="button"></button>
+        </div>
+        <!-- Embedded Subtitle Track Selector -->
+        <div class="pop-row" id="row-sub-track" style="display:none;">
+          <div>
+            <div class="pop-label">Embedded Subtitle</div>
+            <div style="font-size:10.5px;color:var(--text-muted);" id="lbl-sub-track-sub">Select embedded subtitle</div>
+          </div>
+          <select class="jux-select" id="sel-sub-track" style="min-width:140px;max-width:190px;">
+            <option value="-1">Off / External</option>
+          </select>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label" id="lbl-sub-track" style="max-width:175px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No subtitle loaded</span>
+          <button class="lib-add-btn" id="btn-load-sub">Load .SRT / .VTT</button>
+        </div>
+        <div class="pop-row">
+          <span class="pop-label">Subtitle Size</span>
+          <span id="lbl-sub-size" style="font-size:11.5px;color:var(--text-muted);">22px</span>
+        </div>
+        <input type="range" class="jux-range" id="rng-sub-size" min="14" max="38" step="1" value="22" />
+
+        <div class="pop-section-divider"></div>
+        <div class="settings-section-title" style="font-size:11.5px;margin-bottom:0;">Advanced Subtitle Appearance</div>
+
+        <div class="pop-row">
+          <span class="pop-label">Font Family</span>
+          <select class="jux-select" id="sel-sub-font" style="min-width:125px;">
+            <option value="'Segoe UI Variable Text', system-ui, sans-serif">Segoe UI</option>
+            <option value="Inter, system-ui, sans-serif">Inter</option>
+            <option value="Arial, sans-serif">Arial</option>
+            <option value="'Roboto', sans-serif">Roboto</option>
+            <option value="'Cascadia Code', Consolas, monospace">Consolas</option>
+            <option value="Georgia, serif">Georgia</option>
+          </select>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Text Color</span>
+          <div style="display:flex;gap:6px;" id="sub-color-swatches">
+            <button type="button" class="sub-color-pill active" data-color="#FFFFFF" style="background:#FFFFFF;" title="White"></button>
+            <button type="button" class="sub-color-pill" data-color="#FFF59D" style="background:#FFF59D;" title="Pale Yellow"></button>
+            <button type="button" class="sub-color-pill" data-color="#FFE082" style="background:#FFE082;" title="Warm Amber"></button>
+            <button type="button" class="sub-color-pill" data-color="#80DEEA" style="background:#80DEEA;" title="Cyan"></button>
+            <button type="button" class="sub-color-pill" data-color="#C8E6C9" style="background:#C8E6C9;" title="Mint Green"></button>
+          </div>
+        </div>
+
+        <div class="pop-row">
+          <span class="pop-label">Background Style</span>
+          <select class="jux-select" id="sel-sub-bg" style="min-width:125px;">
+            <option value="shadow">Shadow Only</option>
+            <option value="box-translucent">Semi-Transparent Box</option>
+            <option value="box-solid">Solid Black Box</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Tab 3: Playback -->
+      <div class="pop-panel" data-pop-panel="playback">
         <div class="pop-row">
           <span class="pop-label">Playback Speed</span>
           <span id="lbl-speed" style="font-weight:600;color:var(--accent);">1.00x</span>
@@ -397,16 +514,12 @@
         </div>
 
         <div class="pop-row">
-          <span class="pop-label">Subtitle Blocks on Timeline</span>
-          <button class="jux-switch on" id="sw-sub-timeline" type="button"></button>
-        </div>
-        <div class="pop-row">
           <span class="pop-label">Capture Frame Snapshot</span>
           <button class="lib-add-btn" id="btn-pop-snapshot">Snapshot (Shift+S)</button>
         </div>
       </div>
 
-      <!-- Tab 2: Video -->
+      <!-- Tab 4: Video -->
       <div class="pop-panel" data-pop-panel="video">
         <div class="pop-row">
           <span class="pop-label">Aspect / Fit</span>
@@ -438,111 +551,6 @@
         <input type="range" class="jux-range" id="rng-saturation" min="0" max="200" step="1" value="100" />
 
         <button class="lib-add-btn" id="btn-reset-video" style="align-self:flex-end;">Reset Video Filters</button>
-      </div>
-
-      <!-- Tab 3: Audio -->
-      <div class="pop-panel" data-pop-panel="audio">
-        <div class="pop-row">
-          <span class="pop-label">Cone Volume Boost</span>
-          <span id="lbl-volume-pop" style="font-weight:600;color:var(--accent);">100%</span>
-        </div>
-        <input type="range" class="jux-range" id="rng-volume-pop" min="0" max="200" step="1" value="100" />
-
-        <div class="pop-row">
-          <div>
-            <div class="pop-label">Night Mode (DRC)</div>
-            <div style="font-size:10.5px;color:var(--text-muted);">Compress range to balance quiet dialogue &amp; explosions</div>
-          </div>
-          <button class="jux-switch" id="sw-night-mode" type="button"></button>
-        </div>
-
-        <div class="pop-row">
-          <span class="pop-label">Equalizer Profile</span>
-          <select class="jux-select" id="sel-eq-preset">
-            <option value="flat">Flat (Studio)</option>
-            <option value="bass">Bass Boost</option>
-            <option value="cinema">Cinema Wide</option>
-            <option value="vocal">Vocal Clarity</option>
-            <option value="night">Night Softener</option>
-          </select>
-        </div>
-
-        <div class="pop-row">
-          <span class="pop-label">Audio Sync Offset</span>
-          <span id="lbl-audio-delay" style="font-size:11.5px;color:var(--accent);">0 ms</span>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button class="lib-add-btn" id="btn-audio-minus25" style="flex:1;">-25 ms</button>
-          <button class="lib-add-btn" id="btn-audio-reset" style="flex:1;">Reset</button>
-          <button class="lib-add-btn" id="btn-audio-plus25" style="flex:1;">+25 ms</button>
-        </div>
-
-        <div class="pop-row">
-          <span class="pop-label">Audio Waveform Visualizer</span>
-          <button class="jux-switch" id="sw-visualizer" type="button"></button>
-        </div>
-      </div>
-
-      <!-- Tab 4: Subtitles -->
-      <div class="pop-panel" data-pop-panel="subtitles">
-        <div class="pop-row">
-          <span class="pop-label">Show Subtitles</span>
-          <button class="jux-switch on" id="sw-sub-enabled" type="button"></button>
-        </div>
-        <div class="pop-row">
-          <span class="pop-label" id="lbl-sub-track" style="max-width:175px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No subtitle loaded</span>
-          <button class="lib-add-btn" id="btn-load-sub">Load .SRT / .VTT</button>
-        </div>
-        <div class="pop-row">
-          <span class="pop-label">Subtitle Size</span>
-          <span id="lbl-sub-size" style="font-size:11.5px;color:var(--text-muted);">22px</span>
-        </div>
-        <input type="range" class="jux-range" id="rng-sub-size" min="14" max="38" step="1" value="22" />
-
-        <div class="pop-row">
-          <span class="pop-label">Sync Offset</span>
-          <span id="lbl-sub-offset" style="font-size:11.5px;color:var(--accent);">0 ms</span>
-        </div>
-        <div style="display:flex;gap:6px;">
-          <button class="lib-add-btn" id="btn-sub-minus100" style="flex:1;">-100 ms</button>
-          <button class="lib-add-btn" id="btn-sub-reset" style="flex:1;">Reset</button>
-          <button class="lib-add-btn" id="btn-sub-plus100" style="flex:1;">+100 ms</button>
-        </div>
-
-        <div class="pop-section-divider"></div>
-        <div class="settings-section-title" style="font-size:11.5px;margin-bottom:0;">Advanced Subtitle Appearance</div>
-
-        <div class="pop-row">
-          <span class="pop-label">Font Family</span>
-          <select class="jux-select" id="sel-sub-font" style="min-width:125px;">
-            <option value="'Segoe UI Variable Text', system-ui, sans-serif">Segoe UI</option>
-            <option value="Inter, system-ui, sans-serif">Inter</option>
-            <option value="Arial, sans-serif">Arial</option>
-            <option value="'Roboto', sans-serif">Roboto</option>
-            <option value="'Cascadia Code', Consolas, monospace">Consolas</option>
-            <option value="Georgia, serif">Georgia</option>
-          </select>
-        </div>
-
-        <div class="pop-row">
-          <span class="pop-label">Text Color</span>
-          <div style="display:flex;gap:6px;" id="sub-color-swatches">
-            <button type="button" class="sub-color-pill active" data-color="#FFFFFF" style="background:#FFFFFF;" title="White"></button>
-            <button type="button" class="sub-color-pill" data-color="#FFF59D" style="background:#FFF59D;" title="Pale Yellow"></button>
-            <button type="button" class="sub-color-pill" data-color="#FFE082" style="background:#FFE082;" title="Warm Amber"></button>
-            <button type="button" class="sub-color-pill" data-color="#80DEEA" style="background:#80DEEA;" title="Cyan"></button>
-            <button type="button" class="sub-color-pill" data-color="#C8E6C9" style="background:#C8E6C9;" title="Mint Green"></button>
-          </div>
-        </div>
-
-        <div class="pop-row">
-          <span class="pop-label">Background Style</span>
-          <select class="jux-select" id="sel-sub-bg" style="min-width:125px;">
-            <option value="shadow">Shadow Only</option>
-            <option value="box-translucent">Semi-Transparent Box</option>
-            <option value="box-solid">Solid Black Box</option>
-          </select>
-        </div>
       </div>
 
       <button class="pop-footer-btn" id="btn-open-global-prefs">Show Global Preferences (Ctrl+P)</button>
@@ -853,6 +861,42 @@
 
               <div class="pop-row">
                 <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Autoplay with Subtitles</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Automatically show subtitles on screen when playback begins (press C anytime to toggle)</div>
+                </div>
+                <button class="jux-switch on" id="sw-autoplay-subtitles" type="button" style="flex-shrink:0;"></button>
+              </div>
+
+              <div class="pop-row">
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Preferred Audio Language</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">Automatically select this track when multi-track audio is detected</div>
+                </div>
+                <select class="jux-select" id="sel-preferred-audio-lang" style="min-width:210px;">
+                  <option value="none">Default / Original Track</option>
+                  <option value="en" selected>English</option>
+                  <option value="ja">Japanese</option>
+                  <option value="de">German</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                  <option value="it">Italian</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="ru">Russian</option>
+                  <option value="zh">Chinese</option>
+                  <option value="ko">Korean</option>
+                </select>
+              </div>
+
+              <div class="pop-row">
+                <div style="flex:1;min-width:0;padding-right:12px;">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Fallback Subtitles for Preferred Language</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);">If preferred audio is missing, automatically turn on subtitles in that language</div>
+                </div>
+                <button class="jux-switch on" id="sw-fallback-subtitles" type="button" style="flex-shrink:0;"></button>
+              </div>
+
+              <div class="pop-row">
+                <div style="flex:1;min-width:0;padding-right:12px;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Remember Volume &amp; Theme</div>
                   <div style="font-size:11.5px;color:var(--text-muted);">Persist accent palette, volume level, and UI preferences across launches</div>
                 </div>
@@ -949,10 +993,29 @@
                   <input type="text" id="stream-url-input" class="stream-url-field" placeholder="https://example.com/stream/playlist.m3u8, .mp4, or video webpage URL" spellcheck="false" autocomplete="off" />
                   <button class="stream-probe-btn" id="btn-stream-paste" type="button" title="Paste URL from clipboard">Paste</button>
                   <button class="stream-probe-btn" id="btn-stream-probe" type="button" title="Inspect URL format & stream info">Probe</button>
+                  <button class="stream-probe-btn" id="btn-stream-next-ep" type="button" title="Increment to Next Episode (+1)">+1 Ep</button>
+                  <button class="stream-probe-btn" id="btn-stream-season" type="button" title="Configure and download whole season">Season</button>
                 </div>
                 <div class="stream-filename-row" style="display:flex;align-items:center;gap:8px;margin-top:8px;">
                   <span style="font-size:11.5px;color:var(--text-muted);font-weight:600;white-space:nowrap;">File Name:</span>
-                  <input type="text" id="stream-filename-input" class="stream-url-field" style="flex:1;padding:6px 10px;font-size:12px;" placeholder="Custom file name (pre-filled when probed, e.g. Returner Magic S2 E1)" spellcheck="false" autocomplete="off" />
+                  <input type="text" id="stream-filename-input" class="stream-url-field" style="flex:1;padding:6px 10px;font-size:12px;" placeholder="Custom file name" spellcheck="false" autocomplete="off" />
+                </div>
+                <div id="stream-season-panel" class="stream-probe-card" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-panel);border-radius:6px;">
+                  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span style="font-size:11.5px;color:var(--text-muted);font-weight:600;">From Ep:</span>
+                      <input type="number" id="season-from-ep" class="stream-url-field" style="width:60px;padding:4px 8px;font-size:12px;text-align:center;" value="1" min="1" max="9999" />
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                      <span style="font-size:11.5px;color:var(--text-muted);font-weight:600;">To Ep:</span>
+                      <input type="number" id="season-to-ep" class="stream-url-field" style="width:60px;padding:4px 8px;font-size:12px;text-align:center;" value="12" min="1" max="9999" />
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+                      <span style="font-size:11.5px;color:var(--text-muted);font-weight:600;white-space:nowrap;">Series Folder:</span>
+                      <input type="text" id="season-folder-name" class="stream-url-field" style="flex:1;padding:4px 8px;font-size:12px;" placeholder="Folder name" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <button class="stream-probe-btn" id="btn-queue-season" type="button" style="padding:5px 12px;font-size:11.5px;background:var(--accent);color:#fff;font-weight:600;" title="Queue entire season for sequential download">Queue Season</button>
+                  </div>
                 </div>
                 <div id="stream-probe-result" class="stream-probe-card" style="display:none;"></div>
                 <div class="stream-action-row">
@@ -968,21 +1031,19 @@
               </div>
 
               <!-- 2. Active Background Downloads Queue & Live Progress Bars -->
-              <div style="padding-top:12px;border-top:1px solid var(--border-panel);">
+              <div id="dl-queue-section" style="padding-top:12px;border-top:1px solid var(--border-panel);display:none;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                   <div class="settings-section-title">
                     <span>Download Progress &amp; Queue</span>
                     <span class="update-status-pill" id="dl-queue-count" style="display:none;font-size:10px;margin-left:8px;padding:2px 8px;">0 Active</span>
                   </div>
-                  <button class="ghost-pill-btn" id="btn-clear-completed-dl" type="button" style="padding:4px 10px;font-size:11px;display:none;">Clear Completed</button>
-                </div>
-
-                <div id="dl-queue-container" class="dl-queue-list">
-                  <div class="dl-empty-state" id="dl-empty-state" style="text-align:center;padding:18px 16px;background:rgba(255,255,255,0.02);border:1px dashed var(--border-panel);border-radius:10px;">
-                    <div style="opacity:0.35;font-size:20px;margin-bottom:4px;">⬇</div>
-                    <div style="font-size:12px;color:var(--text-muted);">No downloads in queue. Paste a URL above and click Download to PC.</div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <button class="ghost-pill-btn" id="btn-halt-all-dl" type="button" style="padding:4px 10px;font-size:11px;display:none;color:#ff6b6b;border-color:rgba(255,107,107,0.3);" title="Halt all active and queued downloads">Halt All</button>
+                    <button class="ghost-pill-btn" id="btn-clear-completed-dl" type="button" style="padding:4px 10px;font-size:11px;display:none;">Clear Completed</button>
                   </div>
                 </div>
+
+                <div id="dl-queue-container" class="dl-queue-list"></div>
               </div>
 
               <!-- 3. Streaming Portals & Search Presets -->
@@ -1026,10 +1087,7 @@
                   <div class="settings-section-title" style="margin-bottom:2px;">Auto-Play Completed Downloads</div>
                   <div style="font-size:11.5px;color:var(--text-muted);">Automatically load and start playback in CopyCat as soon as a download finishes</div>
                 </div>
-                <label class="switch-wrap" style="cursor:pointer;">
-                  <input type="checkbox" id="chk-auto-play-dl" checked style="display:none;" />
-                  <span class="switch-track"><span class="switch-thumb"></span></span>
-                </label>
+                <button class="jux-switch on" id="sw-auto-play-dl" type="button" role="switch" aria-checked="true" title="Toggle auto-play on download completion"></button>
               </div>
             </div>
 

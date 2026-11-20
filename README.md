@@ -18,7 +18,7 @@
 
 ## Overview
 
-**CopyCat Media Player** is a standalone, frameless desktop media player engineered for performance, precision, and modern design aesthetics. Built from the ground up on Electron, HTML5 Video/Canvas, and the Web Audio API, CopyCat brings Juxtopposed’s viral *VLC After 25 Years* conceptual redesign to life with a bespoke cat iconography branding, ultra-responsive gesture drawers, zero-latency local HTTP control, and native Windows shell integration.
+**CopyCat Media Player** is a standalone, frameless desktop media player engineered for performance, precision, and modern design aesthetics. Built from the ground up on Electron, HTML5 Video/Canvas, and the Web Audio API, CopyCat brings Juxtopposed's viral *VLC After 25 Years* conceptual redesign to life with bespoke cat iconography branding, ultra-responsive gesture drawers, zero-latency local HTTP control, and native Windows shell integration.
 
 ---
 
@@ -30,20 +30,38 @@
 - **Context-Aware Drawers**: Edge-gesture side panels—Left Library Navigator and Right Queue / Bookmarks Drawer—that glide smoothly into view and automatically defer rendering calculations when collapsed.
 - **Unobtrusive Controls**: Bottom playback bar, volume popovers, and settings auto-hide during video playback and restore instantly on mouse interaction.
 
-### ⚡ Hardware-Accelerated Video Engine
-- **Direct Composition Zero-Copy Passthrough**: Active video playback bypasses intermediate CSS filter graphs (`filter: none`), enabling Chromium’s Direct Composition swapchain to feed hardware-decoded video surfaces directly to the display with minimal GPU memory transfers.
+### ⚡ Hardware-Accelerated Video & Streaming Engine
+- **Direct Composition Zero-Copy Passthrough**: Active video playback bypasses intermediate CSS filter graphs (`filter: none`), enabling Chromium's Direct Composition swapchain to feed hardware-decoded video surfaces directly to the display with minimal GPU memory transfers.
 - **Chromium GPU Acceleration**: Configured with dedicated hardware decode switches (`enable-accelerated-video-decode`, `enable-accelerated-mjpeg-decode`) for smooth 4K/60fps and high-bitrate playback.
+- **RFC 7233 Byte-Range Protocol**: Native `media:///` protocol handler with 2MB highWaterMark buffering for instant non-blocking seeks across local NVMe/SSD files.
 - **Universal Format Demuxing**: Seamlessly plays standard HTML5 formats (`.mp4`, `.webm`) as well as extended media containers (`.mkv`, `.avi`, `.ts`, `.m2ts`, `.flv`, `.vob`, `.wmv`) through bundled background FFmpeg/FFprobe streaming services.
 
 ### 🔊 Studio-Grade Web Audio & Real-Time Visualizer
-- **True 200% Volume Boost**: Powered by native Web Audio `GainNode` processing for authentic acoustic amplification beyond 100% without digital clipping.
-- **Parametric Multi-Band Equalizer**: Built-in EQ presets (Flat, Bass Boost, Treble Boost, Vocal Clarity, Electronic, Rock) with real-time biquad filtering.
+- **True 200% Volume Boost**: Powered by native Web Audio `GainNode` processing for authentic acoustic amplification beyond 100%, backed by a downstream `DynamicsCompressorNode` brickwall limiter (-0.5 dBFS) to prevent digital clipping.
+- **Parametric Multi-Band Equalizer**: Built-in EQ presets (*Flat Studio, Bass Boost, Cinema Wide, Vocal Clarity, Night Softener*) with real-time biquad filtering.
 - **60fps Zero-Allocation Visualizer**: Real-time frequency spectrum visualizer engineered with pre-allocated typed arrays, cached color tokens, and cached 2D canvas contexts for 0ms garbage collection pauses.
 
-### 💬 Precision Subtitle Engine
-- **$O(\log N)$ Binary Search Matching**: Instantaneous cue synchronization across thousands of subtitle lines, eliminating frame drops during dense dialogue sequences.
+### 💬 Precision Subtitle & Dual-Audio Engine
+- **Autoplay Subtitles Toggle**: Dedicated toggle under Settings → Playback & Files to automatically activate matching subtitles upon media load or require manual hotkey (`C`) activation.
+- **O(log N) Binary Search Matching**: Instantaneous cue synchronization across thousands of subtitle lines, eliminating frame drops during dense dialogue sequences.
 - **Cue Equality Memoization**: Guards against redundant DOM reflows by updating the subtitle overlay only when active cue content changes.
-- **Interactive Dialogue Timeline**: Displays subtitle cue density directly on the seekbar and provides on-the-fly subtitle delay synchronization ($\pm 50\text{ms}$).
+- **Native Dual Audio**: Automatic recognition of original and dub streams (`Japanese (Original)`, `English (Dub)`, or ISO language codes) in the audio drawer and keyboard hotkey cycling (`B`).
+- **Interactive Dialogue Timeline**: Displays subtitle cue density directly on the seekbar and provides keyboard subtitle delay synchronization (`Shift + G` / `Shift + H`).
+
+### 🎌 Anime Skip & Contiguous Chapter Generation
+- **Dynamic Progression Bar Alignment**: The floating "Skip Segment [TAB]" prompt is dynamically positioned pixel-perfect to the horizontal start of the seekbar progression bar across all window sizes and layout changes.
+- **AniList & AniSkip Integration**: Strictly verified OP/ED intervals queried asynchronously without stalling local playback starts.
+- **Lossless Chapter Baking**: Generates contiguous, non-overlapping chapter markers (`Prologue`, `Opening`, `Episode`, `Ending`, `Preview`) and embeds them losslessly into MP4/MKV containers via FFmpeg stream-copy with safe backup rollback on NTFS.
+
+### 📥 Next-Episode, Multi-Link & Season Batch Downloader
+- **Zero-Dependency Stream Downloader**: Native HTTPS segment fetcher and bundled FFmpeg muxer producing single self-contained MP4 files with embedded subtitles and dual audio. Zero stray `.temp_*` or `.vtt` files.
+- **Fast URL Incrementing (`+1 Ep`)**: Smart pattern detector that recognizes query strings (`?ep=01`) and path slugs (`/episode-1`), automatically incrementing to the next episode while strictly preserving zero-padding.
+- **10-Episode Sliding Window Queue**: Download full seasons sequentially (1 active download at a time) with an in-memory backlog that feeds up to 10 active/pending items at a time without network saturation or bot detection.
+- **Just-In-Time (JIT) Headless Sniffing**: Webpage URLs are sniffed only right before each episode begins downloading, keeping background CPU and RAM usage minimal.
+- **Strict Option A Track Validation**: Enforces user language preferences (Japanese, English Dub, Dual Audio, specific subtitles). If an episode lacks the requested track, CopyCat flags it with a clear reason, skips downloading the wrong track, and seamlessly advances to the next episode.
+- **One-Click Retry**: Easily re-queue any skipped or failed episode directly from the download card with a single click.
+- **Dedicated Season Subfolders & Explorer View**: Season downloads automatically create and organize into `C:\Users\Schual\Downloads\CopyCat\<Series Name>\` with standardized filenames (`<Series Name> - Episode 01.mp4`), automatically configured with `desktop.ini` and Windows Explorer view settings to display as **Large Icons** (thumbnails) sorted in **Ascending** order without grouping.
+- **Emergency Halt All**: Instant kill-switch that safely terminates active FFmpeg processes, closes open sniffer windows, purges the season backlog, and resets the taskbar progress bar.
 
 ### 🎯 Power-User Tools & Playback Controls
 - **Live Hover Scrubbing**: Floating live thumbnail preview card with LRU frame caching for instant scrubbing precision.
@@ -55,13 +73,15 @@
 - **Always-on-Top Picture-in-Picture (`P`)**: Native Windows TopMost enforcement via compiled C# helper for guaranteed screen priority over other applications.
 - **Watched Episode Tracking**: Session-aware checkmarks and hover tags in the queue list to track series progress.
 
-### 🪟 Native Windows Integration
+### 🪟 Native Windows Integration & Non-Blocking Design
+- **100% Non-Blocking Main Process**: Zero synchronous child process spawns (`spawnSync`) on startup or hot paths; PATH tool lookup is resolved in memory, and desktop shortcuts are created asynchronously.
 - **Shell Associations**: Registers CopyCat as an official media viewer across 21 extensions (`.mp4`, `.mkv`, `.ts`, `.webm`, `.avi`, `.mov`, `.flac`, `.mp3`, `.opus`, etc.).
 - **Windows Explorer Context Menu**: Right-click any media file or directory to "Play with CopyCat media player".
 - **Taskbar Thumbnail Toolbar & SMTC**: Control playback directly from the Windows taskbar preview (Play/Pause, Next, Previous) and Windows System Media Transport Controls.
 
 ### 🤖 Local AI & Script Automation Bridge
 - Hosts a high-performance local REST HTTP server on `127.0.0.1:4500` enabled with `TCP_NODELAY`.
+- Strictly protected against browser CSRF attacks via loopback origin checks and `Sec-Fetch-Site: cross-site` blocking.
 - Enables external scripts, CLI utilities, and AI assistants (Antigravity, Gemini, Copilot, Cursor) to inspect playback state and control the player programmatically via JSON payloads (`/api/status`, `/api/control`).
 
 ---
@@ -74,13 +94,17 @@
 | `F` / Double-Click | Toggle Fullscreen |
 | `M` | Toggle Audio Mute |
 | `Z` / `A` | **Cycle Aspect Ratio** *(Contain, Cover, Stretch, 16:9, 4:3, 21:9)* |
+| `B` | **Cycle Audio Track** *(Dual Audio switch between Original & Dub)* |
+| `C` | Toggle Subtitles On / Off |
+| `PageDown` / `Ctrl + Right` | Jump to Next Chapter / Anime Segment |
+| `PageUp` / `Ctrl + Left` | Jump to Previous Chapter / Anime Segment |
 | `←` / `→` | Seek -5s / +5s *(Shift for ±15s, coalesced multi-tap)* |
 | `↑` / `↓` | Volume +5% / -5% *(Boost up to 200%)* |
 | `[` / `]` | Playback Speed -0.25x / +0.25x |
 | `Tab` | Skip Intro / Outro / Segment *(Full Binge Mode available)* |
 | `E` | Toggle "Stop After Current Episode" |
 | `P` | Toggle Always-on-Top Picture-in-Picture (PiP) |
-| `B` | Add Timestamp Bookmark |
+| `Ctrl + B` | Add Timestamp Bookmark |
 | `S` / `Shift + S` | Capture & Save High-Resolution Video Snapshot |
 | `F12` | **Boss Key**: Instant Mute, Pause & Minimize |
 | `Ctrl + O` | Open Media File |
@@ -115,6 +139,9 @@ npm install
 
 # Start CopyCat Media Player
 npm start
+
+# Run Automated Regression & Health Test Suite
+npm test
 ```
 
 #### Compiling Production Binaries
@@ -132,28 +159,42 @@ npm run dist:portable
 
 ```text
 CopyCat Media Player/
-├── package.json          # App manifest, dependencies, and electron-builder packaging config
-├── main.js               # Electron Main Process: frameless window, IPC, hardware flags, HTTP bridge
-├── preload.js            # Secure context bridge exposing window.vlcopycat API
-├── AI_CONTEXT.md         # Deep technical specification & AI control schema guide
-├── README.md             # Project documentation
+├── package.json              # App manifest, dependencies, and electron-builder packaging config
+├── main.js                   # Application bootstrap, GPU acceleration flags, single-instance lock
+├── preload.js                # Secure context bridge exposing window.copycat (and alias window.vlcopycat)
+├── AI_CONTEXT.md             # Deep technical specification & AI control schema guide
+├── README.md                 # Project documentation
 ├── assets/
-│   ├── icon.ico          # Multi-resolution Windows application icon
-│   ├── icon.png          # High-resolution raster logo
-│   └── thumbar-*.png     # Windows taskbar thumbnail toolbar button icons
+│   ├── icon.ico              # Multi-resolution Windows application icon
+│   ├── icon.png              # High-resolution raster logo
+│   └── thumbar-*.png         # Windows taskbar thumbnail toolbar button icons
 ├── bin/
-│   ├── ffmpeg.exe        # Bundled static FFmpeg media processor
-│   ├── ffprobe.exe       # Bundled static FFprobe stream analyzer
-│   ├── launcher.cs       # C# Win32 desktop session redirector source
-│   ├── pip-helper.cs     # C# Win32 HWND TopMost enforcer source
-│   ├── pip-helper.exe    # Compiled always-on-top PiP helper binary
-│   ├── open_player.ps1   # PowerShell automation and session summoning script
+│   ├── ffmpeg.exe            # Bundled static FFmpeg media processor
+│   ├── ffprobe.exe           # Bundled static FFprobe stream analyzer
+│   ├── launcher.cs           # C# Win32 desktop session redirector source
+│   ├── pip-helper.cs         # C# Win32 HWND TopMost enforcer source
+│   ├── pip-helper.exe        # Compiled always-on-top PiP helper binary
+│   ├── open_player.ps1       # PowerShell automation and session summoning script
 │   └── register_associations.ps1 # Comprehensive Windows file type association setup
-└── src/
-    ├── index.html        # DOM layout: Titlebar, Video Canvas, Drawers, Seekbar, Dialogs
-    ├── styles.css        # Glassmorphic CSS design system, CSS custom properties, animations
-    ├── icons.js          # Crisp inline SVG vector iconography
-    └── app.js            # Core playback state machine, Web Audio DSP, subtitle engine & event orchestration
+├── src/
+│   ├── index.html            # DOM layout: Titlebar, Video Canvas, Drawers, Seekbar, Dialogs
+│   ├── styles.css            # Glassmorphic CSS design system, CSS custom properties, animations
+│   ├── icons.js              # Crisp inline SVG vector iconography
+│   ├── app.js                # Core playback state machine, Web Audio DSP, subtitle engine & event orchestration
+│   └── main/                 # Modular Main Process Services (IoC Architecture)
+│       ├── container.js      # IoC Service Container & WindowManager
+│       ├── downloader.js     # Native stream downloader, sliding-window season queue, JIT sniffer & Dual-Audio muxer
+│       ├── stream-manager.js # FFmpeg live fragmented-MP4 transcoding & streaming process lifecycle
+│       ├── stream-sniffer.js # Isolated headless stream sniffer & subtitle extractor
+│       ├── media-resolver.js # Fast local ffprobe media analyzer, byte-range handler & subtitle extraction
+│       ├── anime-skip-resolver.js # AniList & AniSkip integration, chapter generation & baking
+│       ├── server.js         # Local HTTP REST automation bridge (port 4500) with origin security guards
+│       ├── session.js        # Window bounds, volume, DRC, desktop shortcuts & state persistence
+│       ├── updater.js        # HTTPS auto-update checking, SHA-256 verification, and atomic staging
+│       ├── ipc.js            # Declarative IPC channel registration
+│       └── logger.js         # Scoped structured file & console logging
+└── tests/
+    └── test-suite.js         # Automated regression test suite (syntax, IoC, security, semver, anime, range)
 ```
 
 ---

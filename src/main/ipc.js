@@ -239,6 +239,30 @@ const IPC_HANDLERS = {
     }
   },
 
+  'media:resolveAnimeChapters': {
+    type: 'handle',
+    description: 'Query AniList & AniSkip asynchronously for anime chapters without blocking media probe',
+    handler: async ({ media }, _evt, payload) => {
+      const { filePath, duration } = (typeof payload === 'object' && payload !== null) ? payload : { filePath: payload, duration: 0 };
+      if (!filePath || !media?.resolveAnimeChapters) {
+        return [];
+      }
+      return media.resolveAnimeChapters(filePath, duration || 0);
+    }
+  },
+
+  'media:extractEmbeddedSubtitle': {
+    type: 'handle',
+    description: 'Extract embedded subtitle track as WebVTT',
+    handler: async ({ media }, _evt, payload) => {
+      const { filePath, trackIndex } = (typeof payload === 'object' && payload !== null) ? payload : { filePath: payload, trackIndex: 0 };
+      if (!filePath || !media?.extractEmbeddedSubtitleVtt) {
+        return { ok: false, content: null };
+      }
+      return media.extractEmbeddedSubtitleVtt(filePath, trackIndex || 0);
+    }
+  },
+
   'media:stopStream': {
     type: 'handle',
     description: 'Kill active FFmpeg stream and thumbnail worker processes',
@@ -513,8 +537,12 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Reveal item in Windows Explorer',
     validate: (filePath) => pathExists(filePath),
-    handler: (_deps, _evt, filePath) => {
+    handler: (deps, _evt, filePath) => {
       shell.showItemInFolder(filePath);
+      try {
+        const folderPath = path.dirname(filePath);
+        deps.downloader?.optimizeFolderView?.(folderPath, true);
+      } catch {}
       return true;
     }
   },
@@ -547,6 +575,41 @@ const IPC_HANDLERS = {
     validate: (payload) => payload && typeof payload.url === 'string' && payload.url.trim().length > 0,
     handler: ({ downloader }, _evt, payload) => {
       return downloader.startDownload(payload);
+    }
+  },
+
+  'download:queueSeason': {
+    type: 'handle',
+    description: 'Queue an entire season of episodes with sliding window and dedicated folder',
+    validate: (payload) => payload && typeof payload.url === 'string' && payload.url.trim().length > 0,
+    handler: ({ downloader }, _evt, payload) => {
+      return downloader.queueSeason(payload);
+    }
+  },
+
+  'download:haltAll': {
+    type: 'handle',
+    description: 'Emergency stop: halt all active and queued downloads and clear season backlog',
+    handler: ({ downloader }) => {
+      return downloader.haltAllDownloads();
+    }
+  },
+
+  'download:retry': {
+    type: 'handle',
+    description: 'Retry an individual failed or cancelled download task',
+    validate: (id) => typeof id === 'string' && id.trim().length > 0,
+    handler: ({ downloader }, _evt, id) => {
+      return downloader.retryDownload(id);
+    }
+  },
+
+  'download:incrementUrl': {
+    type: 'handle',
+    description: 'Increment episode number in streaming URL preserving zero-padding',
+    validate: (payload) => payload && typeof payload.url === 'string' && payload.url.trim().length > 0,
+    handler: ({ downloader }, _evt, { url, step }) => {
+      return downloader.incrementEpisodeUrl(url, step || 1);
     }
   },
 

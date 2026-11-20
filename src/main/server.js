@@ -15,9 +15,6 @@ function sendJson(res, status, obj) {
     const body = JSON.stringify(obj, null, 2);
     res.writeHead(status, {
       'Content-Type': 'application/json; charset=utf-8',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
       'Content-Length': Buffer.byteLength(body)
     });
     res.end(body);
@@ -395,20 +392,52 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
   const commandRegistry = customRegistry || createDefaultCommandRegistry();
 
   const server = http.createServer((req, res) => {
-    // 1. CORS Preflight Middleware
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const currentPort = (window && typeof window.getPort === 'function') ? window.getPort() : 4500;
+    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${currentPort}`);
+    const pathname = urlObj.pathname;
+
+    // 1. Security Origin Guard: Protect against cross-site CSRF/rebinding attacks from external web browsers.
+    // Media streaming routes (/api/stream, /api/thumb) are requested by Electron's file:/// renderer,
+    // which Chromium network security tags as sec-fetch-site: cross-site.
+    // We strictly protect API control and status endpoints from cross-site browser CSRF.
+    const origin = req.headers.origin;
+    const secFetchSite = req.headers['sec-fetch-site'];
+    const isMediaRoute = pathname === '/api/stream' || pathname === '/api/thumb';
+
+    if (secFetchSite === 'cross-site' && !isMediaRoute) {
+      logger.warn(`Blocked cross-site browser request to ${pathname} from origin: ${origin || 'unknown'}`);
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Cross-origin browser requests forbidden' }));
+      return;
+    }
+
+    if (origin && origin !== 'null') {
+      try {
+        const parsedOrigin = new URL(origin);
+        const allowedHosts = ['127.0.0.1', 'localhost', 'app', 'copycat'];
+        if (!allowedHosts.includes(parsedOrigin.hostname)) {
+          logger.warn(`Blocked unauthorized origin: ${origin}`);
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Forbidden origin' }));
+          return;
+        }
+      } catch {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid origin header' }));
+        return;
+      }
+    }
+
+    const allowedOrigin = origin && origin !== 'null' ? origin : '*';
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
     }
-
-    const currentPort = window.getPort();
-    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${currentPort}`);
-    const pathname = urlObj.pathname;
 
     // 2. GET / (Documentation & Discovery)
     if (req.method === 'GET' && pathname === '/') {

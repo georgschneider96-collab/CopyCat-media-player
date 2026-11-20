@@ -3,7 +3,8 @@
 
 const path = require('path');
 const fs = require('fs');
-const { spawn, spawnSync, execFile } = require('child_process');
+const os = require('os');
+const { spawn, execFile } = require('child_process');
 const { app, nativeImage } = require('electron');
 const { createLogger } = require('./logger');
 
@@ -106,13 +107,11 @@ function restoreMainWindowWin32(win) {
 // ----------------------------------------------------
 // Taskbar Thumbar Management
 // ----------------------------------------------------
-let currentThumbarPlaying = null;
-
 function updateThumbarButtons(mainWindow, isPlaying = false) {
   if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
   const normalizedPlaying = Boolean(isPlaying);
-  if (currentThumbarPlaying === normalizedPlaying) return;
-  currentThumbarPlaying = normalizedPlaying;
+  if (mainWindow._thumbarPlaying === normalizedPlaying) return;
+  mainWindow._thumbarPlaying = normalizedPlaying;
 
   const assetsDir = path.join(__dirname, '..', '..', 'assets');
   const prevIcon = nativeImage.createFromPath(path.join(assetsDir, 'thumbar-prev.png'));
@@ -158,7 +157,9 @@ function updateThumbarButtons(mainWindow, isPlaying = false) {
 // Desktop Shortcut Management
 // ----------------------------------------------------
 function getDesktopShortcutPath() {
-  const desktopPath = app.getPath('desktop');
+  const desktopPath = (app && typeof app.getPath === 'function')
+    ? app.getPath('desktop')
+    : path.join(os.homedir(), 'Desktop');
   return path.join(desktopPath, 'CopyCat Media Player.lnk');
 }
 
@@ -171,38 +172,49 @@ function hasDesktopShortcut() {
 }
 
 function createDesktopShortcut() {
-  try {
-    const rootDir = path.join(__dirname, '..', '..');
-    const shortcutPath = getDesktopShortcutPath();
-    const icoPath = path.join(rootDir, 'assets', 'icon.ico');
-    const copycatExe = path.join(rootDir, 'CopyCat.exe');
-    const exeLauncher = path.join(rootDir, 'Launch_CopyCat.exe');
-    const isPackaged = app.isPackaged;
-    const targetPath = isPackaged 
-      ? process.execPath 
-      : (fs.existsSync(copycatExe) ? copycatExe : (fs.existsSync(exeLauncher) ? exeLauncher : path.join(rootDir, 'Launch_CopyCat.bat')));
-    const workingDir = isPackaged ? path.dirname(process.execPath) : rootDir;
-    const iconLocation = fs.existsSync(icoPath) ? `${icoPath},0` : `${targetPath},0`;
+  return new Promise((resolve) => {
+    try {
+      const rootDir = path.join(__dirname, '..', '..');
+      const shortcutPath = getDesktopShortcutPath();
+      const icoPath = path.join(rootDir, 'assets', 'icon.ico');
+      const copycatExe = path.join(rootDir, 'CopyCat.exe');
+      const exeLauncher = path.join(rootDir, 'Launch_CopyCat.exe');
+      const isPackaged = Boolean(app && app.isPackaged);
+      const targetPath = isPackaged 
+        ? process.execPath 
+        : (fs.existsSync(copycatExe) ? copycatExe : (fs.existsSync(exeLauncher) ? exeLauncher : path.join(rootDir, 'Launch_CopyCat.bat')));
+      const workingDir = isPackaged ? path.dirname(process.execPath) : rootDir;
+      const iconLocation = fs.existsSync(icoPath) ? `${icoPath},0` : `${targetPath},0`;
 
-    const psScript = `
-      $ws = New-Object -ComObject WScript.Shell;
-      $s = $ws.CreateShortcut('${shortcutPath.replace(/'/g, "''")}');
-      $s.TargetPath = '${targetPath.replace(/'/g, "''")}';
-      $s.WorkingDirectory = '${workingDir.replace(/'/g, "''")}';
-      $s.IconLocation = '${iconLocation.replace(/'/g, "''")}';
-      $s.Description = 'CopyCat Media Player';
-      $s.Save();
-    `;
-    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
-      windowsHide: true
-    });
-    const created = fs.existsSync(shortcutPath);
-    logger.info(`Desktop shortcut creation result: ${created}`);
-    return { success: created, ok: created, shortcutPath };
-  } catch (err) {
-    logger.error('Failed to create desktop shortcut:', err.message);
-    return { success: false, ok: false, error: err.message };
-  }
+      const psScript = `
+        $ws = New-Object -ComObject WScript.Shell;
+        $s = $ws.CreateShortcut('${shortcutPath.replace(/'/g, "''")}');
+        $s.TargetPath = '${targetPath.replace(/'/g, "''")}';
+        $s.WorkingDirectory = '${workingDir.replace(/'/g, "''")}';
+        $s.IconLocation = '${iconLocation.replace(/'/g, "''")}';
+        $s.Description = 'CopyCat Media Player';
+        $s.Save();
+      `;
+
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+        windowsHide: true
+      });
+
+      child.on('error', (err) => {
+        logger.error('Failed to spawn PowerShell for desktop shortcut:', err.message);
+        resolve({ success: false, ok: false, error: err.message });
+      });
+
+      child.on('close', () => {
+        const created = fs.existsSync(shortcutPath);
+        logger.info(`Desktop shortcut creation result: ${created}`);
+        resolve({ success: created, ok: created, shortcutPath });
+      });
+    } catch (err) {
+      logger.error('Failed to create desktop shortcut:', err.message);
+      resolve({ success: false, ok: false, error: err.message });
+    }
+  });
 }
 
 // ----------------------------------------------------

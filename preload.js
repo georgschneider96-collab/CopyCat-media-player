@@ -37,6 +37,8 @@ const copycatApi = {
 
   // Media probe & FFmpeg stream lifecycle
   probeMedia: (filePath) => ipcRenderer.invoke('media:probe', filePath),
+  resolveAnimeChapters: (filePath, duration) => ipcRenderer.invoke('media:resolveAnimeChapters', { filePath, duration }),
+  extractEmbeddedSubtitle: (filePath, trackIndex) => ipcRenderer.invoke('media:extractEmbeddedSubtitle', { filePath, trackIndex }),
   stopStream: () => ipcRenderer.invoke('media:stopStream'),
 
   // Filesystem helpers
@@ -63,6 +65,10 @@ const copycatApi = {
   // Native Stream & Downloader
   probeStreamUrl: (url) => ipcRenderer.invoke('stream:probe', url),
   startDownload: (payload) => ipcRenderer.invoke('download:start', payload),
+  queueSeasonDownload: (payload) => ipcRenderer.invoke('download:queueSeason', payload),
+  haltAllDownloads: () => ipcRenderer.invoke('download:haltAll'),
+  retryDownload: (id) => ipcRenderer.invoke('download:retry', id),
+  incrementEpisodeUrl: (url, step) => ipcRenderer.invoke('download:incrementUrl', { url, step }),
   cancelDownload: (id) => ipcRenderer.invoke('download:cancel', id),
   getDownloadQueue: () => ipcRenderer.invoke('download:getQueue'),
   getDownloadFolder: () => ipcRenderer.invoke('download:getFolder'),

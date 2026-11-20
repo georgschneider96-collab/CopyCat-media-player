@@ -22,7 +22,7 @@ const hostHeaderRegistry = new Map();
  */
 function isStrmCdnUrl(targetUrl) {
   if (!targetUrl || typeof targetUrl !== 'string') return false;
-  return /strm\.cx|miruro|frostheron|coastowl|keeply|\.top\/(m|a|s)\//i.test(targetUrl);
+  return /strm\.cx|miruro|frostheron|coastowl|keeply|\.top\/(m|a|s|sub)\/|subtitles/i.test(targetUrl);
 }
 
 /**
@@ -78,8 +78,10 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
   const normalizedUrl = (webpageUrl || '').trim();
   const cached = sniffCache.get(normalizedUrl);
   if (cached && (Date.now() - cached.timestamp < SNIFF_CACHE_TTL_MS)) {
-    logger.info('Returning cached stream sniff result for:', normalizedUrl);
-    return Promise.resolve(cached.result);
+    if (cached.result && Array.isArray(cached.result.subtitles) && cached.result.subtitles.length > 0) {
+      logger.info('Returning cached stream sniff result with subtitles for:', normalizedUrl);
+      return Promise.resolve(cached.result);
+    }
   }
 
   const pageIsMiruro = /miruro|strm\.cx/i.test(normalizedUrl);
@@ -95,18 +97,136 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
     const capturedStreams = [];
     const capturedSubtitles = [];
     let activeLangCheck = null;
+    let switchTriggered = false;
+    let streamIndexAtSwitch = -1;
 
-    const finalize = (result) => {
+    const collectInPageSubtitles = async () => {
+      if (!snifferWin || snifferWin.isDestroyed()) return;
+      try {
+        const frames = [
+          snifferWin.webContents.mainFrame,
+          ...(snifferWin.webContents.mainFrame?.frames || [])
+        ];
+        for (const frame of frames) {
+          if (!frame || frame.isDestroyed()) continue;
+          try {
+            const list = await frame.executeJavaScript(`
+              (async () => {
+                const results = [];
+                const formatTime = (sec) => {
+                  if (isNaN(sec) || sec < 0) sec = 0;
+                  const h = Math.floor(sec / 3600);
+                  const m = Math.floor((sec % 3600) / 60);
+                  const s = Math.floor(sec % 60);
+                  const ms = Math.floor((sec % 1) * 1000);
+                  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+                };
+
+                // 1. Vidstack or custom player textTracks (e.g. strm.cx, miruro, modern HTML5 players)
+                const mp = document.querySelector('media-player');
+                if (mp && mp.textTracks) {
+                  for (let i = 0; i < mp.textTracks.length; i++) {
+                    const t = mp.textTracks[i];
+                    if (t.kind === 'subtitles' || t.kind === 'captions') {
+                      try {
+                        t.mode = 'showing';
+                        await new Promise(r => setTimeout(r, 150));
+                        let content = '';
+                        if (t.src) {
+                          try {
+                            content = await fetch(t.src).then(r => r.text()).catch(() => '');
+                          } catch {}
+                        }
+                        if ((!content || content.length < 10) && t.cues && t.cues.length > 0) {
+                          let vtt = 'WEBVTT\\n\\n';
+                          for (let c = 0; c < t.cues.length; c++) {
+                            const cue = t.cues[c];
+                            vtt += formatTime(cue.startTime) + ' --> ' + formatTime(cue.endTime) + '\\n' + (cue.text || '') + '\\n\\n';
+                          }
+                          content = vtt;
+                        }
+                        results.push({
+                          label: t.label || t.language || ('Track ' + (i + 1)),
+                          lang: t.language || 'und',
+                          url: t.src || '',
+                          content: (content && content.length > 10) ? content : null
+                        });
+                      } catch {}
+                    }
+                  }
+                }
+
+                // 2. Standard HTML5 <video> and <track> elements
+                const v = document.querySelector('video');
+                if (v) {
+                  const trackEls = Array.from(v.querySelectorAll('track'));
+                  for (let i = 0; i < trackEls.length; i++) {
+                    const t = trackEls[i];
+                    const label = t.label || t.srclang || ('Track ' + (i + 1));
+                    if (!results.some(s => s.label === label)) {
+                      let content = '';
+                      if (t.src) {
+                        try {
+                          content = await fetch(t.src).then(r => r.text()).catch(() => '');
+                        } catch {}
+                      }
+                      if ((!content || content.length < 10) && t.track && t.track.cues && t.track.cues.length > 0) {
+                        let vtt = 'WEBVTT\\n\\n';
+                        for (let c = 0; c < t.track.cues.length; c++) {
+                          const cue = t.track.cues[c];
+                          vtt += formatTime(cue.startTime) + ' --> ' + formatTime(cue.endTime) + '\\n' + (cue.text || '') + '\\n\\n';
+                        }
+                        content = vtt;
+                      }
+                      results.push({
+                        label,
+                        lang: t.srclang || 'und',
+                        url: t.src || '',
+                        content: (content && content.length > 10) ? content : null
+                      });
+                    }
+                  }
+                }
+
+                return results;
+              })()
+            `).catch(() => []);
+
+            if (Array.isArray(list)) {
+              for (const item of list) {
+                if (item && item.label && (item.content || item.url)) {
+                  if (!capturedSubtitles.some(s => s.label === item.label)) {
+                    capturedSubtitles.push(item);
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      } catch (err) {
+        logger.debug('Error collecting in-page subtitles:', err.message);
+      }
+    };
+
+    const finalize = async (result) => {
       if (finished) return;
       finished = true;
       if (timer) clearTimeout(timer);
       if (settleTimer) clearTimeout(settleTimer);
+
       if (snifferWin && !snifferWin.isDestroyed()) {
+        try {
+          await collectInPageSubtitles();
+        } catch {}
         try {
           snifferWin.destroy();
         } catch {}
       }
       snifferWin = null;
+
+      if (result) {
+        result.subtitles = capturedSubtitles.slice(0, 8);
+      }
 
       if (result && result.streamUrl) {
         sniffCache.set(normalizedUrl, {
@@ -126,13 +246,19 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
       let subStreamUrl = primary.url;
       let dubStreamUrl = null;
 
-      if (capturedStreams.length >= 2 && check && check.hasAlternate) {
-        if (check.current === 'sub') {
-          subStreamUrl = primary.url;
-          dubStreamUrl = capturedStreams[1].url;
-        } else {
-          dubStreamUrl = primary.url;
-          subStreamUrl = capturedStreams[1].url;
+      // Only assign alternate language stream if an alternate language was explicitly verified
+      // and a new stream was captured after the switch was triggered
+      if (check && check.hasAlternate && streamIndexAtSwitch >= 0) {
+        const alternateStreams = capturedStreams.slice(streamIndexAtSwitch);
+        const altStream = alternateStreams.find((s) => s.url !== primary.url);
+        if (altStream) {
+          if (check.current === 'sub') {
+            subStreamUrl = primary.url;
+            dubStreamUrl = altStream.url;
+          } else {
+            dubStreamUrl = primary.url;
+            subStreamUrl = altStream.url;
+          }
         }
       }
 
@@ -148,12 +274,16 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
       };
     };
 
-    timer = setTimeout(() => {
+    timer = setTimeout(async () => {
       logger.debug('Sniffer timeout reached');
-      finalize(buildResultFromCaptured());
+      await finalize(buildResultFromCaptured());
     }, timeoutMs);
 
     try {
+      if (!session || typeof session.fromPartition !== 'function' || !BrowserWindow) {
+        logger.debug('Stream sniffer invoked outside Electron runtime; skipping browser sniffing.');
+        return resolve(null);
+      }
       const partition = `sniffer-${Date.now()}`;
       const sniffSession = session.fromPartition(partition);
 
@@ -173,7 +303,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           if (ref || orig || pageIsMiruro) {
             const effectiveRef = pageIsMiruro ? 'https://strm.cx/' : (ref || (pageOrigin ? `${pageOrigin}/` : ''));
             const effectiveOrig = pageIsMiruro ? 'https://strm.cx' : (orig || pageOrigin || '');
-            if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4/i.test(u))) {
+            if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4|\.vtt|\.srt|\/sub/i.test(u))) {
               registerStreamHostHeaders(u, {
                 Referer: effectiveRef,
                 Origin: effectiveOrig
@@ -197,8 +327,14 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
         );
 
         if (!isAd && !finished) {
-          // 1. Check for subtitle tracks (.vtt / .srt)
-          if ((/\.(vtt|srt)(\?|$)/i.test(u) || lower.includes('/sub.vtt')) && !lower.includes('thumb') && !lower.includes('sprite')) {
+          // 1. Check for subtitle tracks (.vtt / .srt or CDN /s/ /sub/ paths)
+          if ((/\.(vtt|srt)(\?|$)/i.test(u) || lower.includes('/sub.vtt') || lower.includes('/subtitles/') || /\/s\/[a-zA-Z0-9_\-]+/i.test(u) || /\.top\/s\//i.test(u) || lower.includes('/sub/')) && !lower.includes('thumb') && !lower.includes('sprite')) {
+            if (pageIsMiruro || isStrmCdnUrl(u)) {
+              registerStreamHostHeaders(u, {
+                Referer: 'https://strm.cx/',
+                Origin: 'https://strm.cx'
+              });
+            }
             if (!capturedSubtitles.some((s) => s.url === u)) {
               let subLabel = 'Subtitle';
               try {
@@ -228,60 +364,80 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
               if (capturedStreams.length === 1 && (pageIsMiruro || isStrmCdnUrl(u))) {
                 if (snifferWin && !snifferWin.isDestroyed()) {
                   snifferWin.webContents.executeJavaScript(`
-                    (() => {
+                    new Promise((resolve) => {
                       try {
                         const langBtn = document.querySelector('button[aria-label="Language"]') || 
-                          Array.from(document.querySelectorAll('button')).find(b => /^(sub|dub)$/i.test(b.innerText.trim()));
-                        if (!langBtn) return { hasAlternate: false };
+                          Array.from(document.querySelectorAll('button')).find(b => /^(sub|dub)$/i.test((b.innerText || '').trim()));
+                        if (!langBtn) return resolve({ hasAlternate: false });
                         const currentText = (langBtn.innerText || '').trim().toLowerCase();
                         const target = currentText === 'sub' ? 'dub' : 'sub';
                         langBtn.click();
                         setTimeout(() => {
                           try {
-                            const candidates = Array.from(document.querySelectorAll('[role="option"], [data-radix-collection-item], button, div, span'));
-                            const targetEl = candidates.find(el => el.innerText && el.innerText.trim().toLowerCase() === target);
-                            if (targetEl) targetEl.click();
-                          } catch {}
-                        }, 250);
-                        return { hasAlternate: true, current: currentText, target };
+                            const candidates = Array.from(document.querySelectorAll(
+                              '[role="menuitem"], [role="option"], [data-radix-collection-item], [role="menu"] *, button, div, span'
+                            ));
+                            const targetEl = candidates.find(el => (el.innerText || '').trim().toLowerCase() === target);
+                            if (targetEl) {
+                              targetEl.click();
+                              return resolve({ hasAlternate: true, current: currentText, target });
+                            }
+                            langBtn.click();
+                            return resolve({ hasAlternate: false, current: currentText });
+                          } catch {
+                            return resolve({ hasAlternate: false });
+                          }
+                        }, 350);
                       } catch {
-                        return { hasAlternate: false };
+                        return resolve({ hasAlternate: false });
                       }
-                    })()
+                    });
                   `).then((langCheck) => {
                     activeLangCheck = langCheck;
                     if (langCheck && langCheck.hasAlternate) {
+                      switchTriggered = true;
+                      streamIndexAtSwitch = capturedStreams.length;
                       logger.info(`Detected alternate language track (${langCheck.target}), waiting for alternate stream...`);
                       if (settleTimer) clearTimeout(settleTimer);
                       settleTimer = setTimeout(() => {
                         finalize(buildResultFromCaptured(langCheck));
                       }, 2500);
-                    } else if (!settleTimer) {
+                    } else {
+                      if (settleTimer) clearTimeout(settleTimer);
                       settleTimer = setTimeout(() => {
-                        finalize(buildResultFromCaptured());
-                      }, 450);
+                        finalize(buildResultFromCaptured(langCheck));
+                      }, 850);
                     }
                   }).catch(() => {
                     if (!settleTimer) {
                       settleTimer = setTimeout(() => {
                         finalize(buildResultFromCaptured());
-                      }, 450);
+                      }, 850);
                     }
                   });
                 } else if (!settleTimer) {
                   settleTimer = setTimeout(() => {
                     finalize(buildResultFromCaptured());
-                  }, 450);
+                  }, 850);
                 }
-              } else if (capturedStreams.length >= 2) {
+              } else if (switchTriggered && capturedStreams.length > streamIndexAtSwitch) {
+                // An alternate stream arrived after switching language!
                 if (settleTimer) clearTimeout(settleTimer);
                 settleTimer = setTimeout(() => {
-                  finalize(buildResultFromCaptured(activeLangCheck || { hasAlternate: true, current: 'sub', target: 'dub' }));
-                }, 350);
+                  finalize(buildResultFromCaptured(activeLangCheck));
+                }, 850);
+              } else if (!switchTriggered && capturedStreams.length >= 2) {
+                // Secondary streams of the current primary rendition loaded
+                if (activeLangCheck && !activeLangCheck.hasAlternate) {
+                  if (settleTimer) clearTimeout(settleTimer);
+                  settleTimer = setTimeout(() => {
+                    finalize(buildResultFromCaptured(activeLangCheck));
+                  }, 750);
+                }
               } else if (!settleTimer) {
                 settleTimer = setTimeout(() => {
                   finalize(buildResultFromCaptured());
-                }, 450);
+                }, 850);
               }
             }
           }

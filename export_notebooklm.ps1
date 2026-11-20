@@ -9,11 +9,14 @@ $OutputFile  = Join-Path $ProjectRoot 'CopyCat-Gesamtprojekt.txt'
 
 $AllowedExtensions = @('.json', '.js', '.html', '.css', '.md', '.ps1')
 $ExcludedDirs      = @('.git', 'node_modules', 'dist', 'out', 'build', 'bin', 'assets', 'vendor')
-$ExcludedFiles     = @('CopyCat-Gesamtprojekt.txt', 'package-lock.json')
+$ExcludedFiles     = @('CopyCat-Gesamtprojekt.txt', 'CopyCat-Konversationsprotokoll.txt', 'package-lock.json', 'export_conversation.py', 'export_conversation.ps1')
 
 $PriorityOrder = @(
     './package.json',
+    './README.md',
+    './AI_CONTEXT.md',
     './main.js',
+    './preload.js',
     './src/main/container.js',
     './src/main/stream-manager.js',
     './src/main/logger.js',
@@ -21,16 +24,15 @@ $PriorityOrder = @(
     './src/main/updater.js',
     './src/main/media-resolver.js',
     './src/main/downloader.js',
+    './src/main/anime-skip-resolver.js',
     './src/main/stream-sniffer.js',
     './src/main/ipc.js',
     './src/main/server.js',
-    './preload.js',
     './src/index.html',
     './src/styles.css',
     './src/icons.js',
     './src/app.js',
-    './AI_CONTEXT.md',
-    './README.md',
+    './tests/test-suite.js',
     './export_notebooklm.ps1'
 )
 
@@ -105,3 +107,13 @@ $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($OutputFile, $Sb.ToString(), $Utf8NoBom)
 
 Write-Output "Aktualisiert: ./CopyCat-Gesamtprojekt.txt ($($Files.Count) Dateien)"
+
+# Automatische Aktualisierung des Konversationsprotokolls
+$convScript = Join-Path $ProjectRoot 'export_conversation.py'
+if (Test-Path $convScript) {
+    try {
+        & python $convScript
+    } catch {
+        Write-Warning "Konversationsprotokoll konnte nicht automatisch aktualisiert werden: $_"
+    }
+}

@@ -2,7 +2,7 @@
 // GitHub Releases Auto-Updater Engine for VLCopyCat
 
 const https = require('https');
-const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -15,16 +15,21 @@ const logger = createLogger('Updater');
 const GITHUB_REPO = 'georgschneider96-collab/CopyCat-media-player';
 
 /**
- * Compare semantic versions (vX.Y.Z)
+ * Compare semantic versions (vX.Y.Z) with proper pre-release tag handling
  * @param {string} currentVer
  * @param {string} latestTag
  * @returns {boolean} True if latestTag is newer than currentVer
  */
 function isNewerVersion(currentVer, latestTag) {
+  if (!latestTag || !currentVer) return false;
   const cleanCurr = (currentVer || '').replace(/^v/i, '').trim();
   const cleanLate = (latestTag || '').replace(/^v/i, '').trim();
-  const pCurr = cleanCurr.split('.').map((n) => parseInt(n, 10) || 0);
-  const pLate = cleanLate.split('.').map((n) => parseInt(n, 10) || 0);
+
+  const [coreCurr, preCurr] = cleanCurr.split('-', 2);
+  const [coreLate, preLate] = cleanLate.split('-', 2);
+
+  const pCurr = (coreCurr || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pLate = (coreLate || '').split('.').map((n) => parseInt(n, 10) || 0);
 
   for (let i = 0; i < Math.max(pCurr.length, pLate.length); i++) {
     const c = pCurr[i] || 0;
@@ -32,6 +37,11 @@ function isNewerVersion(currentVer, latestTag) {
     if (l > c) return true;
     if (l < c) return false;
   }
+
+  // Core versions are identical (e.g. 1.3.0 vs 1.3.0-beta.1):
+  // A release without pre-release suffix is newer than one with pre-release.
+  if (!preCurr && preLate) return false; // 1.3.0 stable is newer than 1.3.0-beta.1
+  if (preCurr && !preLate) return true;  // 1.3.0-beta.1 -> 1.3.0 stable is an upgrade
   return false;
 }
 
@@ -117,29 +127,40 @@ function checkForUpdates() {
 }
 
 /**
- * Download update setup asset with redirect handling and progress events
+ * Download update setup asset with strict HTTPS, atomic staging, SHA-256 verification, and PE binary checks
  * @param {string} downloadUrl
  * @param {string} assetName
  * @param {Function} onProgress
+ * @param {string|null} expectedSha256 Optional SHA-256 checksum to verify
  * @param {number} maxRedirects
- * @returns {Promise<string>} Downloaded file path
+ * @returns {Promise<string>} Downloaded verified file path
  */
-function downloadUpdateAsset(downloadUrl, assetName, onProgress, maxRedirects = 6) {
+function downloadUpdateAsset(downloadUrl, assetName, onProgress, expectedSha256 = null, maxRedirects = 6) {
   return new Promise((resolve, reject) => {
-    const destPath = path.join(os.tmpdir(), assetName || 'CopyCat-Update-Setup.exe');
+    const finalName = assetName || 'CopyCat-Update-Setup.exe';
+    const destPath = path.join(os.tmpdir(), finalName);
+    const tempPartPath = path.join(os.tmpdir(), `${finalName}.${Date.now()}.part`);
+
+    function cleanup() {
+      try { if (fs.existsSync(tempPartPath)) fs.unlinkSync(tempPartPath); } catch {}
+    }
 
     function get(currentUrl, redirectsLeft) {
       if (redirectsLeft <= 0) {
+        cleanup();
         return reject(new Error('Too many redirects while downloading update'));
       }
 
       const parsed = new URL(currentUrl);
-      const proto = parsed.protocol === 'https:' ? https : http;
+      if (parsed.protocol !== 'https:') {
+        cleanup();
+        return reject(new Error(`Insecure download protocol rejected: ${parsed.protocol}. Only HTTPS allowed.`));
+      }
 
-      proto.get({
+      https.get({
         protocol: parsed.protocol,
         hostname: parsed.hostname,
-        port: parsed.port,
+        port: parsed.port || 443,
         path: parsed.pathname + parsed.search,
         headers: {
           'User-Agent': 'CopyCat-Media-Player',
@@ -152,16 +173,19 @@ function downloadUpdateAsset(downloadUrl, assetName, onProgress, maxRedirects = 
         }
 
         if (res.statusCode !== 200) {
-          return reject(new Error(`Download failed with status ${res.statusCode}`));
+          cleanup();
+          return reject(new Error(`Download failed with HTTP ${res.statusCode}`));
         }
 
         const total = parseInt(res.headers['content-length'] || '0', 10);
         let transferred = 0;
         let lastReport = 0;
-        const fileStream = fs.createWriteStream(destPath);
+        const hash = crypto.createHash('sha256');
+        const fileStream = fs.createWriteStream(tempPartPath);
 
         res.on('data', (chunk) => {
           transferred += chunk.length;
+          hash.update(chunk);
           const now = Date.now();
           if (now - lastReport > 80 || transferred === total) {
             lastReport = now;
@@ -173,14 +197,56 @@ function downloadUpdateAsset(downloadUrl, assetName, onProgress, maxRedirects = 
         res.pipe(fileStream);
 
         fileStream.on('finish', () => {
-          fileStream.close(() => resolve(destPath));
+          fileStream.close(() => {
+            try {
+              // 1. Content size validation
+              if (total > 0 && transferred !== total) {
+                cleanup();
+                return reject(new Error(`Incomplete download: transferred ${transferred}/${total} bytes`));
+              }
+
+              // 2. Computed SHA-256 hash
+              const computedSha256 = hash.digest('hex');
+              logger.info(`Downloaded asset SHA-256: ${computedSha256}`);
+
+              if (expectedSha256 && computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
+                cleanup();
+                return reject(new Error(`Checksum mismatch! Expected: ${expectedSha256}, Got: ${computedSha256}`));
+              }
+
+              // 3. Binary header validation (Windows PE MZ signature: 0x4D, 0x5A)
+              const fd = fs.openSync(tempPartPath, 'r');
+              const headerBuf = Buffer.alloc(2);
+              fs.readSync(fd, headerBuf, 0, 2, 0);
+              fs.closeSync(fd);
+
+              if (headerBuf[0] !== 0x4D || headerBuf[1] !== 0x5A) {
+                cleanup();
+                return reject(new Error('Downloaded asset is not a valid Windows executable (missing MZ signature)'));
+              }
+
+              // 4. Atomic move to final destination
+              if (fs.existsSync(destPath)) {
+                try { fs.unlinkSync(destPath); } catch {}
+              }
+              fs.renameSync(tempPartPath, destPath);
+              logger.info(`Asset verified and atomically placed: ${destPath}`);
+              resolve(destPath);
+            } catch (postErr) {
+              cleanup();
+              reject(postErr);
+            }
+          });
         });
 
         fileStream.on('error', (err) => {
-          try { fs.unlinkSync(destPath); } catch {}
+          cleanup();
           reject(err);
         });
-      }).on('error', reject);
+      }).on('error', (err) => {
+        cleanup();
+        reject(err);
+      });
     }
 
     get(downloadUrl, maxRedirects);

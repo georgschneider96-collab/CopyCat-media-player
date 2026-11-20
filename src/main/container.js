@@ -256,13 +256,13 @@ class WindowManager {
 
   leavePip(opts = {}) {
     if (!this.isAvailable()) return false;
+    this.restoringFromPipLeave = true;
     const wasActive = this.isInPipMode;
     this.isInPipMode = false;
     this.lastPipBounds = null;
     const shouldRestore = opts?.restore !== false;
 
     if (wasActive && shouldRestore) {
-      this.restoringFromPipLeave = true;
       try {
         sessionModule.restoreMainWindowWin32(this.mainWindow);
         if (this.mainWindow.isMinimized()) this.mainWindow.restore();
@@ -321,10 +321,15 @@ function createAppContainer() {
     getFfmpegPath: () => mediaResolver.FFMPEG_PATH,
     getFfprobePath: () => mediaResolver.FFPROBE_PATH,
     probe: mediaResolver.probeMediaFile,
+    probeMediaFile: mediaResolver.probeMediaFile,
+    resolveAnimeChapters: mediaResolver.resolveAnimeChapters,
     buildItem: mediaResolver.buildMediaItem,
+    buildMediaItem: mediaResolver.buildMediaItem,
     scanFolder: mediaResolver.scanMediaFolder,
     findAutoSubtitle: mediaResolver.findAutoSubtitle,
+    extractEmbeddedSubtitleVtt: mediaResolver.extractEmbeddedSubtitleVtt,
     detectNeedsStream: mediaResolver.detectNeedsStream,
+    parseByteRange: mediaResolver.parseByteRange,
     resolveCliFile: mediaResolver.resolveCliMediaFile,
     MEDIA_EXTENSIONS: mediaResolver.MEDIA_EXTENSIONS,
     SUB_EXTENSIONS: mediaResolver.SUB_EXTENSIONS

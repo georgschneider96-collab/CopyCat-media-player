@@ -208,11 +208,25 @@ html, body {
   color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+  max-width: 175px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background 0.14s ease, color 0.14s ease;
 }
 .folder-crumb-btn svg {
   width: 16px;
   height: 16px;
+  flex-shrink: 0;
+}
+#folder-crumb-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  max-width: 135px;
+  vertical-align: middle;
 }
 .folder-crumb-btn:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -395,23 +409,63 @@ html, body {
 
 .lib-toolbar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 7px;
+  padding: 6px 0 4px 0;
   font-size: 11.5px;
   color: var(--text-muted);
 }
+.lib-folder-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+}
+.lib-folder-header-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--accent);
+  margin-top: 1px;
+  display: inline-flex;
+}
+.lib-folder-header-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.lib-folder-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+  white-space: normal;
+  flex: 1;
+  min-width: 0;
+  cursor: default;
+}
+.lib-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
+}
 .lib-add-btn {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid #2A2A2A;
   color: var(--text-secondary);
   padding: 3px 8px;
   border-radius: 5px;
-  font-size: 11.5px;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.14s ease;
 }
 .lib-add-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.1);
 }
 
 .lib-list {
@@ -469,6 +523,55 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.lib-item.is-scrolling .lib-item-name {
+  text-overflow: clip;
+}
+.lib-item-name-text {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+@keyframes libNameMarquee {
+  0%, 15% {
+    transform: translateX(0);
+  }
+  74%, 86% {
+    transform: translateX(var(--marquee-x, 0));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+.lib-item.is-scrolling .lib-item-name-text {
+  animation: libNameMarquee var(--marquee-dur, 4s) cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+.lib-item.lib-parent-row {
+  opacity: 0.85;
+  transition: opacity 0.14s ease, background 0.14s ease;
+}
+.lib-item.lib-parent-row:hover {
+  opacity: 1;
+}
+.lib-item.lib-parent-row .lib-item-badge {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+.lib-parent-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.lib-parent-dots {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  line-height: 1;
+  color: var(--text-primary);
 }
 .row-actions {
   display: flex;
@@ -631,6 +734,9 @@ html, body {
   object-fit: contain;
   outline: none;
   display: none;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
 }
 #main-video.loaded {
   display: block;
@@ -1038,12 +1144,10 @@ html, body {
 }
 
 .sub-sync-mini {
-  display: none;
-  align-items: center;
-  gap: 2px;
+  display: none !important;
 }
 .sub-sync-mini.visible {
-  display: inline-flex;
+  display: none !important;
 }
 .mini-accent-btn {
   height: 18px;
@@ -1212,8 +1316,16 @@ html, body {
 .right-actions-group {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
+}
+.right-actions-group .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+.right-actions-group .icon-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* ==================== FLOATING MENUS & TABBED POPOVER ==================== */
@@ -1267,7 +1379,7 @@ html, body {
   position: absolute;
   bottom: calc(var(--bottom-h) + 8px);
   right: 12px;
-  width: 344px;
+  width: 380px;
   background: var(--bg-panel);
   backdrop-filter: blur(22px);
   border: 1px solid var(--border-panel);
@@ -1289,15 +1401,16 @@ html, body {
   border-bottom: 1px solid #222;
 }
 .pop-tab {
-  padding: 10px 4px;
+  padding: 12px 6px;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-bottom: 2.5px solid transparent;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  transition: color 0.14s ease;
+  transition: color 0.14s ease, border-color 0.14s ease;
 }
 .pop-tab:hover {
   color: var(--text-primary);
@@ -1309,10 +1422,10 @@ html, body {
 
 .pop-panel {
   display: none;
-  padding: 14px 16px;
+  padding: 16px 18px;
   flex-direction: column;
-  gap: 12px;
-  max-height: 360px;
+  gap: 14px;
+  max-height: 380px;
   overflow-y: auto;
 }
 .pop-panel.active {
@@ -1323,11 +1436,11 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 .pop-label {
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 
 /* Juxtopposed Rectangular [ ON | ██ ] / [ ██ | OFF ] Switch (09_paused_state.png & 15_accents_clear.png) */
@@ -1444,14 +1557,14 @@ html, body {
 }
 
 .settings-modal {
-  width: min(780px, 92vw);
-  height: min(520px, 84vh);
+  width: min(1060px, 94vw);
+  height: min(740px, 92vh);
   background: #141414;
   border: 1px solid #292929;
   border-radius: 14px;
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.85);
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: 230px 1fr;
   overflow: hidden;
 }
 
@@ -1807,7 +1920,8 @@ html, body {
   background: #121212;
   border: 1px solid #222222;
   border-radius: 8px;
-  max-height: 280px;
+  min-height: 420px;
+  max-height: 480px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -2621,67 +2735,70 @@ html, body {
 /* ==================== SKIP SEGMENT & UP NEXT OVERLAYS ==================== */
 .skip-segment-btn {
   position: absolute;
-  bottom: calc(var(--bottom-h) + 20px);
-  right: 24px;
+  bottom: calc(var(--bottom-h) + 24px);
+  left: 190px;
+  right: auto;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 18px;
-  background: rgba(20, 20, 24, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1.5px solid var(--accent);
+  padding: 12px 24px;
+  background: var(--accent);
+  color: #000000;
+  border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: 999px;
-  color: #FFFFFF;
   font-family: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   cursor: pointer;
-  z-index: 45;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 16px rgba(255, 138, 0, 0.25);
-  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, color 0.2s ease;
+  z-index: 50;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), filter 0.15s ease;
   user-select: none;
+  transform: translateZ(0);
+  will-change: transform, opacity;
 }
 
 .skip-segment-btn:hover {
-  background: var(--accent);
-  color: #000000;
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.65), 0 0 24px var(--accent);
+  filter: brightness(1.12);
+  transform: translateY(-2px) scale(1.03) translateZ(0);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 
 .skip-segment-btn:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(0) scale(0.97) translateZ(0);
+  filter: brightness(0.95);
 }
 
 .skip-segment-btn .skip-segment-icon {
-  font-size: 13px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .skip-segment-btn .skip-segment-label {
   letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .skip-segment-btn .skip-segment-hotkey {
-  font-size: 10px;
-  padding: 2px 5px;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  margin-left: 2px;
-  text-transform: uppercase;
-}
-
-.skip-segment-btn:hover .skip-segment-hotkey {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2.5px 7px;
   background: rgba(0, 0, 0, 0.22);
   color: #000000;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  margin-left: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .skip-segment-btn.hidden {
+  display: none !important;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(12px) scale(0.95);
+  transform: translateY(10px) scale(0.96) translateZ(0);
 }
 
 /* Up Next 5-Second Countdown Card */
@@ -2797,12 +2914,19 @@ html, body {
 .seekbar-chapter-tick {
   position: absolute;
   top: 0;
-  width: 2px;
+  width: 3px;
   height: 100%;
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.45);
   transform: translateX(-50%);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   border-radius: 1px;
+  transition: background 0.15s ease, width 0.15s ease;
+  z-index: 4;
+}
+.seekbar-chapter-tick:hover {
+  background: var(--accent);
+  width: 5px;
 }
 
 .seekbar-segment-zone {
@@ -2824,9 +2948,9 @@ html, body {
 }
 
 [data-theme="light"] .skip-segment-btn {
-  background: rgba(255, 255, 255, 0.94);
-  color: #111111;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  background: var(--accent);
+  color: #000000;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
 }
 
 [data-theme="light"] .up-next-banner {
@@ -3147,7 +3271,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 280px;
+  max-height: 380px;
   overflow-y: auto;
 }
 
@@ -3174,18 +3298,17 @@ html, body {
 
 .dl-item-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .dl-item-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
+  word-break: break-word;
   flex: 1;
 }
 
@@ -3265,7 +3388,8 @@ html, body {
   position: absolute;
   right: 22px;
   bottom: 22px;
-  width: 335px;
+  width: min(440px, calc(100vw - 44px));
+  max-width: 480px;
   background: rgba(18, 18, 18, 0.92);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -3323,9 +3447,11 @@ html, body {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+  max-height: 3.8em;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .player-dl-hud-pct {

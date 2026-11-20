@@ -4,6 +4,37 @@
 const fs = require('fs');
 const path = require('path');
 
+let cachedLogPath = null;
+let logStream = null;
+
+function getLogFilePath() {
+  if (!cachedLogPath) {
+    if (process.env.COPYCAT_TEST_SUITE === '1' || process.env.NODE_ENV === 'test') {
+      cachedLogPath = path.join(__dirname, '..', '..', 'tests', 'test-runs.log');
+      return cachedLogPath;
+    }
+    try {
+      const electron = require('electron');
+      const app = electron.app;
+      const baseDir = app && typeof app.getPath === 'function' ? app.getPath('userData') : path.join(__dirname, '..', '..');
+      cachedLogPath = path.join(baseDir, 'copycat.log');
+    } catch {
+      cachedLogPath = path.join(__dirname, '..', '..', 'copycat.log');
+    }
+  }
+  return cachedLogPath;
+}
+
+function getLogStream() {
+  if (!logStream) {
+    try {
+      logStream = fs.createWriteStream(getLogFilePath(), { flags: 'a', encoding: 'utf8' });
+      logStream.on('error', () => { logStream = null; });
+    } catch {}
+  }
+  return logStream;
+}
+
 class Logger {
   constructor(scope = 'Main') {
     this.scope = scope;
@@ -11,14 +42,7 @@ class Logger {
   }
 
   static getLogFile() {
-    try {
-      const electron = require('electron');
-      const app = electron.app;
-      const baseDir = app && typeof app.getPath === 'function' ? app.getPath('userData') : path.join(__dirname, '..', '..');
-      return path.join(baseDir, 'copycat.log');
-    } catch {
-      return path.join(__dirname, '..', '..', 'copycat.log');
-    }
+    return getLogFilePath();
   }
 
   static writeToFile(level, scope, message, meta) {
@@ -28,7 +52,12 @@ class Logger {
         ? (typeof meta === 'object' ? ` ${JSON.stringify(meta)}` : ` ${meta}`)
         : '';
       const line = `[${stamp}] [${level.toUpperCase()}] [${scope}] ${message}${metaStr}\n`;
-      fs.appendFileSync(Logger.getLogFile(), line, 'utf8');
+      const stream = getLogStream();
+      if (stream && stream.writable) {
+        stream.write(line);
+      } else {
+        fs.appendFile(getLogFilePath(), line, 'utf8', () => {});
+      }
     } catch {
       // Safe fallback: never crash on file logging errors
     }

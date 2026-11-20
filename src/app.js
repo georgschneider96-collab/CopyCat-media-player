@@ -35,6 +35,35 @@
     speedStep: 0.10       // 0.01x to 0.50x
   };
 
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function stripLanguageTags(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+      .replace(/\s*[\(\[]\s*(?:English(?:\s*(?:Dub|Sub))?|Japanese(?:\s*(?:Original|Sub))?|Dual(?:\s*Audio)?|Dub|Sub|Eng|Jpn|Jap|Original)\s*[\)\]]/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+
+  function formatDoubleDigitEpisode(str) {
+    if (!str || typeof str !== 'string') return '';
+    let result = str.replace(/(\b(?:Episode|Ep\.?|E)\s*[-_]?\s*)(\d+)\b/gi, (match, prefix, num) => {
+      return prefix + (num.length === 1 ? `0${num}` : num);
+    });
+    result = result.replace(/(\s*[-–—]\s*)(\d+)(\s*)$/, (match, prefix, num, suffix) => {
+      return prefix + (num.length === 1 ? `0${num}` : num) + suffix;
+    });
+    return result;
+  }
+
   const ACTION_DEFINITIONS = [
     { id: 'togglePlay', label: 'Play / Pause', category: 'Playback', defaults: ['Space', 'KeyK'] },
     { id: 'toggleFullscreen', label: 'Toggle Fullscreen', category: 'Playback', defaults: ['KeyF'] },
@@ -51,7 +80,8 @@
     { id: 'nextTrack', label: 'Next Video', category: 'Navigation', defaults: ['KeyN'] },
     { id: 'prevTrack', label: 'Previous Video', category: 'Navigation', defaults: ['KeyP'] },
     { id: 'toggleSub', label: 'Toggle Subtitles', category: 'Subtitles', defaults: ['KeyC'] },
-    { id: 'addBookmark', label: 'Add Bookmark', category: 'Bookmarks', defaults: ['KeyB'] },
+    { id: 'cycleAudioTrack', label: 'Cycle Audio Track (Dual Audio)', category: 'Audio', defaults: ['KeyB'] },
+    { id: 'addBookmark', label: 'Add Bookmark', category: 'Bookmarks', defaults: ['Ctrl+KeyB', 'Shift+KeyB'] },
     { id: 'snapshot', label: 'Save Snapshot (PNG)', category: 'Tools', defaults: ['Shift+KeyS'] },
     { id: 'cycleAspect', label: 'Cycle Aspect Ratio', category: 'Playback', defaults: ['KeyZ', 'KeyA'] },
     { id: 'openFile', label: 'Open File', category: 'File', defaults: ['Ctrl+KeyO'] },
@@ -70,6 +100,8 @@
     { id: 'toggleGhostMode', label: 'Toggle Ghost Window Mode', category: 'Interface', defaults: ['KeyG'] },
     { id: 'snapshotClipboard', label: 'Copy Snapshot to Clipboard', category: 'Tools', defaults: ['Alt+KeyS'] },
     { id: 'skipIntroCredits', label: 'Skip Intro / Outro / Segment', category: 'Playback', defaults: ['Tab'] },
+    { id: 'nextChapter', label: 'Next Chapter', category: 'Navigation', defaults: ['PageDown', 'Ctrl+ArrowRight'] },
+    { id: 'prevChapter', label: 'Previous Chapter', category: 'Navigation', defaults: ['PageUp', 'Ctrl+ArrowLeft'] },
     { id: 'toggleStopAfterCurrent', label: 'Stop After Current Episode', category: 'Playback', defaults: ['KeyE'] },
     { id: 'bossKey', label: 'Boss Key (Mute & Minimize)', category: 'System', defaults: ['F12'] }
   ];
@@ -156,6 +188,7 @@
     alwaysOnTop: false,
     autoLoadFolder: true,
     autoLoadSub: true,
+    autoPlaySubtitles: true,
     rememberState: true,
     resumeLastVideo: false,
     autoPauseOnMinimize: true,
@@ -179,6 +212,13 @@
     watchedQueuePaths: [],     // File paths of items watched in Queue
     currentChapters: [],
     currentSegments: [],
+    probedAudioTracks: [],
+    probedSubtitleTracks: [],
+    activeEmbeddedSubTrackIndex: -1,
+    preferredAudioLang: 'en',
+    fallbackSubtitles: true,
+    embedSubtitlesOnDownload: true,
+    autoPlayDownloads: true,
     activeSkipSegment: null,
     upNextDismissed: false,
     lastSkippedSegmentId: null,
@@ -225,6 +265,8 @@
     btnFolderCrumb: $('btn-folder-crumb'),
     iconFolderCrumb: $('icon-folder-crumb'),
     folderCrumbText: $('folder-crumb-text'),
+    btnHeaderStream: $('btn-header-stream'),
+    iconHeaderStream: $('icon-header-stream'),
     mediaTitle: $('media-title'),
     btnPip: $('btn-pip'),
     btnMinimize: $('btn-minimize'),
@@ -237,6 +279,7 @@
     menuOpenMulti: $('menu-open-multi'),
     menuOpenFolder: $('menu-open-folder'),
     menuOpenSub: $('menu-open-sub'),
+    menuCycleAudio: $('menu-cycle-audio'),
     menuSnapshot: $('menu-snapshot'),
     menuCycleAspect: $('menu-cycle-aspect'),
     menuReveal: $('menu-reveal'),
@@ -251,7 +294,9 @@
     libSearchIcon: $('lib-search-icon'),
     libSearchInput: $('lib-search-input'),
     btnLibSearchClear: $('btn-lib-search-clear'),
+    libFolderHeader: $('lib-folder-header'),
     libFolderLabel: $('lib-folder-label'),
+    libFolderHeaderIcon: $('lib-folder-header-icon'),
     btnLibOpenFolder: $('btn-lib-open-folder'),
     btnLibOpenFiles: $('btn-lib-open-files'),
     libList: $('lib-list'),
@@ -362,6 +407,8 @@
 
     lblVolumePop: $('lbl-volume-pop'),
     rngVolumePop: $('rng-volume-pop'),
+    selAudioTrack: $('sel-audio-track'),
+    lblAudioTrackSub: $('lbl-audio-track-sub'),
     swNightMode: $('sw-night-mode'),
     selEqPreset: $('sel-eq-preset'),
     lblAudioDelay: $('lbl-audio-delay'),
@@ -371,6 +418,9 @@
     swVisualizer: $('sw-visualizer'),
 
     swSubEnabled: $('sw-sub-enabled'),
+    rowSubTrack: $('row-sub-track'),
+    selSubTrack: $('sel-sub-track'),
+    lblSubTrackSub: $('lbl-sub-track-sub'),
     lblSubTrack: $('lbl-sub-track'),
     btnLoadSub: $('btn-load-sub'),
     lblSubSize: $('lbl-sub-size'),
@@ -395,6 +445,9 @@
     swAlwaysOnTop: $('sw-always-on-top'),
     swAutoloadFolder: $('sw-autoload-folder'),
     swAutoloadSub: $('sw-autoload-sub'),
+    swAutoplaySubtitles: $('sw-autoplay-subtitles'),
+    selPreferredAudioLang: $('sel-preferred-audio-lang'),
+    swFallbackSubtitles: $('sw-fallback-subtitles'),
     swRememberState: $('sw-remember-state'),
     swResumePlayback: $('sw-resume-playback'),
     swAutoPauseMinimize: $('sw-auto-pause-minimize'),
@@ -436,8 +489,17 @@
     menuOpenStream: $('menu-open-stream'),
 
     streamUrlInput: $('stream-url-input'),
+    swStreamEmbedSub: $('sw-stream-embed-sub'),
     btnStreamPaste: $('btn-stream-paste'),
     btnStreamProbe: $('btn-stream-probe'),
+    btnStreamNextEp: $('btn-stream-next-ep'),
+    btnStreamSeason: $('btn-stream-season'),
+    streamSeasonPanel: $('stream-season-panel'),
+    seasonFromEp: $('season-from-ep'),
+    seasonToEp: $('season-to-ep'),
+    seasonFolderName: $('season-folder-name'),
+    btnQueueSeason: $('btn-queue-season'),
+    btnHaltAllDl: $('btn-halt-all-dl'),
     streamProbeResult: $('stream-probe-result'),
     btnStreamPlay: $('btn-stream-play'),
     btnStreamDownload: $('btn-stream-download'),
@@ -447,7 +509,8 @@
     downloadFolderDisplay: $('download-folder-display'),
     btnChooseDlFolder: $('btn-choose-dl-folder'),
     btnOpenDlFolder: $('btn-open-dl-folder'),
-    chkAutoPlayDl: $('chk-auto-play-dl'),
+    swAutoPlayDl: $('sw-auto-play-dl'),
+    dlQueueSection: $('dl-queue-section'),
     dlQueueContainer: $('dl-queue-container'),
     dlEmptyState: $('dl-empty-state'),
     dlQueueCount: $('dl-queue-count'),
@@ -525,6 +588,7 @@
   // ==================== AUDIO ENGINE (200% CONE BOOST + EQ + ANALYSER) ====================
   let audioCtx = null;
   let gainNode = null;
+  let limiterNode = null;
   let compressorNode = null;
   let delayNode = null;
   let analyserNode = null;
@@ -565,6 +629,16 @@
 
       gainNode = audioCtx.createGain();
 
+      // Dedicated Brickwall Peak Limiter downstream of the 200% Gain Boost:
+      // Prevents digital clipping/oversaturation when boosting quiet audio signals up to 200%,
+      // while preserving 100% transparent dynamics below -0.5 dBFS.
+      limiterNode = audioCtx.createDynamicsCompressor();
+      limiterNode.threshold.value = -0.5; // True peak ceiling in dBFS
+      limiterNode.knee.value = 0.0;       // Hard knee for instant limiting
+      limiterNode.ratio.value = 20.0;     // 20:1 brickwall limiting ratio
+      limiterNode.attack.value = 0.002;   // 2ms ultra-fast lookahead attack
+      limiterNode.release.value = 0.05;   // 50ms fast recovery to prevent audible volume pumping
+
       source.connect(bass);
       bass.connect(mid);
       mid.connect(treble);
@@ -572,7 +646,8 @@
       compressorNode.connect(delayNode);
       delayNode.connect(analyserNode);
       analyserNode.connect(gainNode);
-      gainNode.connect(audioCtx.destination);
+      gainNode.connect(limiterNode);
+      limiterNode.connect(audioCtx.destination);
 
       eqNodes = [bass, mid, treble];
       applyEqualizer();
@@ -618,6 +693,9 @@
     if (gainNode && audioCtx) {
       el.video.muted = false;
       el.video.volume = 1.0;
+      try {
+        gainNode.gain.cancelScheduledValues(0);
+      } catch {}
       gainNode.gain.value = state.muted ? 0 : clamped / 100;
     } else {
       el.video.muted = state.muted;
@@ -637,6 +715,425 @@
 
     el.rngVolumePop.value = String(clamped);
     el.lblVolumePop.textContent = state.muted ? `Muted (${clamped}%)` : `${clamped}%`;
+  }
+
+  // ==================== MULTI-TRACK AUDIO & DUAL AUDIO SWITCHER ====================
+  function getAudioTracksList() {
+    if (state.hls && Array.isArray(state.hls.audioTracks) && state.hls.audioTracks.length > 0) {
+      return state.hls.audioTracks.map((t, idx) => ({
+        index: idx,
+        name: t.name || (t.lang ? t.lang.toUpperCase() : `Audio Track ${idx + 1}`),
+        lang: t.lang || '',
+        enabled: state.hls.audioTrack === idx
+      }));
+    }
+
+    const currentItem = getCurrentItem();
+    const itemTitle = currentItem?.title || currentItem?.name || currentItem?.filePath || '';
+    const isDub = /dub/i.test(itemTitle);
+    const isAnime = /(?:\[.*?\]|\b(?:ep(?:isode)?\.?\s*\d+|s\d+\s*e\d+|season\s*\d+|owarimonogatari|monogatari|naruto|piece|bleach|jujutsu|frieren|knight|elaina|witch|slime|re:zero|titan|hero|dungeon|isekai|danmachi|sword|art|online|shield|solo|leveling)\b)/i.test(itemTitle)
+      || (state.currentChapters && state.currentChapters.length > 0)
+      || (state.currentSegments && state.currentSegments.length > 0)
+      || (state.subCues && state.subCues.length > 0)
+      || /copycat/i.test(itemTitle);
+
+    const resolveTrackLabel = (rawName, langCode, idx, totalTracks) => {
+      let name = rawName || '';
+      const lang = (langCode || '').toLowerCase().trim();
+      if (!name || name === 'SoundHandler' || /^audio\s*track/i.test(name) || /^track\s*\d+/i.test(name) || /^default/i.test(name)) {
+        if (/jpn|ja/i.test(lang)) {
+          return 'Japanese (Original)';
+        } else if (/eng|en/i.test(lang)) {
+          return isDub ? 'English (Dub)' : 'English';
+        } else if (/ger|deu|de/i.test(lang)) {
+          return 'German';
+        } else if (/fra|fre|fr/i.test(lang)) {
+          return 'French';
+        } else if (/spa|es/i.test(lang)) {
+          return 'Spanish';
+        } else if (isAnime) {
+          if (totalTracks > 1) {
+            return idx === 0 ? (isDub ? 'English (Dub)' : 'Japanese (Original)') : (isDub ? 'Japanese (Original)' : 'English (Dub)');
+          }
+          return isDub ? 'English (Dub)' : 'Japanese (Original)';
+        }
+        return `Audio Track ${idx + 1}${lang ? ` [${lang.toUpperCase()}]` : ''}`;
+      }
+      if (/japanese|ja-jp|jpn/i.test(name)) return 'Japanese (Original)';
+      if (/english|en-us|eng/i.test(name)) return 'English (Dub)';
+      return name;
+    };
+
+    if (el.video && el.video.audioTracks && el.video.audioTracks.length > 0) {
+      const list = [];
+      const totalTracks = el.video.audioTracks.length;
+      for (let i = 0; i < totalTracks; i++) {
+        const t = el.video.audioTracks[i];
+        const probed = state.probedAudioTracks?.[i];
+        const rawName = t.label || probed?.name;
+        const langCode = t.language || probed?.lang || (isAnime ? (isDub ? (i === 0 ? 'eng' : 'jpn') : (i === 0 ? 'jpn' : 'eng')) : '');
+        const name = resolveTrackLabel(rawName, langCode, i, totalTracks);
+        list.push({
+          index: i,
+          name,
+          lang: langCode,
+          enabled: Boolean(t.enabled)
+        });
+      }
+      return list;
+    }
+
+    if (Array.isArray(state.probedAudioTracks) && state.probedAudioTracks.length > 0) {
+      const totalTracks = state.probedAudioTracks.length;
+      return state.probedAudioTracks.map((p, idx) => {
+        const langCode = p.lang || (isAnime ? (isDub ? (idx === 0 ? 'eng' : 'jpn') : (idx === 0 ? 'jpn' : 'eng')) : '');
+        const name = resolveTrackLabel(p.name, langCode, idx, totalTracks);
+        return {
+          index: idx,
+          name,
+          lang: langCode,
+          enabled: idx === 0
+        };
+      });
+    }
+
+    return [];
+  }
+
+  function syncAudioTracksDropdown() {
+    if (!el.selAudioTrack) return;
+    const tracks = getAudioTracksList();
+    const currentItem = getCurrentItem();
+    const itemTitle = currentItem?.title || currentItem?.name || currentItem?.filePath || '';
+    const isDub = /dub/i.test(itemTitle);
+    const isAnime = /(?:\[.*?\]|\b(?:ep(?:isode)?\.?\s*\d+|s\d+\s*e\d+|season\s*\d+|owarimonogatari|monogatari|naruto|piece|bleach|jujutsu|frieren|knight|elaina|witch|slime|re:zero|titan|hero|dungeon|isekai|danmachi|sword|art|online|shield|solo|leveling)\b)/i.test(itemTitle)
+      || (state.currentChapters && state.currentChapters.length > 0)
+      || (state.currentSegments && state.currentSegments.length > 0)
+      || (state.subCues && state.subCues.length > 0)
+      || /copycat/i.test(itemTitle);
+
+    if (tracks.length <= 1) {
+      let label = tracks.length === 1 ? tracks[0].name : '';
+      if (!label && state.probedAudioTracks && state.probedAudioTracks.length > 0) {
+        label = state.probedAudioTracks[0].name;
+      }
+      if (!label || /^audio\s*track/i.test(label) || /^default/i.test(label)) {
+        label = isAnime ? (isDub ? 'English (Dub)' : 'Japanese (Original)') : 'Default Audio (Stereo)';
+      }
+      if (el.selAudioTrack.options.length !== 1 || el.selAudioTrack.options[0].textContent !== label) {
+        el.selAudioTrack.innerHTML = `<option value="0" selected>${escapeHtml(label)}</option>`;
+      }
+      el.selAudioTrack.disabled = false;
+      if (el.lblAudioTrackSub) el.lblAudioTrackSub.textContent = `${label} • Single audio track`;
+      return;
+    }
+
+    el.selAudioTrack.disabled = false;
+    if (el.lblAudioTrackSub) el.lblAudioTrackSub.textContent = `${tracks.length} audio tracks available (Dual Audio)`;
+    const anyEnabled = tracks.some((t) => t.enabled);
+    const activeTrack = tracks.find((t) => t.enabled) || tracks[0];
+
+    // Rebuild options only when necessary, preserving focus & preventing dropdown flicker
+    if (el.selAudioTrack.options.length !== tracks.length) {
+      el.selAudioTrack.innerHTML = tracks.map((t, idx) => {
+        let label = t.name;
+        if (/japanese|ja/i.test(label) || /jpn/i.test(t.lang || '')) label = 'Japanese (Original)';
+        else if (/english|en/i.test(label) || /eng/i.test(t.lang || '')) label = 'English (Dub)';
+        const isSelected = anyEnabled ? t.enabled : (idx === 0);
+        return `<option value="${t.index}" ${isSelected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+      }).join('');
+    }
+
+    if (activeTrack) {
+      el.selAudioTrack.value = String(activeTrack.index);
+    }
+  }
+
+  function setAudioTrack(trackIndex) {
+    const tracks = getAudioTracksList();
+    if (tracks.length === 0) return;
+    const targetIdx = Math.max(0, Math.min(tracks.length - 1, trackIndex));
+
+    const wasPlaying = !el.video.paused;
+    const curTime = el.video.currentTime;
+
+    if (state.hls && Array.isArray(state.hls.audioTracks)) {
+      state.hls.audioTrack = targetIdx;
+    } else if (el.video && el.video.audioTracks && el.video.audioTracks.length > 0) {
+      for (let i = 0; i < el.video.audioTracks.length; i++) {
+        el.video.audioTracks[i].enabled = (i === targetIdx);
+      }
+
+      // Automatically un-stall Chromium's media demuxer:
+      // In Chromium, toggling AudioTrack.enabled on an MP4 leaves the demuxer waiting
+      // for new audio packets, stalling video playback until an explicit seek occurs.
+      // Performing an imperceptible 10ms micro-seek flushes the demuxer buffers and
+      // binds the newly selected audio stream immediately, resuming playback seamlessly.
+      const dur = getDuration();
+      const nudge = (Number.isFinite(dur) && curTime + 0.01 < dur) ? curTime + 0.01 : Math.max(0, curTime - 0.01);
+      try {
+        el.video.currentTime = nudge;
+      } catch {}
+
+      if (wasPlaying) {
+        el.video.play().catch(() => {});
+        setTimeout(() => {
+          if (wasPlaying && el.video.paused) {
+            el.video.play().catch(() => {});
+          }
+        }, 60);
+      }
+    }
+
+    // Ensure AudioContext is active and Web Audio gainNode is not muted
+    if (audioCtx) {
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+    }
+    applyVolumeToEngine();
+
+    syncAudioTracksDropdown();
+    const active = tracks[targetIdx];
+    let label = active?.name || `Track ${targetIdx + 1}`;
+    if (/japanese|ja/i.test(label) || /jpn/i.test(active?.lang || '')) label = 'Japanese';
+    else if (/english|en/i.test(label) || /eng/i.test(active?.lang || '')) label = 'English';
+    showToast(`Audio Track: ${label} (${targetIdx + 1}/${tracks.length})`);
+  }
+
+  function cycleAudioTrack() {
+    const tracks = getAudioTracksList();
+    if (tracks.length <= 1) {
+      showToast(tracks.length === 1 ? `Audio: ${tracks[0].name} (Single Track)` : 'No alternate audio track found');
+      return;
+    }
+    const currentIdx = tracks.findIndex((t) => t.enabled);
+    const nextIdx = (currentIdx + 1) % tracks.length;
+    setAudioTrack(nextIdx);
+  }
+
+  function detectClientSubtitleLanguage(text) {
+    if (!text || typeof text !== 'string') return null;
+    const clean = text
+      .replace(/^WEBVTT[^\r\n]*\r?\n+/i, '')
+      .replace(/\d\d:\d\d(?::\d\d)?(?:\.\d+)?\s*-->\s*\d\d:\d\d(?::\d\d)?(?:\.\d+)?/g, '')
+      .replace(/<[^>]+>/g, '')
+      .slice(0, 15000);
+
+    if (/[\u0e00-\u0e7f]/.test(clean)) return { name: 'Thai', lang: 'tha' };
+    if (/[\u3040-\u30ff]/.test(clean)) return { name: 'Japanese', lang: 'jpn' };
+    if (/[\uac00-\ud7af]/.test(clean)) return { name: 'Korean', lang: 'kor' };
+    if (/[\u0400-\u04ff]/.test(clean)) return { name: 'Russian', lang: 'rus' };
+    if (/[\u0600-\u06ff]/.test(clean)) return { name: 'Arabic', lang: 'ara' };
+    if (/[\u4e00-\u9fa5]/.test(clean)) return { name: 'Chinese', lang: 'chi' };
+
+    const idMatches = (clean.match(/\b(yang|dan|di|ini|itu|tidak|ada|dari|untuk|kamu|aku|dia|kita|mereka|bisa|sudah|dengan|akan|apa|pada|saya|kau|kami|jangan|bukan)\b/gi) || []).length;
+    const deMatches = (clean.match(/\b(und|der|die|das|ich|nicht|sie|ein|eine|ist|wir|haben|mit|dem|den|aber|wie|dass|sich|oder|wenn)\b/gi) || []).length;
+    const esMatches = (clean.match(/\b(que|de|no|el|la|es|un|una|los|las|por|con|para|yo|pero|está|como|más|este|esta)\b/gi) || []).length;
+    const frMatches = (clean.match(/\b(que|de|ne|pas|le|la|les|un|une|est|et|des|en|du|pour|avec|dans|mais|elle|nous)\b/gi) || []).length;
+    const itMatches = (clean.match(/\b(che|di|non|il|la|un|una|per|con|sono|ma|questo|questa|come|cosa|tutto|anche)\b/gi) || []).length;
+    const ptMatches = (clean.match(/\b(que|de|não|o|a|os|as|um|uma|com|para|por|em|este|esta|você|isso|mas)\b/gi) || []).length;
+    const enMatches = (clean.match(/\b(the|and|you|that|was|for|are|with|his|they|this|have|from|one|had|not|but|what|all|were|when|your|can|there|out|about)\b/gi) || []).length;
+
+    const scores = [
+      { name: 'English', lang: 'eng', score: enMatches },
+      { name: 'Indonesian', lang: 'ind', score: idMatches },
+      { name: 'German', lang: 'ger', score: deMatches },
+      { name: 'Spanish', lang: 'spa', score: esMatches },
+      { name: 'French', lang: 'fra', score: frMatches },
+      { name: 'Italian', lang: 'ita', score: itMatches },
+      { name: 'Portuguese', lang: 'por', score: ptMatches }
+    ].sort((a, b) => b.score - a.score);
+
+    if (scores[0] && scores[0].score >= 2) {
+      return { name: scores[0].name, lang: scores[0].lang };
+    }
+    return null;
+  }
+
+  function syncSubtitleTracksDropdown() {
+    if (!el.selSubTrack || !el.rowSubTrack) return;
+    const subTracks = state.probedSubtitleTracks || [];
+    if (subTracks.length === 0) {
+      if (state.subCues && state.subCues.length > 0) {
+        el.rowSubTrack.style.display = 'flex';
+        if (el.lblSubTrackSub) {
+          el.lblSubTrackSub.textContent = '1 subtitle track loaded';
+        }
+        const langLabel = state.subTrackLanguage
+          ? `${state.subTrackLanguage} (Original)`
+          : (state.subTrackName || 'Active Subtitles');
+        const isOff = !state.subEnabled;
+        el.selSubTrack.innerHTML = `
+          <option value="0" ${!isOff ? 'selected' : ''} style="background:#181818;color:#fff;">${escapeHtml(langLabel)}</option>
+          <option value="-1" ${isOff ? 'selected' : ''} style="background:#181818;color:#aaa;">Off</option>
+        `;
+        el.selSubTrack.value = isOff ? '-1' : '0';
+        return;
+      }
+      el.rowSubTrack.style.display = 'none';
+      return;
+    }
+
+    el.rowSubTrack.style.display = 'flex';
+    if (el.lblSubTrackSub) {
+      el.lblSubTrackSub.textContent = `${subTracks.length} embedded track${subTracks.length > 1 ? 's' : ''} available`;
+    }
+
+    const currentIdx = state.activeEmbeddedSubTrackIndex ?? -1;
+    let optsHtml = `<option value="-1" ${currentIdx === -1 ? 'selected' : ''} style="background:#181818;color:#aaa;">Off / External</option>`;
+    subTracks.forEach((st, idx) => {
+      let label = st.name || `Subtitle Track ${idx + 1}`;
+      if (st.lang && st.lang !== 'und' && !label.toLowerCase().includes(st.lang.toLowerCase())) {
+        label += ` [${st.lang.toUpperCase()}]`;
+      }
+      optsHtml += `<option value="${idx}" ${currentIdx === idx ? 'selected' : ''} style="background:#181818;color:#fff;">${escapeHtml(label)}</option>`;
+    });
+    el.selSubTrack.innerHTML = optsHtml;
+    el.selSubTrack.value = String(currentIdx);
+  }
+
+  async function selectEmbeddedSubtitleTrack(trackIdx) {
+    if (!state.currentItem || !state.currentItem.filePath || !api.extractEmbeddedSubtitle) return;
+    const subTracks = state.probedSubtitleTracks || [];
+    const track = subTracks[trackIdx];
+    if (!track) return;
+
+    try {
+      showToast(`Loading ${track.name || 'embedded'} subtitle...`);
+      const res = await api.extractEmbeddedSubtitle(state.currentItem.filePath, track.index !== undefined ? track.index : trackIdx);
+      if (res && res.ok && res.content) {
+        state.activeEmbeddedSubTrackIndex = trackIdx;
+        state.subEnabled = true;
+        if (!track.name || track.name.startsWith('Subtitle Track') || !track.lang || track.lang === 'und') {
+          const detected = detectClientSubtitleLanguage(res.content);
+          if (detected) {
+            track.name = detected.name;
+            track.lang = detected.lang;
+          }
+        }
+        loadSubtitleData({
+          name: `${track.name || 'Embedded'} Subtitle`,
+          content: res.content
+        }, true);
+        if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
+        if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
+        syncSubtitleTracksDropdown();
+      } else {
+        showToast('Failed to extract subtitle track');
+      }
+    } catch (err) {
+      console.warn('Failed to extract subtitle track:', err);
+      showToast('Error extracting subtitle');
+    }
+  }
+
+  // ==================== PREFERRED LANGUAGE & FALLBACK SUBTITLES ====================
+  const LANG_PATTERNS = {
+    en: /en|eng|english/i,
+    ja: /ja|jpn|japanese/i,
+    de: /de|deu|ger|german|deutsch/i,
+    es: /es|spa|spanish|español/i,
+    fr: /fr|fre|fra|french|français/i,
+    it: /it|ita|italian|italiano/i,
+    pt: /pt|por|portuguese|português/i,
+    ru: /ru|rus|russian/i,
+    zh: /zh|zho|chi|chinese/i,
+    ko: /ko|kor|korean/i,
+    in: /in|id|ind|indonesian/i,
+    th: /th|tha|thai/i
+  };
+
+  function matchesLanguage(track, langCode) {
+    if (!track || !langCode || langCode === 'none') return false;
+    const pattern = LANG_PATTERNS[langCode];
+    if (!pattern) return false;
+    const lang = (track.lang || track.language || '').toLowerCase();
+    const name = (track.name || track.label || track.title || '').toLowerCase();
+    return pattern.test(lang) || pattern.test(name);
+  }
+
+  let languagePreferenceAppliedForCurrent = false;
+
+  async function applyLanguagePreferencesOnLoad(probe = null) {
+    if (!state.currentItem || languagePreferenceAppliedForCurrent) return;
+    const prefLang = state.preferredAudioLang || 'en';
+    if (prefLang === 'none') return;
+
+    const audioTracks = getAudioTracksList();
+
+    // 1. If multiple audio tracks are detected:
+    if (audioTracks.length > 1) {
+      const matchIdx = audioTracks.findIndex((t) => matchesLanguage(t, prefLang));
+      if (matchIdx >= 0) {
+        languagePreferenceAppliedForCurrent = true;
+        const currentActive = audioTracks.findIndex((t) => t.enabled);
+        if (currentActive !== matchIdx) {
+          setAudioTrack(matchIdx);
+        }
+        return; // Preferred audio is active, no fallback subtitles needed!
+      }
+    }
+
+    // 2. Preferred audio is not available; check fallback subtitles
+    if (!state.fallbackSubtitles || !state.autoPlaySubtitles) return;
+
+    // Check if preferred language subtitle is already loaded & enabled
+    if (state.subEnabled && state.subCues.length > 0 && matchesLanguage({ name: state.subTrackName }, prefLang)) {
+      languagePreferenceAppliedForCurrent = true;
+      return;
+    }
+
+    // 2A. Check embedded subtitle tracks from ffprobe
+    const subTracks = probe?.subtitleTracks || state.probedSubtitleTracks || [];
+    const matchingSubIdx = subTracks.findIndex((s) => matchesLanguage(s, prefLang));
+    if (matchingSubIdx >= 0 && state.currentItem.filePath && api.extractEmbeddedSubtitle) {
+      languagePreferenceAppliedForCurrent = true;
+      try {
+        const subResult = await api.extractEmbeddedSubtitle(state.currentItem.filePath, matchingSubIdx);
+        if (subResult && subResult.ok && subResult.content) {
+          state.subEnabled = true;
+          state.activeEmbeddedSubTrackIndex = matchingSubIdx;
+          loadSubtitleData({
+            name: `${subTracks[matchingSubIdx].name || 'Embedded'} [${prefLang.toUpperCase()}]`,
+            content: subResult.content
+          }, false);
+          if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
+          if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
+          syncSubtitleTracksDropdown();
+          showToast(`Preferred audio unavailable: enabled ${subTracks[matchingSubIdx].name || prefLang.toUpperCase()} subtitles`);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to extract embedded subtitle:', err);
+      }
+    }
+
+    // 2B. Check Chromium native textTracks
+    if (el.video && el.video.textTracks && el.video.textTracks.length > 0) {
+      for (let i = 0; i < el.video.textTracks.length; i++) {
+        const tt = el.video.textTracks[i];
+        if (matchesLanguage(tt, prefLang)) {
+          languagePreferenceAppliedForCurrent = true;
+          for (let j = 0; j < el.video.textTracks.length; j++) {
+            el.video.textTracks[j].mode = (j === i) ? 'showing' : 'disabled';
+          }
+          state.subEnabled = true;
+          if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
+          showToast(`Preferred audio unavailable: enabled ${tt.label || prefLang.toUpperCase()} subtitles`);
+          return;
+        }
+      }
+    }
+
+    // 2C. Check auto-detected companion subtitle (.srt / .vtt)
+    if (state.currentItem.autoSubPath && matchesLanguage({ name: state.currentItem.autoSubPath }, prefLang)) {
+      languagePreferenceAppliedForCurrent = true;
+      state.subEnabled = true;
+      if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
+      if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
+      showToast(`Preferred audio unavailable: enabled subtitles`);
+    }
   }
 
   // ==================== HOVER THUMBNAIL ENGINE (NATIVE + FFMPEG STREAM) ====================
@@ -903,6 +1400,11 @@
       autoLoadFolder: state.autoLoadFolder,
       folderPlaybackV3: true,
       autoLoadSub: state.autoLoadSub,
+      autoPlaySubtitles: state.autoPlaySubtitles,
+      preferredAudioLang: state.preferredAudioLang,
+      fallbackSubtitles: state.fallbackSubtitles,
+      embedSubtitlesOnDownload: state.embedSubtitlesOnDownload,
+      autoPlayDownloads: state.autoPlayDownloads,
       rememberState: state.rememberState,
       resumeLastVideo: state.resumeLastVideo,
       autoPauseOnMinimize: state.autoPauseOnMinimize,
@@ -971,6 +1473,11 @@
         state.autoLoadFolder = true;
       }
       if (typeof d.autoLoadSub === 'boolean') state.autoLoadSub = d.autoLoadSub;
+      if (typeof d.autoPlaySubtitles === 'boolean') state.autoPlaySubtitles = d.autoPlaySubtitles;
+      if (typeof d.preferredAudioLang === 'string') state.preferredAudioLang = d.preferredAudioLang;
+      if (typeof d.fallbackSubtitles === 'boolean') state.fallbackSubtitles = d.fallbackSubtitles;
+      if (typeof d.embedSubtitlesOnDownload === 'boolean') state.embedSubtitlesOnDownload = d.embedSubtitlesOnDownload;
+      if (typeof d.autoPlayDownloads === 'boolean') state.autoPlayDownloads = d.autoPlayDownloads;
       if (typeof d.rememberState === 'boolean') state.rememberState = d.rememberState;
       if (typeof d.resumeLastVideo === 'boolean') state.resumeLastVideo = d.resumeLastVideo;
       if (typeof d.autoPauseOnMinimize === 'boolean') state.autoPauseOnMinimize = d.autoPauseOnMinimize;
@@ -1063,6 +1570,11 @@
     if (el.swAlwaysOnTop) el.swAlwaysOnTop.classList.toggle('on', state.alwaysOnTop);
     if (el.swAutoloadFolder) el.swAutoloadFolder.classList.toggle('on', state.autoLoadFolder);
     if (el.swAutoloadSub) el.swAutoloadSub.classList.toggle('on', state.autoLoadSub);
+    if (el.swAutoplaySubtitles) el.swAutoplaySubtitles.classList.toggle('on', state.autoPlaySubtitles);
+    if (el.swFallbackSubtitles) el.swFallbackSubtitles.classList.toggle('on', Boolean(state.fallbackSubtitles));
+    if (el.swStreamEmbedSub) el.swStreamEmbedSub.classList.toggle('on', Boolean(state.embedSubtitlesOnDownload));
+    if (el.swAutoPlayDl) el.swAutoPlayDl.classList.toggle('on', Boolean(state.autoPlayDownloads));
+    if (el.selPreferredAudioLang) el.selPreferredAudioLang.value = state.preferredAudioLang || 'en';
     if (el.swRememberState) el.swRememberState.classList.toggle('on', state.rememberState);
     if (el.swResumePlayback) el.swResumePlayback.classList.toggle('on', Boolean(state.resumeLastVideo));
     if (el.swAutoPauseMinimize) el.swAutoPauseMinimize.classList.toggle('on', Boolean(state.autoPauseOnMinimize));
@@ -1125,6 +1637,9 @@
     state.alwaysOnTop = false;
     state.autoLoadFolder = true;
     state.autoLoadSub = true;
+    state.autoPlaySubtitles = true;
+    state.embedSubtitlesOnDownload = true;
+    state.autoPlayDownloads = true;
     state.rememberState = true;
     state.resumeLastVideo = false;
     state.seekbarThumbStyle = 'pill';
@@ -1243,14 +1758,21 @@
       clearSubtitles();
       return;
     }
+    state.loadedExternalSubData = subObj;
     state.subCues = parseSubtitles(subObj.content);
-    state.subTrackName = subObj.name || 'External Subtitles';
+    const detected = detectClientSubtitleLanguage(subObj.content);
+    state.subTrackLanguage = detected ? detected.name : '';
+    state.subTrackName = detected ? `${detected.name} Subtitles` : (subObj.name || 'External Subtitles');
     state.subOffsetMs = 0;
-    el.lblSubTrack.textContent = state.subTrackName;
-    el.lblSubOffset.textContent = '0 ms';
+    if (el.lblSubTrack) {
+      el.lblSubTrack.textContent = state.subTrackName;
+      el.lblSubTrack.title = subObj.name || state.subTrackName;
+    }
+    if (el.lblSubOffset) el.lblSubOffset.textContent = '0 ms';
     el.btnSubPop.classList.toggle('active', state.subEnabled && state.subCues.length > 0);
     renderSubtitleBlocksOnSeekbar();
     updateActiveSubtitleCue();
+    syncSubtitleTracksDropdown();
     if (notify) {
       showToast(`Subtitles loaded: ${state.subTrackName} (${state.subCues.length} lines)`);
     }
@@ -1260,21 +1782,27 @@
     lastActiveSubCue = null;
     state.subCues = [];
     state.subTrackName = null;
+    state.subTrackLanguage = '';
     state.subOffsetMs = 0;
-    el.lblSubTrack.textContent = 'No subtitle loaded';
-    el.lblSubOffset.textContent = '0 ms';
+    state.activeEmbeddedSubTrackIndex = -1;
+    if (el.lblSubTrack) {
+      el.lblSubTrack.textContent = 'No subtitle loaded';
+      el.lblSubTrack.title = '';
+    }
+    if (el.lblSubOffset) el.lblSubOffset.textContent = '0 ms';
     el.subtitleOverlay.classList.remove('visible');
     el.subtitleOverlay.textContent = '';
     el.seekbarSubBlocks.innerHTML = '';
-    el.subSyncMini.classList.remove('visible');
+    if (el.subSyncMini) el.subSyncMini.classList.remove('visible');
     el.btnSubPop.classList.remove('active');
+    syncSubtitleTracksDropdown();
   }
 
   function renderSubtitleBlocksOnSeekbar() {
     el.seekbarSubBlocks.innerHTML = '';
     const dur = getDuration();
     const hasSubs = state.subCues.length > 0 && state.subEnabled;
-    el.subSyncMini.classList.toggle('visible', hasSubs);
+    if (el.subSyncMini) el.subSyncMini.classList.remove('visible');
 
     if (!hasSubs || !state.subTimelineBlocks || !Number.isFinite(dur) || dur <= 0) {
       return;
@@ -1584,6 +2112,11 @@
     hideUpNextBanner();
     state.currentChapters = [];
     state.currentSegments = [];
+    state.probedAudioTracks = [];
+    state.probedSubtitleTracks = [];
+    state.activeEmbeddedSubTrackIndex = -1;
+    syncSubtitleTracksDropdown();
+    languagePreferenceAppliedForCurrent = false;
     renderChapterMarkersOnSeekbar();
 
     el.video.classList.toggle('loaded', !item.isAudio);
@@ -1629,6 +2162,11 @@
       }
     }
 
+    // Enforce subtitle autoplay preference
+    state.subEnabled = Boolean(state.autoPlaySubtitles);
+    if (el.swSubEnabled) el.swSubEnabled.classList.toggle('on', state.subEnabled);
+    if (el.subtitleOverlay) el.subtitleOverlay.style.display = state.subEnabled ? 'block' : 'none';
+
     updateVisualizerVisibility();
     renderLibraryList();
     renderRightDrawer();
@@ -1644,8 +2182,11 @@
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120
+        backBufferLength: 30,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 60 * 1000 * 1000,
+        fastAudioTrackSwitch: true
       });
       activeHls = hls;
 
@@ -1710,6 +2251,7 @@
 
     // 3. Standard native playback path (ISO MP4, WebM, Audio)
     el.video.removeAttribute('crossorigin');
+    el.video.preload = 'auto';
     el.video.src = item.fileUrl;
     el.video.playbackRate = state.speed;
     updateBottomSpeedBadge();
@@ -1737,6 +2279,27 @@
           state.currentSegments = classifySegments(state.currentChapters, probe.duration || getDuration(), item);
           renderChapterMarkersOnSeekbar();
           updateTimelineUI();
+          if (Array.isArray(probe.audioTracks) && probe.audioTracks.length > 0) {
+            state.probedAudioTracks = probe.audioTracks;
+            syncAudioTracksDropdown();
+          }
+          if (Array.isArray(probe.subtitleTracks)) {
+            state.probedSubtitleTracks = probe.subtitleTracks;
+            syncSubtitleTracksDropdown();
+          }
+          applyLanguagePreferencesOnLoad(probe);
+
+          // If no embedded chapters, query AniList/AniSkip asynchronously in the background
+          if (state.currentChapters.length === 0 && api.resolveAnimeChapters && (probe.duration || getDuration()) >= 60) {
+            api.resolveAnimeChapters(item.filePath, probe.duration || getDuration()).then((bgChapters) => {
+              if (Array.isArray(bgChapters) && bgChapters.length > 0 && state.currentItem === item) {
+                state.currentChapters = bgChapters;
+                state.currentSegments = classifySegments(state.currentChapters, probe.duration || getDuration(), item);
+                renderChapterMarkersOnSeekbar();
+                updateTimelineUI();
+              }
+            }).catch(() => {});
+          }
         }
       }).catch(() => {});
     }
@@ -1902,7 +2465,9 @@
 
     if (bundle.folder && (!append || !state.libraryFolder)) {
       state.libraryFolder = bundle.folder;
+      if (el.libFolderHeader) el.libFolderHeader.style.display = 'flex';
       el.libFolderLabel.textContent = bundle.folder.folderName || 'Folder';
+      el.libFolderLabel.title = bundle.folder.folderPath || '';
       el.folderCrumbText.textContent = bundle.folder.folderName || 'Folder';
     }
 
@@ -1927,6 +2492,21 @@
     renderRightDrawer();
   }
 
+  async function playLocalFile(filePath, autoPlay = true) {
+    if (!filePath || !api.resolvePaths) return false;
+    try {
+      const res = await api.resolvePaths([filePath]);
+      if (res && res.items && res.items.length > 0) {
+        toggleSettingsModal(false);
+        ingestOpenedBundle(res, autoPlay);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Failed to play local file:', err);
+    }
+    return false;
+  }
+
   function pathsMatch(a, b) {
     if (!a || !b) return false;
     const normA = a.replace(/[\\/]+$/, '').toLowerCase().replace(/\\/g, '/');
@@ -1939,6 +2519,7 @@
     const scanned = await api.scanFolder(folderPath);
     if (!scanned) return;
     state.libraryFolder = scanned;
+    if (el.libFolderHeader) el.libFolderHeader.style.display = 'flex';
     if (!preserveFilter) {
       state.libraryFilter = '';
       if (el.libSearchInput) el.libSearchInput.value = '';
@@ -1984,7 +2565,28 @@
     });
   }
 
+  function setupLibItemScroller(rowEl, nameEl, textString) {
+    nameEl.innerHTML = `<span class="lib-item-name-text">${escapeHtml(textString)}</span>`;
+    rowEl.addEventListener('mouseenter', () => {
+      const textEl = nameEl.querySelector('.lib-item-name-text');
+      if (!textEl) return;
+      const diff = textEl.scrollWidth - nameEl.clientWidth;
+      if (diff > 4) {
+        const dur = Math.max(2.6, Math.min(10, diff / 36));
+        textEl.style.setProperty('--marquee-x', `-${diff + 6}px`);
+        textEl.style.setProperty('--marquee-dur', `${dur}s`);
+        rowEl.classList.add('is-scrolling');
+      }
+    });
+    rowEl.addEventListener('mouseleave', () => {
+      rowEl.classList.remove('is-scrolling');
+    });
+  }
+
   function renderLibraryList(options = {}) {
+    if (el.libFolderHeader) {
+      el.libFolderHeader.style.display = state.libraryFolder ? 'flex' : 'none';
+    }
     if (el.librarySidebar.classList.contains('collapsed')) {
       state.libraryDirty = true;
       return;
@@ -2015,14 +2617,17 @@
     // Parent folder ".." row when browsing a folder
     if (state.libraryFolder && parentPath) {
       const upRow = document.createElement('div');
-      upRow.className = 'lib-item';
-      upRow.title = `Up to ${parentPath}`;
+      upRow.className = 'lib-item lib-parent-row';
+      upRow.title = `Parent folder: ${parentPath}`;
       const badge = document.createElement('div');
       badge.className = 'lib-item-badge';
-      badge.textContent = '↑';
+      badge.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/></svg>`;
       const name = document.createElement('div');
       name.className = 'lib-item-name';
-      name.textContent = '.. (Parent Folder)';
+      name.style.display = 'flex';
+      name.style.alignItems = 'center';
+      name.style.gap = '6px';
+      name.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-muted);flex-shrink:0;"><path d="M3 7C3 5.9 3.9 5 5 5H9.2L11.2 7H19C20.1 7 21 7.9 21 9V17C21 18.1 20.1 19 19 19H5C3.9 19 3 18.1 3 17V7Z"/></svg><span class="lib-parent-dots">..</span>`;
       upRow.appendChild(badge);
       upRow.appendChild(name);
       upRow.addEventListener('click', () => {
@@ -2053,7 +2658,7 @@
 
       const name = document.createElement('div');
       name.className = 'lib-item-name';
-      name.textContent = dir.name;
+      setupLibItemScroller(row, name, dir.name);
 
       row.appendChild(badge);
       row.appendChild(name);
@@ -2076,7 +2681,7 @@
 
       const name = document.createElement('div');
       name.className = 'lib-item-name';
-      name.textContent = item.title || item.name;
+      setupLibItemScroller(row, name, item.title || item.name);
 
       const actions = document.createElement('div');
       actions.className = 'row-actions' + (isQueued ? ' has-queued' : '');
@@ -2447,7 +3052,7 @@
 
         const name = document.createElement('div');
         name.className = 'lib-item-name';
-        name.textContent = item.title || item.name;
+        setupLibItemScroller(row, name, item.title || item.name);
 
         row.appendChild(grip);
         row.appendChild(badge);
@@ -2759,6 +3364,7 @@
     }
     state.scrubPreviewTime = null;
     lastActiveSubCue = null;
+    state.lastSkippedSegmentId = null;
     const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
     const clamped = Math.max(0, Math.min(dur, targetSec));
@@ -2766,6 +3372,10 @@
     if (!state.streamMode) {
       el.video.currentTime = clamped;
       updateTimelineUI();
+      pushPlayerStatus();
+      if (shouldPlayAfter && el.video.paused) {
+        playMedia();
+      }
       return;
     }
 
@@ -2790,17 +3400,20 @@
     }
   }
 
+  let deltaSeekDebounceTimer = null;
+
   function seekByDelta(deltaSec) {
     const dur = getDuration();
     if (!Number.isFinite(dur) || dur <= 0) return;
-    const cur = getCurrentTime();
+    const cur = state.scrubPreviewTime !== null ? state.scrubPreviewTime : getCurrentTime();
     const target = Math.max(0, Math.min(dur, cur + deltaSec));
     showToast(`${deltaSec >= 0 ? '+' : ''}${deltaSec}s (${formatTime(target)})`);
 
+    state.scrubPreviewTime = target;
+    updateTimelineUI();
+
+    const wasPlaying = !el.video.paused;
     if (state.streamMode) {
-      state.scrubPreviewTime = target;
-      updateTimelineUI();
-      const wasPlaying = !el.video.paused;
       if (streamSeekDebounceTimer) clearTimeout(streamSeekDebounceTimer);
       streamSeekDebounceTimer = setTimeout(() => {
         streamSeekDebounceTimer = null;
@@ -2809,7 +3422,13 @@
         seekToSeconds(finalTarget, wasPlaying);
       }, 110);
     } else {
-      seekToSeconds(target, !el.video.paused);
+      if (deltaSeekDebounceTimer) clearTimeout(deltaSeekDebounceTimer);
+      deltaSeekDebounceTimer = setTimeout(() => {
+        deltaSeekDebounceTimer = null;
+        const finalTarget = state.scrubPreviewTime !== null ? state.scrubPreviewTime : target;
+        state.scrubPreviewTime = null;
+        seekToSeconds(finalTarget, wasPlaying);
+      }, 75);
     }
   }
 
@@ -3490,6 +4109,11 @@
         tick.className = 'seekbar-chapter-tick';
         tick.style.left = `${pct}%`;
         tick.title = `${ch.title ? ch.title + ' — ' : ''}${formatTime(ch.start, dur >= 3600)}`;
+        tick.addEventListener('click', (e) => {
+          e.stopPropagation();
+          seekToSeconds(ch.start, true);
+          showToast(`Chapter: ${ch.title || formatTime(ch.start, dur >= 3600)}`);
+        });
         frag.appendChild(tick);
       });
     }
@@ -3511,6 +4135,40 @@
     el.seekbarChapters.appendChild(frag);
   }
 
+  function jumpToNextChapter() {
+    const cur = getCurrentTime();
+    const dur = getDuration();
+    if (!state.currentChapters || state.currentChapters.length === 0) {
+      seekRelative(30);
+      return;
+    }
+    const nextCh = state.currentChapters.find((c) => c.start > cur + 0.5);
+    if (nextCh) {
+      seekToSeconds(nextCh.start, true);
+      showToast(`Chapter: ${nextCh.title || formatTime(nextCh.start, dur >= 3600)}`);
+    } else {
+      showToast('End of chapters');
+    }
+  }
+
+  function jumpToPrevChapter() {
+    const cur = getCurrentTime();
+    const dur = getDuration();
+    if (!state.currentChapters || state.currentChapters.length === 0) {
+      seekRelative(-30);
+      return;
+    }
+    const prevChapters = state.currentChapters.filter((c) => c.start < cur - 1.5);
+    if (prevChapters.length > 0) {
+      const prevCh = prevChapters[prevChapters.length - 1];
+      seekToSeconds(prevCh.start, true);
+      showToast(`Chapter: ${prevCh.title || formatTime(prevCh.start, dur >= 3600)}`);
+    } else {
+      seekToSeconds(0, true);
+      showToast('Start of video');
+    }
+  }
+
   function checkSegmentSkipping(cur, dur) {
     if (!state.currentSegments || state.currentSegments.length === 0 || dur <= 0) {
       hideSkipSegmentPrompt();
@@ -3523,6 +4181,7 @@
 
     if (!activeSeg) {
       hideSkipSegmentPrompt();
+      state.lastSkippedSegmentId = null;
       return;
     }
 
@@ -3590,21 +4249,42 @@
 
   let isSkipPromptVisible = false;
 
+  function updateSkipSegmentPosition() {
+    if (!el.btnSkipSegment || !el.seekbarTrack || !el.videoStage) return;
+    try {
+      const seekbarRect = el.seekbarTrack.getBoundingClientRect();
+      const stageRect = el.videoStage.getBoundingClientRect();
+      const leftOffset = seekbarRect.left - stageRect.left;
+      if (Number.isFinite(leftOffset)) {
+        el.btnSkipSegment.style.left = `${Math.round(Math.max(16, leftOffset))}px`;
+      }
+    } catch {}
+  }
+
   function showSkipSegmentPrompt(seg, cur = getCurrentTime(), dur = getDuration()) {
+    if (state.activeSkipSegment && state.activeSkipSegment.id === seg.id && isSkipPromptVisible) {
+      return; // Already actively showing prompt for this segment; prevent per-tick DOM thrashing
+    }
     state.activeSkipSegment = seg;
     if (!el.btnSkipSegment) return;
 
+    let targetText = 'Skip Segment';
     if (seg.hasAfterCredits) {
-      el.skipSegmentLabel.textContent = 'Jump to After-Credits';
+      targetText = 'Jump to After-Credits';
     } else if (seg.type === 'opening') {
-      el.skipSegmentLabel.textContent = 'Skip Opening';
+      targetText = 'Skip Opening';
     } else if (seg.type === 'ending') {
-      el.skipSegmentLabel.textContent = 'Skip Ending';
+      targetText = 'Skip Ending';
     } else if (seg.type === 'credits') {
-      el.skipSegmentLabel.textContent = 'Skip Credits';
-    } else {
-      el.skipSegmentLabel.textContent = `Skip ${seg.label || 'Segment'}`;
+      targetText = 'Skip Credits';
+    } else if (seg.label) {
+      targetText = `Skip ${seg.label}`;
     }
+
+    if (el.skipSegmentLabel && el.skipSegmentLabel.textContent !== targetText) {
+      el.skipSegmentLabel.textContent = targetText;
+    }
+    updateSkipSegmentPosition();
     if (!isSkipPromptVisible) {
       el.btnSkipSegment.classList.remove('hidden');
       isSkipPromptVisible = true;
@@ -3621,10 +4301,16 @@
   }
 
   function triggerCurrentSegmentSkip() {
-    if (!state.activeSkipSegment) return;
-    const seg = state.activeSkipSegment;
+    let seg = state.activeSkipSegment;
     const cur = getCurrentTime();
     const dur = getDuration();
+    if (!seg && state.currentSegments && state.currentSegments.length > 0) {
+      seg = state.currentSegments.find((s) => cur >= s.start && cur < s.end);
+    }
+    if (!seg) {
+      jumpToNextChapter();
+      return;
+    }
     state.lastSkippedSegmentId = seg.id;
     hideSkipSegmentPrompt();
 
@@ -3961,7 +4647,9 @@
       const folder = await api.openFolder();
       if (!folder) return;
       state.libraryFolder = folder;
+      if (el.libFolderHeader) el.libFolderHeader.style.display = 'flex';
       el.libFolderLabel.textContent = folder.folderName || 'Folder';
+      el.libFolderLabel.title = folder.folderPath || '';
       el.folderCrumbText.textContent = folder.folderName || 'Folder';
       el.librarySidebar.classList.remove('collapsed');
       el.btnSidebar.classList.add('active');
@@ -4192,6 +4880,9 @@
     document.querySelectorAll('.pop-panel').forEach((p) => {
       p.classList.toggle('active', p.dataset.popPanel === tabName);
     });
+    if (tabName === 'audio') {
+      syncAudioTracksDropdown();
+    }
     el.bottomPopover.classList.add('open');
     syncPopoverButtonsActive();
     updateChromeSolidity();
@@ -4409,6 +5100,9 @@
         if (el.subtitleOverlay) el.subtitleOverlay.style.display = state.subEnabled ? 'block' : 'none';
         showToast(`Subtitles: ${state.subEnabled ? 'ON' : 'OFF'}`);
         break;
+      case 'cycleAudioTrack':
+        cycleAudioTrack();
+        break;
       case 'addBookmark':
         addBookmark();
         break;
@@ -4465,6 +5159,12 @@
         break;
       case 'skipIntroCredits':
         triggerCurrentSegmentSkip();
+        break;
+      case 'nextChapter':
+        jumpToNextChapter();
+        break;
+      case 'prevChapter':
+        jumpToPrevChapter();
         break;
       case 'toggleStopAfterCurrent':
         toggleStopAfterCurrent();
@@ -4786,7 +5486,17 @@
         break;
       }
       case 'setAudioTrack': {
-        showToast(`AI Bridge: Audio Track → ${cmd.value || cmd.index || 'Default'}`);
+        if (cmd.value !== undefined) {
+          const v = String(cmd.value).toLowerCase();
+          const tracks = getAudioTracksList();
+          const matchIdx = tracks.findIndex(t => t.name.toLowerCase().includes(v) || (t.lang && t.lang.toLowerCase().includes(v)));
+          if (matchIdx >= 0) setAudioTrack(matchIdx);
+          else cycleAudioTrack();
+        } else if (typeof cmd.index === 'number') {
+          setAudioTrack(cmd.index);
+        } else {
+          cycleAudioTrack();
+        }
         break;
       }
     }
@@ -4827,12 +5537,14 @@
     el.btnMenu.innerHTML = ICONS.dots;
     el.btnSidebar.innerHTML = ICONS.sidebar;
     el.iconFolderCrumb.innerHTML = ICONS.folderPlay;
+    if (el.iconHeaderStream) el.iconHeaderStream.innerHTML = ICONS.stream;
     el.btnPip.innerHTML = ICONS.pip;
     el.btnMinimize.innerHTML = ICONS.minimize;
     el.btnMaximize.innerHTML = ICONS.maximize;
     el.btnFullscreen.innerHTML = ICONS.fullscreen;
     el.btnClose.innerHTML = ICONS.close;
     el.libSearchIcon.innerHTML = ICONS.search;
+    if (el.libFolderHeaderIcon) el.libFolderHeaderIcon.innerHTML = ICONS.folderPlay || '';
     el.emptyCone.innerHTML = ICONS.cone;
     if (el.shortcutBannerIcon) el.shortcutBannerIcon.innerHTML = ICONS.cone;
     if (el.resumePromptIcon) el.resumePromptIcon.innerHTML = ICONS.play;
@@ -4952,7 +5664,9 @@
         path: targetFolder.folderPath
       });
       state.libraryFolder = targetFolder;
+      if (el.libFolderHeader) el.libFolderHeader.style.display = 'flex';
       el.libFolderLabel.textContent = targetFolder.folderName || 'Folder';
+      el.libFolderLabel.title = targetFolder.folderPath || '';
       savePreferences();
       renderSidebarShortcuts();
       renderLibraryList({ scrollToTop: true });
@@ -5319,6 +6033,15 @@
       }
     });
 
+    if (el.btnHeaderStream) {
+      el.btnHeaderStream.addEventListener('click', () => {
+        openSettingsTab('stream-download');
+        if (el.streamUrlInput) {
+          setTimeout(() => el.streamUrlInput.focus(), 100);
+        }
+      });
+    }
+
     el.menuOpenFile.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
       updateChromeSolidity();
@@ -5339,6 +6062,13 @@
       updateChromeSolidity();
       openSubtitleDialog();
     });
+    if (el.menuCycleAudio) {
+      el.menuCycleAudio.addEventListener('click', () => {
+        el.headerMenu.classList.remove('open');
+        updateChromeSolidity();
+        cycleAudioTrack();
+      });
+    }
     el.menuSnapshot.addEventListener('click', () => {
       el.headerMenu.classList.remove('open');
       updateChromeSolidity();
@@ -5488,6 +6218,8 @@
       applyVideoAppearance();
       updateTimelineUI();
       renderSubtitleBlocksOnSeekbar();
+      syncAudioTracksDropdown();
+      applyLanguagePreferencesOnLoad();
       if (!state.currentSegments || state.currentSegments.length === 0 || (state.currentChapters && state.currentChapters.length > 0)) {
         state.currentSegments = classifySegments(state.currentChapters || [], getDuration(), getCurrentItem());
         renderChapterMarkersOnSeekbar();
@@ -5786,12 +6518,8 @@
 
       const rect = el.seekbarTrack.getBoundingClientRect();
       const targetSec = calcSeekRatio(e.clientX, rect) * dur;
-      if (state.streamMode) {
-        state.scrubPreviewTime = targetSec;
-        updateTimelineUI();
-      } else {
-        seekToSeconds(targetSec, wasPlayingBeforeScrub);
-      }
+      state.scrubPreviewTime = targetSec;
+      updateTimelineUI();
       updateHoverPreview(e.clientX, rect);
     });
 
@@ -5802,12 +6530,8 @@
       const dur = getDuration();
       if (dur <= 0) return;
       const targetSec = calcSeekRatio(e.clientX, rect) * dur;
-      if (state.streamMode) {
-        state.scrubPreviewTime = targetSec;
-        updateTimelineUI();
-      } else {
-        seekToSeconds(targetSec, wasPlayingBeforeScrub);
-      }
+      state.scrubPreviewTime = targetSec;
+      updateTimelineUI();
     });
 
     el.seekbarTrack.addEventListener('pointerup', (e) => {
@@ -5815,11 +6539,12 @@
       isScrubbing = false;
       el.seekbarTrack.releasePointerCapture(e.pointerId);
 
-      if (state.streamMode && state.scrubPreviewTime !== null) {
-        const finalSec = state.scrubPreviewTime;
-        state.scrubPreviewTime = null;
-        seekToSeconds(finalSec, wasPlayingBeforeScrub);
-      }
+      const dur = getDuration();
+      const rect = el.seekbarTrack.getBoundingClientRect();
+      const fallbackSec = dur > 0 ? calcSeekRatio(e.clientX, rect) * dur : 0;
+      const finalSec = state.scrubPreviewTime !== null ? state.scrubPreviewTime : fallbackSec;
+      state.scrubPreviewTime = null;
+      seekToSeconds(finalSec, wasPlayingBeforeScrub);
     });
 
     el.seekbarTrack.addEventListener('pointerleave', () => {
@@ -5829,13 +6554,13 @@
     // Mini subtitle sync buttons next to seekbar
     const adjustSubOffset = (deltaMs) => {
       state.subOffsetMs += deltaMs;
-      el.lblSubOffset.textContent = `${state.subOffsetMs >= 0 ? '+' : ''}${state.subOffsetMs} ms`;
+      if (el.lblSubOffset) el.lblSubOffset.textContent = `${state.subOffsetMs >= 0 ? '+' : ''}${state.subOffsetMs} ms`;
       renderSubtitleBlocksOnSeekbar();
       updateActiveSubtitleCue();
       showToast(`Subtitle Sync: ${state.subOffsetMs >= 0 ? '+' : ''}${state.subOffsetMs} ms`);
     };
-    el.btnSubEarlier.addEventListener('click', () => adjustSubOffset(-50));
-    el.btnSubLater.addEventListener('click', () => adjustSubOffset(50));
+    el.btnSubEarlier?.addEventListener('click', () => adjustSubOffset(-50));
+    el.btnSubLater?.addEventListener('click', () => adjustSubOffset(50));
 
     // 11. Horizontal Cone Volume Slider Dragging
     let isDraggingVol = false;
@@ -5910,12 +6635,14 @@
     if (el.btnAbSetB) el.btnAbSetB.addEventListener('click', () => setAbLoopPoint('B'));
     if (el.btnAbClear) el.btnAbClear.addEventListener('click', () => clearAbLoop());
 
-    el.swSubTimeline.addEventListener('click', () => {
-      state.subTimelineBlocks = !state.subTimelineBlocks;
-      syncSwitchesUI();
-      renderSubtitleBlocksOnSeekbar();
-      savePreferences();
-    });
+    if (el.swSubTimeline) {
+      el.swSubTimeline.addEventListener('click', () => {
+        state.subTimelineBlocks = !state.subTimelineBlocks;
+        syncSwitchesUI();
+        renderSubtitleBlocksOnSeekbar();
+        savePreferences();
+      });
+    }
 
     el.btnPopSnapshot.addEventListener('click', captureSnapshot);
 
@@ -5970,6 +6697,37 @@
     if (el.btnAudioPlus25) el.btnAudioPlus25.addEventListener('click', () => adjustAudioDelay(25));
     if (el.btnAudioReset) el.btnAudioReset.addEventListener('click', () => adjustAudioDelay(0));
 
+    if (el.selAudioTrack) {
+      el.selAudioTrack.addEventListener('change', () => {
+        setAudioTrack(Number(el.selAudioTrack.value));
+      });
+    }
+
+    if (el.selSubTrack) {
+      el.selSubTrack.addEventListener('change', async () => {
+        const idx = parseInt(el.selSubTrack.value, 10);
+        const subTracks = state.probedSubtitleTracks || [];
+        if (idx < 0) {
+          state.activeEmbeddedSubTrackIndex = -1;
+          state.subEnabled = false;
+          syncSwitchesUI();
+          if (el.subtitleOverlay) {
+            el.subtitleOverlay.classList.remove('visible');
+            el.subtitleOverlay.textContent = '';
+          }
+          if (el.lblSubTrack) el.lblSubTrack.textContent = 'Subtitles Off';
+          syncSubtitleTracksDropdown();
+          showToast('Subtitles Off');
+        } else if (subTracks.length > 0) {
+          await selectEmbeddedSubtitleTrack(idx);
+        } else if (state.loadedExternalSubData) {
+          state.subEnabled = true;
+          syncSwitchesUI();
+          loadSubtitleData(state.loadedExternalSubData, true);
+        }
+      });
+    }
+
     el.selEqPreset.addEventListener('change', () => {
       ensureAudioGraph();
       state.eqPreset = el.selEqPreset.value;
@@ -6001,15 +6759,17 @@
       el.subtitleOverlay.style.fontSize = `${state.subSizePx}px`;
       savePreferences();
     });
-    el.btnSubMinus100.addEventListener('click', () => adjustSubOffset(-100));
-    el.btnSubPlus100.addEventListener('click', () => adjustSubOffset(100));
-    el.btnSubReset.addEventListener('click', () => {
-      state.subOffsetMs = 0;
-      el.lblSubOffset.textContent = '0 ms';
-      renderSubtitleBlocksOnSeekbar();
-      updateActiveSubtitleCue();
-      showToast('Subtitle sync reset to 0 ms');
-    });
+    if (el.btnSubMinus100) el.btnSubMinus100.addEventListener('click', () => adjustSubOffset(-100));
+    if (el.btnSubPlus100) el.btnSubPlus100.addEventListener('click', () => adjustSubOffset(100));
+    if (el.btnSubReset) {
+      el.btnSubReset.addEventListener('click', () => {
+        state.subOffsetMs = 0;
+        if (el.lblSubOffset) el.lblSubOffset.textContent = '0 ms';
+        renderSubtitleBlocksOnSeekbar();
+        updateActiveSubtitleCue();
+        showToast('Subtitle sync reset to 0 ms');
+      });
+    }
 
     if (el.selSubFont) {
       el.selSubFont.addEventListener('change', () => {
@@ -6181,6 +6941,30 @@
       syncSwitchesUI();
       savePreferences();
     });
+    if (el.swAutoplaySubtitles) {
+      el.swAutoplaySubtitles.addEventListener('click', () => {
+        state.autoPlaySubtitles = !state.autoPlaySubtitles;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.autoPlaySubtitles ? 'Autoplay Subtitles: ON' : 'Autoplay Subtitles: OFF');
+      });
+    }
+    if (el.selPreferredAudioLang) {
+      el.selPreferredAudioLang.addEventListener('change', () => {
+        state.preferredAudioLang = el.selPreferredAudioLang.value;
+        savePreferences();
+        const selectedLabel = el.selPreferredAudioLang.options[el.selPreferredAudioLang.selectedIndex]?.textContent || state.preferredAudioLang;
+        showToast(`Preferred Audio: ${selectedLabel}`);
+      });
+    }
+    if (el.swFallbackSubtitles) {
+      el.swFallbackSubtitles.addEventListener('click', () => {
+        state.fallbackSubtitles = !state.fallbackSubtitles;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.fallbackSubtitles ? 'Fallback Subtitles: Enabled' : 'Fallback Subtitles: Disabled');
+      });
+    }
     el.swRememberState.addEventListener('click', () => {
       state.rememberState = !state.rememberState;
       syncSwitchesUI();
@@ -6200,6 +6984,24 @@
         syncSwitchesUI();
         savePreferences();
         showToast(state.autoPauseOnMinimize ? 'Auto-Pause on Minimize: Enabled' : 'Auto-Pause on Minimize: Disabled');
+      });
+    }
+
+    if (el.swStreamEmbedSub) {
+      el.swStreamEmbedSub.addEventListener('click', () => {
+        state.embedSubtitlesOnDownload = !state.embedSubtitlesOnDownload;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.embedSubtitlesOnDownload ? 'Embed Subtitles: Enabled for downloads' : 'Embed Subtitles: Disabled for downloads');
+      });
+    }
+
+    if (el.swAutoPlayDl) {
+      el.swAutoPlayDl.addEventListener('click', () => {
+        state.autoPlayDownloads = !state.autoPlayDownloads;
+        syncSwitchesUI();
+        savePreferences();
+        showToast(state.autoPlayDownloads ? 'Auto-Play Downloads: Enabled' : 'Auto-Play Downloads: Disabled');
       });
     }
 
@@ -6669,16 +7471,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           showToast(`Download complete: ${data.title || data.fileName}`);
 
           // Auto-play if enabled
-          if (el.chkAutoPlayDl && el.chkAutoPlayDl.checked && data.outputPath) {
+          if (state.autoPlayDownloads !== false && data.outputPath) {
             setTimeout(async () => {
-              try {
-                const probe = await api.probeMedia(data.outputPath);
-                if (probe && probe.ok) {
-                  toggleSettingsModal(false);
-                  loadMediaItem(probe.item, { autoPlay: true });
-                }
-              } catch {}
-            }, 800);
+              await playLocalFile(data.outputPath, true);
+            }, 500);
           }
         });
       }
@@ -6693,7 +7489,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
     }
 
-    let dismissedHudTaskId = null;
+    const dismissedHudTaskIds = new Set();
+    const notifiedCompletedTaskIds = new Set();
     let hudAutoDismissTimer = null;
     let currentHudCompletedTaskId = null;
 
@@ -6704,7 +7501,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
       const targetId = taskId || currentHudCompletedTaskId;
       if (targetId) {
-        dismissedHudTaskId = targetId;
+        dismissedHudTaskIds.add(targetId);
       }
       currentHudCompletedTaskId = null;
       if (el.playerDlHud) {
@@ -6722,14 +7519,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         el.playerDlHud.classList.add('fading');
         setTimeout(() => {
           dismissHudCompleted(taskId);
-        }, 400);
+        }, 350);
       }, delayMs);
     }
 
     function updatePlayerDownloadHud() {
       const items = Array.from(activeDownloadsMap.values());
       const activeTask = items.find((i) => i.status === 'downloading' || i.status === 'starting');
-      const latestCompleted = items.find((i) => i.status === 'completed' && i.id !== dismissedHudTaskId);
 
       // 1. Top Bar Live Download Indicator (Shows in top-right ONLY while downloading)
       if (el.topDlIndicator) {
@@ -6751,57 +7547,59 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         }
       }
 
-      // 2. In-Player Completed Pop-up (Shows ONLY when a download finishes, never while downloading)
+      // 2. In-Player Completed Pop-up (Shows ONCE when a download finishes, never re-opens if dismissed)
       if (!el.playerDlHud) return;
 
-      if (!latestCompleted) {
-        el.playerDlHud.classList.add('hidden');
+      // Find the latest completed task that has NOT been dismissed or notified yet
+      const unnotifiedCompleted = [...items].reverse().find(
+        (i) => i.status === 'completed' && !dismissedHudTaskIds.has(i.id) && !notifiedCompletedTaskIds.has(i.id)
+      );
+
+      if (unnotifiedCompleted) {
+        notifiedCompletedTaskIds.add(unnotifiedCompleted.id);
+        currentHudCompletedTaskId = unnotifiedCompleted.id;
+
+        el.playerDlHud.classList.remove('hidden');
+        el.playerDlHud.classList.add('completed');
         el.playerDlHud.classList.remove('fading');
-        currentHudCompletedTaskId = null;
-        return;
-      }
 
-      const isNewCompletion = currentHudCompletedTaskId !== latestCompleted.id;
-      currentHudCompletedTaskId = latestCompleted.id;
+        if (el.playerDlHudBadge) {
+          el.playerDlHudBadge.textContent = '✓ COMPLETED';
+        }
+        if (el.playerDlHudTitle) {
+          // Display the whole file name
+          const fullName = unnotifiedCompleted.fileName || unnotifiedCompleted.title || 'Stream Video';
+          el.playerDlHudTitle.textContent = fullName;
+          el.playerDlHudTitle.title = fullName;
+        }
+        if (el.playerDlHudPct) {
+          el.playerDlHudPct.textContent = '100%';
+        }
+        if (el.playerDlHudFill) {
+          el.playerDlHudFill.style.width = '100%';
+        }
+        if (el.playerDlHudStats) {
+          el.playerDlHudStats.textContent = `${unnotifiedCompleted.sizeFormatted || 'Saved'} • Ready to Play`;
+        }
+        if (el.btnPlayerDlPlay) {
+          el.btnPlayerDlPlay.style.display = unnotifiedCompleted.outputPath ? 'inline-block' : 'none';
+          el.btnPlayerDlPlay.dataset.path = unnotifiedCompleted.outputPath || '';
+        }
+        if (el.btnPlayerDlQueue) {
+          el.btnPlayerDlQueue.style.display = unnotifiedCompleted.outputPath ? 'inline-block' : 'none';
+          el.btnPlayerDlQueue.dataset.path = unnotifiedCompleted.outputPath || '';
+        }
+        if (el.btnPlayerDlCancel) {
+          el.btnPlayerDlCancel.style.display = 'none';
+        }
+        if (el.btnPlayerDlDismiss) {
+          el.btnPlayerDlDismiss.style.display = 'inline-block';
+          el.btnPlayerDlDismiss.dataset.id = unnotifiedCompleted.id;
+        }
 
-      el.playerDlHud.classList.remove('hidden');
-      el.playerDlHud.classList.add('completed');
-      el.playerDlHud.classList.remove('fading');
-
-      if (el.playerDlHudBadge) {
-        el.playerDlHudBadge.textContent = '✓ COMPLETED';
-      }
-      if (el.playerDlHudTitle) {
-        el.playerDlHudTitle.textContent = latestCompleted.title || latestCompleted.fileName || 'Stream Video';
-        el.playerDlHudTitle.title = latestCompleted.title || latestCompleted.fileName || '';
-      }
-      if (el.playerDlHudPct) {
-        el.playerDlHudPct.textContent = '100%';
-      }
-      if (el.playerDlHudFill) {
-        el.playerDlHudFill.style.width = '100%';
-      }
-      if (el.playerDlHudStats) {
-        el.playerDlHudStats.textContent = `${latestCompleted.sizeFormatted || 'Saved'} • Ready to Play`;
-      }
-      if (el.btnPlayerDlPlay) {
-        el.btnPlayerDlPlay.style.display = latestCompleted.outputPath ? 'inline-block' : 'none';
-        el.btnPlayerDlPlay.dataset.path = latestCompleted.outputPath || '';
-      }
-      if (el.btnPlayerDlQueue) {
-        el.btnPlayerDlQueue.style.display = latestCompleted.outputPath ? 'inline-block' : 'none';
-        el.btnPlayerDlQueue.dataset.path = latestCompleted.outputPath || '';
-      }
-      if (el.btnPlayerDlCancel) {
-        el.btnPlayerDlCancel.style.display = 'none';
-      }
-      if (el.btnPlayerDlDismiss) {
-        el.btnPlayerDlDismiss.style.display = 'inline-block';
-        el.btnPlayerDlDismiss.dataset.id = latestCompleted.id;
-      }
-
-      if (isNewCompletion) {
-        scheduleHudAutoDismiss(latestCompleted.id, 5000);
+        scheduleHudAutoDismiss(unnotifiedCompleted.id, 5000);
+      } else if (!currentHudCompletedTaskId) {
+        el.playerDlHud.classList.add('hidden');
       }
     }
 
@@ -6825,14 +7623,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         el.btnClearCompletedDl.style.display = hasFinished ? 'inline-block' : 'none';
       }
 
+      if (el.btnHaltAllDl) {
+        const hasActiveOrQueued = items.some((i) => i.status === 'downloading' || i.status === 'starting' || i.status === 'sniffing' || i.status === 'queued');
+        el.btnHaltAllDl.style.display = hasActiveOrQueued ? 'inline-block' : 'none';
+      }
+
       if (items.length === 0) {
-        if (el.dlEmptyState) el.dlEmptyState.style.display = 'block';
+        if (el.dlQueueSection) el.dlQueueSection.style.display = 'none';
         el.dlQueueContainer.innerHTML = '';
-        if (el.dlEmptyState) el.dlQueueContainer.appendChild(el.dlEmptyState);
         return;
       }
 
-      if (el.dlEmptyState) el.dlEmptyState.style.display = 'none';
+      if (el.dlQueueSection) el.dlQueueSection.style.display = 'block';
       el.dlQueueContainer.innerHTML = '';
 
       items.forEach((task) => {
@@ -6843,9 +7645,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         const isDone = task.status === 'completed';
         const isErr = task.status === 'error';
         const isCanc = task.status === 'cancelled';
-        const isDl = task.status === 'downloading' || task.status === 'starting';
+        const isDl = task.status === 'downloading' || task.status === 'starting' || task.status === 'sniffing' || task.status === 'queued';
 
-        const statusLabel = isDone ? '✓ Completed' : (isErr ? '⚠ Error' : (isCanc ? 'Cancelled' : `${percent}%`));
+        const statusLabel = isDone ? '✓ Completed' : (isErr ? '⚠ Skipped (Error)' : (isCanc ? 'Halted' : (task.status === 'sniffing' ? 'Sniffing...' : (task.status === 'queued' ? 'Queued' : `${percent}%`))));
         const segPart = (!isDone && task.segmentsText) ? ` • ${escapeHtml(task.segmentsText)}` : '';
         const etaPart = (!isDone && task.etaFormatted) ? ` • <strong style="color:var(--text-secondary);">${escapeHtml(task.etaFormatted)}</strong>` : '';
         const errPart = (isErr && task.error) ? ` • <span style="color:#ff6b6b;">${escapeHtml(task.error)}</span>` : '';
@@ -6861,6 +7663,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           <div class="dl-item-footer">
             <span>${escapeHtml(task.sizeFormatted || '0 MB')} • ${escapeHtml(task.speed || 'Queued')}${segPart}${etaPart}${errPart}</span>
             <div style="display:flex;align-items:center;gap:8px;">
+              ${(isErr || isCanc) ? `<button class="ghost-pill-btn btn-retry-dl" type="button" style="padding:2px 8px;font-size:10.5px;color:var(--accent);" data-id="${escapeHtml(task.id)}">Retry</button>` : ''}
               ${isDone ? `<button class="ghost-pill-btn btn-play-dl" type="button" style="padding:2px 8px;font-size:10.5px;" data-path="${escapeHtml(task.outputPath)}">▶ Play</button>` : ''}
               ${isDone ? `<button class="ghost-pill-btn btn-reveal-dl" type="button" style="padding:2px 8px;font-size:10.5px;" data-path="${escapeHtml(task.outputPath)}">Show in Folder</button>` : ''}
               ${isDl ? `<button class="ghost-pill-btn btn-cancel-dl" type="button" style="padding:2px 8px;font-size:10.5px;color:#ff6b6b;" data-id="${escapeHtml(task.id)}">Cancel</button>` : ''}
@@ -6868,18 +7671,23 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           </div>
         `;
 
+        const btnRetry = card.querySelector('.btn-retry-dl');
+        if (btnRetry) {
+          btnRetry.addEventListener('click', async () => {
+            const taskId = btnRetry.dataset.id;
+            if (taskId && api.retryDownload) {
+              await api.retryDownload(taskId);
+              showToast('Re-queued download task');
+            }
+          });
+        }
+
         const btnPlay = card.querySelector('.btn-play-dl');
         if (btnPlay) {
           btnPlay.addEventListener('click', async () => {
             const filePath = btnPlay.dataset.path;
-            if (filePath && api.probeMedia) {
-              try {
-                const probe = await api.probeMedia(filePath);
-                if (probe && probe.ok) {
-                  toggleSettingsModal(false);
-                  loadMediaItem(probe.item, { autoPlay: true });
-                }
-              } catch {}
+            if (filePath) {
+              await playLocalFile(filePath, true);
             }
           });
         }
@@ -6916,13 +7724,15 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           selectedAudioUrl: '',
           selectedAudioName: '',
           dualAudio: false,
-          outputFormat: 'ts'
+          selectedSubtitles: [],
+          embedSubtitles: true,
+          outputFormat: 'mp4'
         };
       }
 
       const videoSel = document.getElementById('probe-select-video');
       const audioSel = document.getElementById('probe-select-audio');
-      const formatSel = document.getElementById('probe-select-format');
+      const subSel = document.getElementById('probe-select-sub');
 
       let selectedVideoUrl = '';
       if (videoSel && videoSel.value && Array.isArray(probe?.videoVariants) && probe.videoVariants.some((v) => v.url === videoSel.value)) {
@@ -6931,8 +7741,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         selectedVideoUrl = probe?.videoUrl || '';
       }
 
+      const customTitle = el.streamFilenameInput ? el.streamFilenameInput.value.trim() : '';
+      const titleHasDual = /dual\s*audio/i.test(customTitle || probe?.title || '');
       const rawAudioVal = audioSel ? audioSel.value : '';
-      const dualAudio = rawAudioVal === '__DUAL__';
+      const dualAudio = rawAudioVal === '__DUAL__' || (titleHasDual && rawAudioVal !== '__NONE__');
       let selectedAudioUrl = '';
       if (dualAudio) {
         selectedAudioUrl = probe?.audioUrl || '';
@@ -6946,6 +7758,27 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         ? probe.audioTracks.find((t) => t.url === selectedAudioUrl)
         : null;
 
+      let embedSubtitles = state.embedSubtitlesOnDownload !== false;
+      let selectedSubtitles = [];
+      if (subSel) {
+        const val = subSel.value;
+        if (val === '__NONE__') {
+          embedSubtitles = false;
+          selectedSubtitles = [];
+        } else if (val === '__ALL__') {
+          embedSubtitles = true;
+          selectedSubtitles = Array.isArray(probe?.subtitles) ? probe.subtitles : [];
+        } else if (val) {
+          embedSubtitles = true;
+          const found = Array.isArray(probe?.subtitles) ? probe.subtitles.find((s) => s.url === val || s.label === val) : null;
+          selectedSubtitles = found ? [found] : (probe?.subtitles || []);
+        }
+      } else if (embedSubtitles && Array.isArray(probe?.subtitles) && probe.subtitles.length > 0) {
+        selectedSubtitles = probe.subtitles;
+      } else if (!embedSubtitles) {
+        selectedSubtitles = [];
+      }
+
       const outputFormat = 'mp4';
 
       return {
@@ -6954,6 +7787,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         selectedAudioTrack,
         selectedAudioName: selectedAudioTrack?.name || '',
         dualAudio,
+        selectedSubtitles,
+        embedSubtitles,
         outputFormat
       };
     }
@@ -7049,7 +7884,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
 
       let downloadUrl = rawUrl;
-      let customTitle = (el.streamFilenameInput && el.streamFilenameInput.value.trim()) || probe?.title || '';
+      let customTitle = formatDoubleDigitEpisode(stripLanguageTags((el.streamFilenameInput && el.streamFilenameInput.value.trim()) || probe?.title || ''));
       if (probe && (probe.url === rawUrl || probe.originalUrl === rawUrl) && probe.autoExtracted && probe.url) {
         downloadUrl = probe.url;
       }
@@ -7059,18 +7894,44 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         downloadUrl = opts.selectedAudioTrack.streamUrl;
       }
 
+      let audioPreference = 'any';
+      if (opts.dualAudio) {
+        audioPreference = 'dual';
+      } else if (opts.selectedAudioName) {
+        if (/english|dub/i.test(opts.selectedAudioName)) audioPreference = 'eng';
+        else if (/japanese|jpn/i.test(opts.selectedAudioName)) audioPreference = 'jpn';
+      }
+
+      let subPreference = 'any';
+      if (!opts.embedSubtitles || (opts.selectedSubtitles && opts.selectedSubtitles.length === 0)) {
+        subPreference = 'none';
+      } else if (opts.selectedSubtitles && opts.selectedSubtitles.length > 0) {
+        const firstSub = opts.selectedSubtitles[0];
+        const name = firstSub.label || firstSub.name || '';
+        if (/english/i.test(name)) subPreference = 'eng';
+        else subPreference = 'any';
+      }
+
+      state.lastDownloadPreferences = { audioPreference, subPreference, dualAudio: opts.dualAudio, embedSubtitles: opts.embedSubtitles };
+
       try {
         showToast('Download started (.mp4) — see live progress bar above');
         const task = await api.startDownload({
           url: downloadUrl,
           title: customTitle,
+          audioPreference,
+          subPreference,
           selectedVideoUrl: opts.selectedVideoUrl,
           selectedAudioUrl: opts.selectedAudioUrl,
+          selectedSubtitles: opts.selectedSubtitles,
+          embedSubtitles: opts.embedSubtitles,
           dualAudio: opts.dualAudio,
+          dubStreamUrl: probe?.dubStreamUrl || null,
+          subStreamUrl: probe?.subStreamUrl || null,
+          audioTracks: Array.isArray(probe?.audioTracks) ? probe.audioTracks : [],
           outputFormat: 'mp4'
         });
         if (task) {
-          dismissedHudTaskId = null;
           activeDownloadsMap.set(task.id, task);
           renderDownloadQueue();
         }
@@ -7098,13 +7959,6 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
       let html = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">';
 
-      // Format Badge (.mp4 default container)
-      html += `
-        <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);background:rgba(255,255,255,0.05);padding:3px 8px;border-radius:6px;border:1px solid var(--border-panel);">
-          Format: <strong style="color:var(--accent);font-weight:600;">.mp4</strong>
-        </span>
-      `;
-
       if (hasVideoChoices) {
         const optsHtml = probe.videoVariants.map((v) =>
           `<option value="${escapeHtml(v.url)}" style="background:#181818;color:#fff;">${escapeHtml(v.label)}</option>`
@@ -7117,26 +7971,97 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         `;
       }
 
+      const titleCandidate = probe.title || '';
+      const isAnimeCandidate = /(?:\[.*?\]|\b(?:ep(?:isode)?\.?\s*\d+|s\d+\s*e\d+|season\s*\d+|owarimonogatari|monogatari|naruto|piece|bleach|jujutsu|frieren|knight|elaina|witch|slime|re:zero|titan|hero|dungeon|isekai|danmachi|sword|art|online|shield|solo|leveling)\b)/i.test(titleCandidate) || (Array.isArray(probe.subtitles) && probe.subtitles.length > 0);
+      const isDub = /dub/i.test(titleCandidate);
+      const titleHasDual = /dual\s*audio/i.test(titleCandidate);
+
+      const hasJapanese = probe.audioTracks?.some((a) => /japanese|ja/i.test(a.name || '') || /ja/i.test(a.lang || ''));
+      const hasEnglish = probe.audioTracks?.some((a) => /english|en/i.test(a.name || '') || /en/i.test(a.lang || ''));
+      const canDual = (hasJapanese && hasEnglish) || titleHasDual;
+
+      const preferredAudioPref = state.lastDownloadPreferences?.audioPreference;
+      const preferDual = preferredAudioPref ? preferredAudioPref === 'dual' : canDual;
+      const preferEng = preferredAudioPref ? (/eng|dub/i.test(preferredAudioPref)) : false;
+      const preferJpn = preferredAudioPref ? (/jpn|ja/i.test(preferredAudioPref)) : false;
+
+      let audioOptsHtml = '';
       if (hasAudioChoices) {
-        const audioOptsHtml = probe.audioTracks.map((a) => {
+        audioOptsHtml = probe.audioTracks.map((a) => {
           let label = a.name;
-          if (/japanese|ja/i.test(label)) label = 'Japanese';
-          else if (/english|en/i.test(label)) label = 'English';
+          const isTrackEng = /english|en/i.test(label) || /eng/i.test(a.lang || '');
+          const isTrackJpn = /japanese|ja/i.test(label) || /jpn/i.test(a.lang || '');
+          if (isTrackJpn) label = 'Japanese (Original)';
+          else if (isTrackEng) label = 'English (Dub)';
           else label = label.replace(/\s*\([^)]*\)/g, '').trim() || label;
-          return `<option value="${escapeHtml(a.url)}" ${a.isDefault ? 'selected' : ''} style="background:#181818;color:#fff;">${escapeHtml(label)}</option>`;
-        }).join('') + `<option value="__DUAL__" style="background:#181818;color:var(--accent);font-weight:600;">Dual Audio (Japanese & English)</option>`;
-        html += `
-          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);">
-            <span>Audio:</span>
-            <select id="probe-select-audio" style="${selectStyle}">${audioOptsHtml}</select>
-          </label>
-        `;
+
+          let isSelected = false;
+          if (preferDual) {
+            isSelected = false;
+          } else if (preferEng) {
+            isSelected = isTrackEng;
+          } else if (preferJpn) {
+            isSelected = isTrackJpn;
+          } else {
+            isSelected = Boolean(a.isDefault);
+          }
+          return `<option value="${escapeHtml(a.url)}" ${isSelected ? 'selected' : ''} style="background:#181818;color:#fff;">${escapeHtml(label)}</option>`;
+        }).join('') + (canDual ? `<option value="__DUAL__" ${preferDual ? 'selected' : ''} style="background:#181818;color:var(--accent);font-weight:600;">Dual Audio (Japanese & English)</option>` : '');
+      } else if (Array.isArray(probe.audioTracks) && probe.audioTracks.length === 1) {
+        let singleLabel = probe.audioTracks[0].name || '';
+        if (/japanese|ja/i.test(singleLabel) || /jpn/i.test(probe.audioTracks[0].lang || '')) singleLabel = 'Japanese (Original)';
+        else if (/english|en/i.test(singleLabel) || /eng/i.test(probe.audioTracks[0].lang || '')) singleLabel = 'English (Dub)';
+        else singleLabel = singleLabel.replace(/\s*\([^)]*\)/g, '').trim() || (isAnimeCandidate ? (isDub ? 'English (Dub)' : 'Japanese (Original)') : 'Default Audio (Stereo)');
+        audioOptsHtml = `<option value="${escapeHtml(probe.audioTracks[0].url || '')}" selected style="background:#181818;color:#fff;">${escapeHtml(singleLabel)}</option>`;
+      } else {
+        const singleLabel = isAnimeCandidate ? (isDub ? 'English (Dub)' : 'Japanese (Original)') : 'Default Audio (Stereo)';
+        audioOptsHtml = `<option value="" selected style="background:#181818;color:#fff;">${escapeHtml(singleLabel)}</option>`;
       }
 
+      html += `
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);">
+          <span>Audio:</span>
+          <select id="probe-select-audio" style="${selectStyle}">${audioOptsHtml}</select>
+        </label>
+      `;
+
       if (hasSubs) {
+        const preferredSubPref = state.lastDownloadPreferences?.subPreference;
+        const isEmbedOn = preferredSubPref === 'none' ? false : (state.embedSubtitlesOnDownload !== false);
+        let subOptsHtml = '';
+        if (probe.subtitles.length > 1) {
+          subOptsHtml += `<option value="__ALL__" ${isEmbedOn ? 'selected' : ''} style="background:#181818;color:var(--accent);font-weight:600;">Embed All (${probe.subtitles.length} tracks)</option>`;
+          subOptsHtml += probe.subtitles.map((s, idx) => {
+            let label = s.label || s.name || s.lang || `Track ${idx + 1}`;
+            if (/english|en/i.test(label) || /eng/i.test(s.lang || '')) label = 'English';
+            else if (/japanese|ja/i.test(label) || /jpn/i.test(s.lang || '')) label = 'Japanese';
+            else if (/german|deutsch|de/i.test(label) || /ger|deu/i.test(s.lang || '')) label = 'German';
+            else if (/indonesian|indo|in/i.test(label) || /^in$/i.test(s.lang || '')) label = 'Indonesian';
+            else if (/thai|th/i.test(label) || /^th$/i.test(s.lang || '')) label = 'Thai';
+            const val = s.url || s.label || String(idx);
+            return `<option value="${escapeHtml(val)}" style="background:#181818;color:#fff;">${escapeHtml(label)}</option>`;
+          }).join('');
+          subOptsHtml += `<option value="__NONE__" ${!isEmbedOn ? 'selected' : ''} style="background:#181818;color:#aaa;">No Subtitles (Skip)</option>`;
+        } else {
+          const s = probe.subtitles[0];
+          let label = s.label || s.name || s.lang || 'Subtitle';
+          if (/english|en/i.test(label) || /eng/i.test(s.lang || '')) label = 'English';
+          else if (/japanese|ja/i.test(label) || /jpn/i.test(s.lang || '')) label = 'Japanese';
+          else if (/german|deutsch|de/i.test(label) || /ger|deu/i.test(s.lang || '')) label = 'German';
+          subOptsHtml += `<option value="__ALL__" ${isEmbedOn ? 'selected' : ''} style="background:#181818;color:var(--accent);font-weight:600;">Embed Subtitle (${escapeHtml(label)})</option>`;
+          subOptsHtml += `<option value="__NONE__" ${!isEmbedOn ? 'selected' : ''} style="background:#181818;color:#aaa;">No Subtitles (Skip)</option>`;
+        }
+
         html += `
-          <span style="font-size:11px;color:var(--accent);background:rgba(var(--accent-rgb),0.12);padding:2px 7px;border-radius:5px;">
-            CC: ${probe.subtitles.length} Subtitle Track(s)
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);">
+            <span>Subtitles:</span>
+            <select id="probe-select-sub" style="${selectStyle}">${subOptsHtml}</select>
+          </label>
+        `;
+      } else {
+        html += `
+          <span style="font-size:11px;color:var(--text-muted);background:rgba(255,255,255,0.05);padding:2px 7px;border-radius:5px;border:1px solid var(--border-panel);">
+            Subtitles: None in stream manifest
           </span>
         `;
       }
@@ -7164,7 +8089,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         lastProbedData = probe;
         if (el.streamFilenameInput && probe.title) {
           if (!el.streamFilenameInput.value.trim() || el.streamFilenameInput.dataset.autoFilled === 'true') {
-            el.streamFilenameInput.value = probe.title;
+            el.streamFilenameInput.value = formatDoubleDigitEpisode(stripLanguageTags(probe.title));
             el.streamFilenameInput.dataset.autoFilled = 'true';
           }
         }
@@ -7215,17 +8140,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           if (audioSel && el.streamFilenameInput) {
             audioSel.addEventListener('change', () => {
               if (el.streamFilenameInput.dataset.autoFilled === 'true' && lastProbedData?.title) {
-                const optText = audioSel.options[audioSel.selectedIndex]?.text || '';
-                const isEnglish = /english/i.test(optText);
-                const isDual = audioSel.value === '__DUAL__';
-                const baseTitle = lastProbedData.title.replace(/\s*\((English|Japanese|Dual Audio|Dub)\)/gi, '');
-                if (isDual) {
-                  el.streamFilenameInput.value = `${baseTitle} (Dual Audio)`;
-                } else if (isEnglish) {
-                  el.streamFilenameInput.value = `${baseTitle} (English)`;
-                } else {
-                  el.streamFilenameInput.value = baseTitle;
-                }
+                const baseTitle = formatDoubleDigitEpisode(stripLanguageTags(lastProbedData.title));
+                el.streamFilenameInput.value = baseTitle;
               }
             });
           }
@@ -7259,14 +8175,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       el.btnPlayerDlPlay.addEventListener('click', async () => {
         const filePath = el.btnPlayerDlPlay.dataset.path;
         dismissHudCompleted();
-        if (filePath && api.probeMedia) {
-          try {
-            const probe = await api.probeMedia(filePath);
-            if (probe && probe.ok) {
-              toggleSettingsModal(false);
-              loadMediaItem(probe.item, { autoPlay: true });
-            }
-          } catch {}
+        if (filePath) {
+          await playLocalFile(filePath, true);
         }
       });
     }
@@ -7275,16 +8185,16 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       el.btnPlayerDlQueue.addEventListener('click', async () => {
         const filePath = el.btnPlayerDlQueue.dataset.path || (el.btnPlayerDlPlay ? el.btnPlayerDlPlay.dataset.path : '');
         dismissHudCompleted();
-        if (filePath && api.probeMedia) {
+        if (filePath && api.resolvePaths) {
           try {
-            const probe = await api.probeMedia(filePath);
-            if (probe && probe.ok && probe.item) {
-              appendItemsToQueue([probe.item], { playFirstIfIdle: false, toast: true });
+            const res = await api.resolvePaths([filePath]);
+            if (res && res.items && res.items.length > 0) {
+              appendItemsToQueue(res.items, { playFirstIfIdle: false, toast: true });
               el.rightDrawer.classList.remove('collapsed');
               el.btnQueueDrawer.classList.add('active');
               state.drawerTab = 'queue';
               renderRightDrawer();
-              showToast(`Added to Queue: ${probe.item.title || probe.item.name}`);
+              showToast(`Added to Queue: ${res.items[0].title || res.items[0].name}`);
               return;
             }
           } catch {}
@@ -7348,6 +8258,152 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     }
     if (el.btnStreamDownload) {
       el.btnStreamDownload.addEventListener('click', handleStreamDownloadAction);
+    }
+    if (el.btnStreamNextEp) {
+      el.btnStreamNextEp.addEventListener('click', async () => {
+        const rawUrl = el.streamUrlInput ? el.streamUrlInput.value.trim() : '';
+        if (!rawUrl) {
+          showToast('Paste or enter an episode URL first');
+          return;
+        }
+        if (!api.incrementEpisodeUrl) return;
+        const nextUrl = await api.incrementEpisodeUrl(rawUrl, 1);
+        if (!nextUrl || nextUrl === rawUrl) {
+          showToast('No episode number found in URL to increment');
+          return;
+        }
+        el.streamUrlInput.value = nextUrl;
+
+        // Also increment filename input if present
+        if (el.streamFilenameInput && el.streamFilenameInput.value.trim()) {
+          const fn = el.streamFilenameInput.value.trim();
+          const nextFn = fn.replace(/(\b(?:ep|episode)?\s*[-_]?\s*)(\d+)/i, (m, p1, p2) => {
+            const nextNum = parseInt(p2, 10) + 1;
+            return p1 + String(nextNum).padStart(Math.max(2, p2.length), '0');
+          });
+          if (nextFn !== fn) {
+            el.streamFilenameInput.value = formatDoubleDigitEpisode(nextFn);
+          }
+        }
+        lastProbedData = null;
+        if (el.streamProbeResult) {
+          el.streamProbeResult.innerHTML = '';
+          el.streamProbeResult.style.display = 'none';
+        }
+        showToast('Incremented to next episode (+1)');
+      });
+    }
+    if (el.btnStreamSeason) {
+      el.btnStreamSeason.addEventListener('click', () => {
+        if (!el.streamSeasonPanel) return;
+        const isShown = el.streamSeasonPanel.style.display === 'block';
+        el.streamSeasonPanel.style.display = isShown ? 'none' : 'block';
+        if (!isShown) {
+          // Pre-populate series folder name and episode numbers
+          const rawUrl = el.streamUrlInput ? el.streamUrlInput.value.trim() : '';
+          const customTitle = el.streamFilenameInput ? el.streamFilenameInput.value.trim() : '';
+          if (el.seasonFolderName && !el.seasonFolderName.value.trim()) {
+            let guess = stripLanguageTags(customTitle.replace(/\s*[-_]\s*episode\s*\d+/i, '').replace(/\s*[-_]\s*ep\s*\d+/i, '').trim());
+            if (!guess && rawUrl) {
+              try {
+                const parts = new URL(rawUrl).pathname.split('/').filter(Boolean);
+                for (let i = parts.length - 1; i >= 0; i--) {
+                  let seg = parts[i].replace(/\.(html|php|mp4|m3u8)$/i, '').replace(/[-_]?(?:episode|ep)[-_]?\d+/i, '').replace(/[-_]\d+$/, '').replace(/[-_]+/g, ' ').trim();
+                  if (seg && !/^(watch|video|play|anime|stream)$/i.test(seg)) {
+                    guess = stripLanguageTags(seg.replace(/\b\w/g, c => c.toUpperCase()));
+                    break;
+                  }
+                }
+              } catch {}
+            }
+            el.seasonFolderName.value = guess || 'Anime Series';
+          }
+        }
+      });
+    }
+    if (el.btnQueueSeason) {
+      el.btnQueueSeason.addEventListener('click', async () => {
+        const rawUrl = el.streamUrlInput ? el.streamUrlInput.value.trim() : '';
+        if (!rawUrl || (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://'))) {
+          showToast('Paste a valid streaming episode URL first');
+          return;
+        }
+
+        const fromEp = parseInt(el.seasonFromEp?.value, 10) || 1;
+        const toEp = parseInt(el.seasonToEp?.value, 10) || 12;
+        if (fromEp > toEp) {
+          showToast('From Episode must be less than or equal to To Episode');
+          return;
+        }
+
+        const seriesTitle = stripLanguageTags((el.seasonFolderName?.value || '').trim());
+        const opts = getSelectedProbeOptions(lastProbedData);
+
+        let audioPreference = 'any';
+        if (opts.dualAudio) {
+          audioPreference = 'dual';
+        } else if (opts.selectedAudioName) {
+          if (/english|dub/i.test(opts.selectedAudioName)) audioPreference = 'eng';
+          else if (/japanese|jpn/i.test(opts.selectedAudioName)) audioPreference = 'jpn';
+        } else if (state.lastDownloadPreferences?.audioPreference) {
+          audioPreference = state.lastDownloadPreferences.audioPreference;
+        }
+
+        let subPreference = 'any';
+        if (!opts.embedSubtitles || (opts.selectedSubtitles && opts.selectedSubtitles.length === 0)) {
+          subPreference = 'none';
+        } else if (opts.selectedSubtitles && opts.selectedSubtitles.length > 0) {
+          const firstSub = opts.selectedSubtitles[0];
+          const name = firstSub.label || firstSub.name || '';
+          if (/english/i.test(name)) subPreference = 'eng';
+          else subPreference = 'any';
+        } else if (state.lastDownloadPreferences?.subPreference) {
+          subPreference = state.lastDownloadPreferences.subPreference;
+        }
+
+        try {
+          showToast(`Queuing ${seriesTitle} (Ep ${fromEp}–${toEp}) in 10-episode sliding window...`);
+          const res = await api.queueSeasonDownload({
+            url: rawUrl,
+            fromEp,
+            toEp,
+            seriesTitle,
+            audioPreference,
+            subPreference,
+            dualAudio: opts.dualAudio || Boolean(state.lastDownloadPreferences?.dualAudio),
+            embedSubtitles: opts.embedSubtitles !== false,
+            outputFormat: 'mp4'
+          });
+
+          if (res && res.success) {
+            showToast(`Season queued: ${res.totalEpisodes} episodes in sliding queue`);
+            if (el.streamSeasonPanel) el.streamSeasonPanel.style.display = 'none';
+            const q = await api.getDownloadQueue();
+            if (Array.isArray(q)) {
+              q.forEach(t => activeDownloadsMap.set(t.id, t));
+              renderDownloadQueue();
+            }
+          }
+        } catch (err) {
+          showToast(`Failed to queue season: ${err.message}`);
+        }
+      });
+    }
+    if (el.btnHaltAllDl) {
+      el.btnHaltAllDl.addEventListener('click', async () => {
+        if (!api.haltAllDownloads) return;
+        try {
+          const res = await api.haltAllDownloads();
+          showToast(`All downloads halted (${res?.haltedCount || 0} stopped)`);
+          const q = await api.getDownloadQueue();
+          if (Array.isArray(q)) {
+            q.forEach(t => activeDownloadsMap.set(t.id, t));
+            renderDownloadQueue();
+          }
+        } catch (err) {
+          showToast(`Halt error: ${err.message}`);
+        }
+      });
     }
     if (el.streamFilenameInput) {
       el.streamFilenameInput.addEventListener('input', () => {
@@ -7886,6 +8942,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     });
     window.addEventListener('resize', () => {
       applyVideoAppearance();
+      if (isSkipPromptVisible) {
+        updateSkipSegmentPosition();
+      }
     });
     window.addEventListener('blur', () => {
       stopHold2x('space');

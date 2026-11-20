@@ -12,7 +12,9 @@
 const { app, BrowserWindow, protocol, net, Menu, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { Readable } = require('stream');
 const { pathToFileURL } = require('url');
+const { parseByteRange } = require('./src/main/media-resolver');
 
 // 1. Structured Logging Module
 const { createLogger } = require('./src/main/logger');
@@ -31,6 +33,7 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('enable-accelerated-video-decode');
 app.commandLine.appendSwitch('enable-accelerated-mjpeg-decode');
+app.commandLine.appendSwitch('enable-blink-features', 'AudioVideoTracks');
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -40,8 +43,7 @@ protocol.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       corsEnabled: true,
-      stream: true,
-      bypassCSP: true
+      stream: true
     }
   }
 ]);
@@ -77,10 +79,10 @@ function createMainWindow() {
   const windowIcon = fs.existsSync(icoPath) ? icoPath : (fs.existsSync(iconPng) ? iconPng : undefined);
 
   const mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 700,
-    minWidth: 680,
-    minHeight: 420,
+    width: 1320,
+    height: 780,
+    minWidth: 720,
+    minHeight: 460,
     frame: false,
     backgroundColor: '#0A0A0A',
     title: 'CopyCat media player',
@@ -90,7 +92,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false,
+      webSecurity: true,
       backgroundThrottling: false
     }
   });
@@ -167,14 +169,60 @@ if (!isSingleInstance) {
 
     protocol.handle('media', (request) => {
       try {
-        let pathname = decodeURIComponent(request.url.replace(/^media:\/\/\/?/i, ''));
-        if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(pathname)) {
-          pathname = pathname.slice(1);
+        const parsed = new URL(request.url);
+        let filePath = '';
+        if (process.platform === 'win32' && /^[a-zA-Z]$/.test(parsed.host)) {
+          filePath = parsed.host.toUpperCase() + ':' + decodeURIComponent(parsed.pathname);
+        } else {
+          let p = decodeURIComponent(parsed.pathname);
+          if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(p)) {
+            p = p.slice(1);
+          }
+          filePath = p;
         }
-        return net.fetch(pathToFileURL(path.resolve(pathname)).href);
+        filePath = path.resolve(filePath);
+
+        if (!fs.existsSync(filePath)) {
+          return new Response('Media file not found', { status: 404 });
+        }
+
+        const stat = fs.statSync(filePath);
+        const { isRange, start, end, chunkSize, total } = parseByteRange(request.headers.get('range'), stat.size);
+
+        const ext = path.extname(filePath).toLowerCase();
+        const mime = (ext === '.mp4' || ext === '.m4v') ? 'video/mp4' :
+                     (ext === '.webm') ? 'video/webm' :
+                     (ext === '.mkv') ? 'video/x-matroska' :
+                     (ext === '.mp3') ? 'audio/mpeg' :
+                     (ext === '.wav') ? 'audio/wav' :
+                     (ext === '.flac') ? 'audio/flac' : 'application/octet-stream';
+
+        // Large 2MB highWaterMark buffer eliminates any stream starvation while enabling instant byte-range seeking
+        const stream = fs.createReadStream(filePath, { start, end, highWaterMark: 2 * 1024 * 1024 });
+
+        if (isRange) {
+          return new Response(Readable.toWeb(stream), {
+            status: 206,
+            headers: {
+              'Content-Type': mime,
+              'Accept-Ranges': 'bytes',
+              'Content-Range': `bytes ${start}-${end}/${total}`,
+              'Content-Length': String(chunkSize)
+            }
+          });
+        }
+
+        return new Response(Readable.toWeb(stream), {
+          status: 200,
+          headers: {
+            'Content-Type': mime,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': String(total)
+          }
+        });
       } catch (err) {
         mainLogger.warn('Media protocol error:', err.message);
-        return new Response('Media file not found', { status: 404 });
+        return new Response('Media protocol error', { status: 500 });
       }
     });
 
@@ -192,10 +240,12 @@ if (!isSingleInstance) {
       callback({ cancel: false, requestHeaders: details.requestHeaders });
     });
 
-    // Ensure CORS headers on remote streams so native hls.js MSE & Web Audio API (EQ / Volume Boost) work seamlessly
+    // Scoped CORS headers on media & streaming resources so native hls.js MSE & Web Audio API work seamlessly
+    const MEDIA_STREAM_REGEX = /\.(m3u8|mpd|ts|m4s|mp4|webm|aac|mp3|m4a|ogg|opus)(\?.*)?$/i;
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       const responseHeaders = { ...(details.responseHeaders || {}) };
-      if (/^https?:\/\//i.test(details.url)) {
+      const u = details.url || '';
+      if (/^https?:\/\//i.test(u) && (details.resourceType === 'media' || MEDIA_STREAM_REGEX.test(u) || u.includes(':4500/api/'))) {
         responseHeaders['Access-Control-Allow-Origin'] = ['*'];
         responseHeaders['Access-Control-Allow-Headers'] = ['*'];
         responseHeaders['Access-Control-Expose-Headers'] = ['Content-Length, Content-Range, Content-Type'];
@@ -205,10 +255,6 @@ if (!isSingleInstance) {
 
     startAiControlServer(4500, container);
     createMainWindow();
-
-    setTimeout(() => {
-      sessionService.registerAssociations(process.execPath);
-    }, 1500);
 
     setTimeout(async () => {
       try {

@@ -2,7 +2,7 @@
 // Dedicated Stream & Thumbnail Worker Process Lifecycle Manager for VLCopyCat
 
 const fs = require('fs');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const { createLogger } = require('./logger');
 const { getRequiredHeadersForUrl } = require('./stream-sniffer');
 
@@ -21,16 +21,20 @@ class StreamProcessManager {
    */
   killActiveStreamProc() {
     if (this.activeStreamProc) {
+      const proc = this.activeStreamProc;
+      this.activeStreamProc = null;
       try {
-        if (process.platform === 'win32' && this.activeStreamProc.pid) {
-          spawnSync('taskkill', ['/pid', String(this.activeStreamProc.pid), '/T', '/F'], { windowsHide: true });
+        if (process.platform === 'win32' && proc.pid) {
+          try { proc.kill('SIGKILL'); } catch {}
+          const killer = spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+          killer.on('error', () => {});
+          killer.unref();
         } else {
-          this.activeStreamProc.kill('SIGKILL');
+          proc.kill('SIGKILL');
         }
       } catch (err) {
         logger.debug('Stream process kill notice:', err.message);
       }
-      this.activeStreamProc = null;
     }
   }
 
@@ -39,16 +43,20 @@ class StreamProcessManager {
    */
   killActiveThumbProc() {
     if (this.activeThumbProc) {
+      const proc = this.activeThumbProc;
+      this.activeThumbProc = null;
       try {
-        if (process.platform === 'win32' && this.activeThumbProc.pid) {
-          spawnSync('taskkill', ['/pid', String(this.activeThumbProc.pid), '/T', '/F'], { windowsHide: true });
+        if (process.platform === 'win32' && proc.pid) {
+          try { proc.kill('SIGKILL'); } catch {}
+          const killer = spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+          killer.on('error', () => {});
+          killer.unref();
         } else {
-          this.activeThumbProc.kill('SIGKILL');
+          proc.kill('SIGKILL');
         }
       } catch (err) {
         logger.debug('Thumbnail process kill notice:', err.message);
       }
-      this.activeThumbProc = null;
     }
   }
 
@@ -93,7 +101,7 @@ class StreamProcessManager {
 
     this.killActiveStreamProc();
 
-    const canCopyVideo = !forceTranscode && (vcodec === 'h264' || isHttpUrl);
+    const canCopyVideo = !forceTranscode && (!vcodec || ['h264', 'avc1', 'mp4v'].includes(vcodec) || isHttpUrl);
     const args = ['-hide_banner', '-loglevel', 'error'];
 
     if (isHttpUrl) {

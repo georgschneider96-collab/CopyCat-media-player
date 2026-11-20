@@ -4,32 +4,61 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, exec } = require('child_process');
 const { app, dialog, shell } = require('electron');
 const { createLogger } = require('./logger');
 const mediaResolver = require('./media-resolver');
+const animeSkipResolver = require('./anime-skip-resolver');
 const { extractStreamFromWebpage, getRequiredHeadersForUrl } = require('./stream-sniffer');
 
 const logger = createLogger('Downloader');
 
-const httpsKeepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 6 });
-const httpKeepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 6 });
+const httpsKeepAliveAgent = new https.Agent({ keepAlive: true, maxSockets: 16, keepAliveMsecs: 15000 });
+const httpKeepAliveAgent = new http.Agent({ keepAlive: true, maxSockets: 16, keepAliveMsecs: 15000 });
+
+/**
+ * Strip language and dub/sub/audio indicators from titles, filenames, and folder names
+ * Example: "Series Name - Episode 1 (English)" -> "Series Name - Episode 1"
+ */
+function stripLanguageTags(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/\s*[\(\[]\s*(?:English(?:\s*(?:Dub|Sub))?|Japanese(?:\s*(?:Original|Sub))?|Dual(?:\s*Audio)?|Dub|Sub|Eng|Jpn|Jap|Original)\s*[\)\]]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Format episode numbers in titles and filenames with at least two digits (e.g. Episode 01, 02)
+ * Handles: "Episode 1" -> "Episode 01", "Ep 2" -> "Ep 02", "Ep. 3" -> "Ep. 03", "E4" -> "E04", " - 5" -> " - 05"
+ */
+function formatDoubleDigitEpisode(str) {
+  if (!str || typeof str !== 'string') return '';
+  let result = str.replace(/(\b(?:Episode|Ep\.?|E)\s*[-_]?\s*)(\d+)\b/gi, (match, prefix, num) => {
+    return prefix + (num.length === 1 ? `0${num}` : num);
+  });
+  result = result.replace(/(\s*[-–—]\s*)(\d+)(\s*)$/, (match, prefix, num, suffix) => {
+    return prefix + (num.length === 1 ? `0${num}` : num) + suffix;
+  });
+  return result;
+}
 
 /**
  * Sanitize filename for safe Windows NTFS storage
  */
 function sanitizeFilename(name) {
-  let clean = (name || 'video')
+  let clean = formatDoubleDigitEpisode(stripLanguageTags(name || 'video'))
     .replace(/^Watch\s+/i, '')
     .replace(/\s*[-–—|·]\s*(Miruro|Watch Online|Full HD).*$/i, '')
     .replace(/[\\/:*?"<>|]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.\s]+$/, '');
-  return clean.slice(0, 85) || (`video_${Date.now()}`);
+  return formatDoubleDigitEpisode(clean.slice(0, 180)) || (`video_${Date.now()}`);
 }
 
 /**
@@ -50,7 +79,7 @@ function formatDuration(sec) {
  * Format bytes into human readable string
  */
 function formatBytes(bytes) {
-  if (!bytes || isNaN(bytes) || bytes <= 0) return '0 MB';
+  if (!bytes || isNaN(bytes) || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   let val = bytes;
@@ -58,7 +87,7 @@ function formatBytes(bytes) {
     val /= 1024;
     i++;
   }
-  return `${val.toFixed(1)} ${units[i]}`;
+  return i === 0 ? `${Math.round(val)} B` : `${val.toFixed(1)} ${units[i]}`;
 }
 
 /**
@@ -83,6 +112,109 @@ function getStreamHeaders(targetUrl, customHeaders = {}) {
   return getRequiredHeadersForUrl(targetUrl, customHeaders);
 }
 
+function normalizeIsoLang(lang, fallbackName = '') {
+  const l = (lang || '').toLowerCase().trim();
+  const n = (fallbackName || '').toLowerCase().trim();
+  if (/^ja/i.test(l) || /japanese|jpn/i.test(n)) return 'jpn';
+  if (/^en/i.test(l) || /english|eng/i.test(n)) return 'eng';
+  if (/^(in|id)/i.test(l) || /indonesian|indo/i.test(n)) return 'ind';
+  if (/^th/i.test(l) || /thai/i.test(n)) return 'tha';
+  if (/^(de|ger)/i.test(l) || /german|deutsch/i.test(n)) return 'ger';
+  if (/^(es|spa)/i.test(l) || /spanish|espanol/i.test(n)) return 'spa';
+  if (/^(fr|fra|fre)/i.test(l) || /french|francais/i.test(n)) return 'fra';
+  if (/^(it|ita)/i.test(l) || /italian/i.test(n)) return 'ita';
+  if (/^(ko|kor)/i.test(l) || /korean/i.test(n)) return 'kor';
+  if (/^(zh|chi|zho)/i.test(l) || /chinese/i.test(n)) return 'chi';
+  if (/^(pt|por)/i.test(l) || /portuguese/i.test(n)) return 'por';
+  if (/^(ru|rus)/i.test(l) || /russian/i.test(n)) return 'rus';
+  if (/^(ar|ara)/i.test(l) || /arabic/i.test(n)) return 'ara';
+  if (/^(vi|vie)/i.test(l) || /vietnamese/i.test(n)) return 'vie';
+  return l.length === 3 ? l : (l || 'und');
+}
+
+/**
+ * Parse episode number, padding, and surrounding pattern from a streaming/webpage URL
+ */
+function parseEpisodeFromUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const patterns = [
+    { regex: /([?&](?:ep|episode|e)=)(\d+)/i, type: 'query' },
+    { regex: /((?:[/-]|^)(?:episode|ep)[/-])(\d+)/i, type: 'slug' },
+    { regex: /((?:[/-]|^)e)(\d+)(?=[/-]|\.|$)/i, type: 'short' },
+    { regex: /([-_.])(\d+)(?=(?:\.[a-z0-9]+|\/)?$)/i, type: 'tail' }
+  ];
+  for (const { regex, type } of patterns) {
+    const m = url.match(regex);
+    if (m) {
+      return {
+        prefix: m[1],
+        numStr: m[2],
+        num: parseInt(m[2], 10),
+        padLength: m[2].length,
+        index: m.index,
+        fullMatch: m[0],
+        type
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Increment episode number in URL, preserving zero-padding
+ */
+function incrementEpisodeUrl(url, step = 1) {
+  const info = parseEpisodeFromUrl(url);
+  if (!info) return null;
+  const nextNum = Math.max(1, info.num + step);
+  const nextNumStr = String(nextNum).padStart(info.padLength, '0');
+  const replacement = info.prefix + nextNumStr;
+  return url.replace(info.fullMatch, replacement);
+}
+
+/**
+ * Replace episode number in URL with a target number, preserving padding
+ */
+function replaceEpisodeInUrl(url, targetNum) {
+  const info = parseEpisodeFromUrl(url);
+  if (!info) return url;
+  const numStr = String(targetNum).padStart(info.padLength, '0');
+  const replacement = info.prefix + numStr;
+  return url.replace(info.fullMatch, replacement);
+}
+
+/**
+ * Extract a reasonable Series Title guess from URL path or user filename
+ */
+function extractSeriesTitleGuess(url, rawTitle = '') {
+  if (rawTitle && rawTitle.trim()) {
+    let clean = stripLanguageTags(rawTitle.trim())
+      .replace(/\s*[-_]\s*episode\s*\d+/i, '')
+      .replace(/\s*[-_]\s*ep\s*\d+/i, '')
+      .replace(/\s*E\d+\b/i, '')
+      .trim();
+    if (clean) return clean;
+  }
+  try {
+    const parsed = new URL(url);
+    const pathParts = parsed.pathname.split('/').filter(Boolean);
+    for (let i = pathParts.length - 1; i >= 0; i--) {
+      let segment = pathParts[i]
+        .replace(/\.(html|php|mp4|m3u8)$/i, '')
+        .replace(/[-_]?(?:episode|ep)[-_]?\d+/i, '')
+        .replace(/[-_]?e\d+/i, '')
+        .replace(/[-_]\d+$/, '')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+      if (segment && !/^(watch|video|play|anime|stream)$/i.test(segment)) {
+        segment = stripLanguageTags(segment);
+        return segment.replace(/\b\w/g, c => c.toUpperCase());
+      }
+    }
+  } catch {}
+  return 'Anime Series';
+}
+
 /**
  * Core Download Manager Class
  */
@@ -93,7 +225,13 @@ class DownloadManager {
     this.activeControllers = new Map(); // id -> { cancelled: boolean }
     this.queue = []; // array of task items
     this.history = [];
-    this.downloadFolder = path.join(app.getPath('downloads'), 'CopyCat');
+    this.seasonBacklog = []; // Backlog of season episodes waiting for sliding window
+    this.activeTaskId = null; // Currently executing task id
+    this._isProcessingQueue = false;
+    const baseDownloads = app && typeof app.getPath === 'function'
+      ? app.getPath('downloads')
+      : path.join(os.homedir(), 'Downloads');
+    this.downloadFolder = path.join(baseDownloads, 'CopyCat');
     this.ensureFolder(this.downloadFolder);
   }
 
@@ -102,8 +240,78 @@ class DownloadManager {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
+      this.optimizeFolderView(dir);
     } catch (err) {
       logger.error('Failed to create download folder:', err.message);
+    }
+  }
+
+  /**
+   * Configure Windows Explorer view for downloads and season folders:
+   * Sets folder template to 'Videos', displays items as Large Icons (big symbols),
+   * sorts ascending by item name, and removes date grouping.
+   */
+  optimizeFolderView(folderPath, updateOpenExplorer = false) {
+    if (!folderPath || typeof folderPath !== 'string') return;
+    try {
+      const resolved = path.resolve(folderPath);
+      if (!fs.existsSync(resolved)) {
+        fs.mkdirSync(resolved, { recursive: true });
+      }
+
+      if (process.platform === 'win32') {
+        const iniPath = path.join(resolved, 'desktop.ini');
+        let needsWrite = true;
+        try {
+          if (fs.existsSync(iniPath)) {
+            const existing = fs.readFileSync(iniPath, 'utf8');
+            if (existing.includes('FolderType=Videos') && existing.includes('Mode=1')) {
+              needsWrite = false;
+            }
+          }
+        } catch {}
+
+        if (needsWrite) {
+          const content = '[.ShellClassInfo]\r\nConfirmFileOp=0\r\n[ViewState]\r\nMode=1\r\nVid=\r\nFolderType=Videos\r\n';
+          try {
+            fs.writeFileSync(iniPath, content, 'utf8');
+            exec(`attrib +h +s "${iniPath}" & attrib +r "${resolved}"`, { windowsHide: true }, () => {});
+          } catch (writeErr) {
+            logger.debug('desktop.ini write note:', writeErr.message);
+          }
+        }
+
+        const applyExplorerView = () => {
+          try {
+            const escaped = resolved.replace(/'/g, "''");
+            const psScript = `
+              $ErrorActionPreference = 'SilentlyContinue'
+              $target = '${escaped}'
+              $shell = New-Object -ComObject Shell.Application
+              foreach ($w in $shell.Windows()) {
+                try {
+                  if ($w.Document.Folder.Self.Path -eq $target) {
+                    $w.Document.GroupBy = 'System.Null'
+                    $w.Document.CurrentViewMode = 1
+                    $w.Document.IconSize = 96
+                    $w.Document.SortColumns = 'prop:System.ItemNameDisplay;'
+                  }
+                } catch {}
+              }
+            `;
+            const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
+            exec(`powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${b64}`, { windowsHide: true }, () => {});
+          } catch {}
+        };
+
+        applyExplorerView();
+        if (updateOpenExplorer) {
+          setTimeout(applyExplorerView, 400);
+          setTimeout(applyExplorerView, 1200);
+        }
+      }
+    } catch (err) {
+      logger.debug('optimizeFolderView error:', err.message);
     }
   }
 
@@ -137,6 +345,7 @@ class DownloadManager {
   openDownloadFolder() {
     this.ensureFolder(this.downloadFolder);
     shell.openPath(this.downloadFolder);
+    this.optimizeFolderView(this.downloadFolder, true);
   }
 
   /**
@@ -373,6 +582,14 @@ class DownloadManager {
       let targetAudioUrl = bestAudioUrl;
       if (options.selectedAudioUrl && audioTracks.some((a) => a.url === options.selectedAudioUrl)) {
         targetAudioUrl = options.selectedAudioUrl;
+      } else if (options.audioPreference) {
+        if (/eng|dub/i.test(options.audioPreference)) {
+          const engTrack = audioTracks.find((a) => /english|en/i.test(a.name || '') || /^en/i.test(a.lang || ''));
+          if (engTrack) targetAudioUrl = engTrack.url;
+        } else if (/jpn|jap/i.test(options.audioPreference)) {
+          const jpnTrack = audioTracks.find((a) => /japanese|ja/i.test(a.name || '') || /^ja/i.test(a.lang || ''));
+          if (jpnTrack) targetAudioUrl = jpnTrack.url;
+        }
       }
 
       const videoBuf = await this._fetchBuffer(targetVideoUrl, customHeaders, 4, 5, cancelState);
@@ -443,6 +660,114 @@ class DownloadManager {
   }
 
   /**
+   * Download and prepare subtitle track into a clean WebVTT file
+   * Handles direct .vtt/.srt files and HLS multi-segment subtitle playlists (.m3u8)
+   */
+  async _downloadSubtitleTrack(sub, outVttPath, customHeaders = {}, cancelState = null) {
+    if (!sub) return false;
+    if (sub.content && typeof sub.content === 'string' && sub.content.length > 10) {
+      await fs.promises.writeFile(outVttPath, sub.content, 'utf8');
+      return true;
+    }
+    if (!sub.url || sub.url.startsWith('blob:')) return false;
+    try {
+      const subBuf = await this._fetchBuffer(sub.url, customHeaders, 5, 5, cancelState);
+      const subText = subBuf.toString('utf8');
+      const cleanText = subText.replace(/^\uFEFF/, '').trim();
+
+      // Check if it is already direct WebVTT or SRT text
+      if (cleanText.startsWith('WEBVTT') || /^\d+\r?\n\d\d:\d\d:/m.test(cleanText) || cleanText.includes('-->')) {
+        let vttOut = cleanText;
+        if (!vttOut.startsWith('WEBVTT')) {
+          vttOut = `WEBVTT\n\n${vttOut}`;
+        }
+        await fs.promises.writeFile(outVttPath, vttOut, 'utf8');
+        return true;
+      }
+
+      // Check for JSON timed text / cues format
+      if (cleanText.startsWith('{') || cleanText.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(cleanText);
+          const cues = parsed.cues || parsed.events || (Array.isArray(parsed) ? parsed : null);
+          if (Array.isArray(cues) && cues.length > 0) {
+            const fmtTime = (sec) => {
+              const h = Math.floor(sec / 3600);
+              const m = Math.floor((sec % 3600) / 60);
+              const sSec = Math.floor(sec % 60);
+              const ms = Math.floor((sec % 1) * 1000);
+              return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sSec).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+            };
+            let vtt = 'WEBVTT\n\n';
+            for (const c of cues) {
+              const s = typeof c.start === 'number' ? c.start : (c.startTime || 0);
+              const e = typeof c.end === 'number' ? c.end : (c.endTime || s + 3);
+              const txt = c.text || c.content || (c.segs ? c.segs.map((x) => x.utf8).join('') : '');
+              if (txt) {
+                vtt += `${fmtTime(s)} --> ${fmtTime(e)}\n${txt}\n\n`;
+              }
+            }
+            await fs.promises.writeFile(outVttPath, vtt, 'utf8');
+            return true;
+          }
+        } catch {}
+      }
+
+      // If it's an HLS subtitle playlist (#EXTM3U)
+      if (subText.includes('#EXTM3U')) {
+        const lines = subText.split('\n').map((l) => l.trim()).filter(Boolean);
+        const segmentUrls = [];
+        for (const line of lines) {
+          if (!line.startsWith('#')) {
+            try {
+              segmentUrls.push(new URL(line, sub.url).href);
+            } catch {
+              segmentUrls.push(line);
+            }
+          }
+        }
+
+        if (segmentUrls.length === 0) return false;
+
+        const vttChunks = [];
+        for (const segUrl of segmentUrls) {
+          if (cancelState?.cancelled) return false;
+          try {
+            const chunkBuf = await this._fetchBuffer(segUrl, customHeaders, 4, 3, cancelState);
+            vttChunks.push(chunkBuf.toString('utf8'));
+          } catch (err) {
+            logger.debug('Failed to fetch subtitle segment:', err.message);
+          }
+        }
+
+        if (vttChunks.length === 0) return false;
+
+        // Merge WebVTT chunks into a single valid WebVTT document
+        let mergedVtt = 'WEBVTT\n\n';
+        for (const chunk of vttChunks) {
+          const cleaned = chunk
+            .replace(/^\uFEFF?WEBVTT[^\r\n]*\r?\n+/i, '')
+            .replace(/^X-TIMESTAMP-MAP[^\r\n]*\r?\n+/im, '')
+            .trim();
+          if (cleaned) {
+            mergedVtt += cleaned + '\n\n';
+          }
+        }
+
+        await fs.promises.writeFile(outVttPath, mergedVtt, 'utf8');
+        return true;
+      }
+
+      // Fallback: write buffer directly
+      await fs.promises.writeFile(outVttPath, subBuf);
+      return true;
+    } catch (err) {
+      logger.warn('Failed to download subtitle track:', sub.label || sub.url, err.message);
+      return false;
+    }
+  }
+
+  /**
    * Fast probe of stream URL headers & metadata with automatic redirect following & webpage sniffing
    */
   async probeUrl(rawUrl, maxRedirects = 5) {
@@ -468,7 +793,8 @@ class DownloadManager {
       if (lastSeg && !lastSeg.includes('master') && !lastSeg.includes('index') && lastSeg.length < 65) {
         const epParam = parsed.searchParams.get('ep');
         const baseName = lastSeg.replace(/\.(m3u8|mpd|mp4|webm|mkv|ts)$/i, '').replace(/-/g, ' ');
-        derivedTitle = sanitizeFilename(epParam ? `${baseName} - Episode ${epParam}` : baseName);
+        const epFormatted = epParam ? (epParam.length === 1 ? `0${epParam}` : epParam) : null;
+        derivedTitle = sanitizeFilename(epFormatted ? `${baseName} - Episode ${epFormatted}` : baseName);
       }
     } catch {
       throw new Error('Malformed stream URL.');
@@ -480,8 +806,13 @@ class DownloadManager {
         const manifest = await this.resolveHlsManifest(baseResult.url);
         let audioTracks = Array.isArray(manifest.audioTracks) ? [...manifest.audioTracks] : [];
 
-        // If the webpage sniffer discovered an alternate Dub/Sub language stream
-        if (sniffedExtra && sniffedExtra.dubStreamUrl) {
+        // If the webpage sniffer discovered a verified alternate Dub/Sub language stream
+        if (
+          sniffedExtra &&
+          sniffedExtra.dubStreamUrl &&
+          sniffedExtra.dubStreamUrl !== baseResult.url &&
+          sniffedExtra.dubStreamUrl !== sniffedExtra.subStreamUrl
+        ) {
           try {
             const dubManifest = await this.resolveHlsManifest(sniffedExtra.dubStreamUrl);
             const dubAudioTrack = dubManifest.audioTracks?.[0] || {
@@ -494,32 +825,55 @@ class DownloadManager {
             dubAudioTrack.name = 'English';
             dubAudioTrack.streamUrl = sniffedExtra.dubStreamUrl;
 
-            const subAudioTrack = audioTracks[0] || {
-              id: 'sub',
-              name: 'Japanese',
-              lang: 'ja-JP',
-              isDefault: true,
-              url: manifest.audioUrl || sniffedExtra.subStreamUrl || baseResult.url,
-              streamUrl: sniffedExtra.subStreamUrl || baseResult.url
-            };
-            subAudioTrack.name = 'Japanese';
-            subAudioTrack.streamUrl = sniffedExtra.subStreamUrl || baseResult.url;
+            const hasEnglishTrack = audioTracks.some((a) => /english|en/i.test(a.name || '') || /en/i.test(a.lang || ''));
+            if (!hasEnglishTrack) {
+              const subAudioTrack = audioTracks[0] || {
+                id: 'sub',
+                name: 'Japanese',
+                lang: 'ja-JP',
+                isDefault: true,
+                url: manifest.audioUrl || sniffedExtra.subStreamUrl || baseResult.url,
+                streamUrl: sniffedExtra.subStreamUrl || baseResult.url
+              };
+              subAudioTrack.name = 'Japanese';
+              subAudioTrack.streamUrl = sniffedExtra.subStreamUrl || baseResult.url;
 
-            if (audioTracks.length <= 1) {
-              audioTracks = [subAudioTrack, dubAudioTrack];
-            } else if (!audioTracks.some((a) => /english/i.test(a.name))) {
-              audioTracks.push(dubAudioTrack);
+              if (audioTracks.length <= 1) {
+                audioTracks = [subAudioTrack, dubAudioTrack];
+              } else {
+                audioTracks.push(dubAudioTrack);
+              }
             }
           } catch (err) {
             logger.debug('Dub stream manifest enrichment notice:', err.message);
           }
         }
 
+        // If no explicit audio tracks were enumerated in manifest (e.g. single-stream TS with multiplexed audio)
+        if (audioTracks.length === 0) {
+          const titleCandidate = baseResult.title || derivedTitle || '';
+          const isAnimeCandidate = animeSkipResolver.parseAnimeTitleAndEpisode(titleCandidate) || /(?:\[.*?\]|\b(?:ep(?:isode)?\.?\s*\d+|s\d+\s*e\d+|season\s*\d+|owarimonogatari|monogatari|naruto|piece|bleach|jujutsu|frieren|knight)\b)/i.test(titleCandidate) || (Array.isArray(baseResult.subtitles) && baseResult.subtitles.length > 0);
+          const isDub = /dub/i.test(titleCandidate);
+          if (isAnimeCandidate) {
+            audioTracks.push({
+              id: 'single_audio_0',
+              name: isDub ? 'English (Dub)' : 'Japanese',
+              lang: isDub ? 'eng' : 'jpn',
+              isDefault: true,
+              url: baseResult.url
+            });
+          }
+        }
+
         const totalSegs = (manifest.videoPlaylist?.segments?.length || 0) + (manifest.audioPlaylist?.segments?.length || 0);
-        const mergedSubtitles = [
-          ...(baseResult.subtitles || []),
-          ...(manifest.subtitleTracks || [])
-        ];
+        const mergedSubtitles = [];
+        const seenSubUrls = new Set();
+        for (const s of [...(manifest.subtitleTracks || []), ...(baseResult.subtitles || [])]) {
+          if (s && s.url && !seenSubUrls.has(s.url)) {
+            seenSubUrls.add(s.url);
+            mergedSubtitles.push(s);
+          }
+        }
         return {
           ...baseResult,
           masterUrl: manifest.masterUrl,
@@ -584,7 +938,8 @@ class DownloadManager {
                   try {
                     const ep = new URL(trimmed).searchParams.get('ep');
                     if (ep && !/ep(isode)?\s*\d+/i.test(cleanTitle)) {
-                      cleanTitle = sanitizeFilename(`${cleanTitle} - Episode ${ep}`);
+                      const epFormatted = ep.length === 1 ? `0${ep}` : ep;
+                      cleanTitle = sanitizeFilename(`${cleanTitle} - Episode ${epFormatted}`);
                     }
                   } catch {}
 
@@ -700,9 +1055,207 @@ class DownloadManager {
   }
 
   /**
-   * Add a download task to the active queue and start execution immediately
+   * Validate resolved stream audio & subtitle tracks against requested preferences
+   * Throws an Error if a strictly requested track is missing (enforcing Option A)
    */
-  async startDownload({ url, title, selectedVideoUrl = '', selectedAudioUrl = '', dualAudio = false, outputFormat = 'ts', customHeaders = {} }) {
+  _validateEpisodeTracks(probe, task) {
+    if (!probe) return;
+
+    // 1. Audio Track Validation
+    if (task.audioPreference && task.audioPreference !== 'any') {
+      const pref = task.audioPreference.toLowerCase();
+      if (pref === 'dual' || task.dualAudio) {
+        const hasDubUrl = Boolean(task.dubStreamUrl || probe.dubStreamUrl);
+        const hasMultipleAudio = Array.isArray(probe.audioTracks) && probe.audioTracks.length > 1;
+        if (!hasDubUrl && !hasMultipleAudio) {
+          throw new Error('Dual audio tracks not available for this episode');
+        }
+      } else if (pref.startsWith('eng') || pref.includes('dub')) {
+        const hasEng = Array.isArray(probe.audioTracks) && probe.audioTracks.some(a =>
+          /english|eng/i.test(a.name || '') || /en/i.test(a.lang || '')
+        );
+        const hasDubStream = Boolean(probe.dubStreamUrl);
+        if (!hasEng && !hasDubStream) {
+          throw new Error('Requested English dub not available for this episode');
+        }
+      } else if (pref.startsWith('jpn') || pref.includes('japanese') || pref.includes('sub')) {
+        const hasJpn = Array.isArray(probe.audioTracks) && probe.audioTracks.some(a =>
+          /japanese|jpn/i.test(a.name || '') || /ja/i.test(a.lang || '')
+        );
+        const hasExplicitNonJpn = Array.isArray(probe.audioTracks) && probe.audioTracks.length === 1 && (
+          /english|eng|dub/i.test(probe.audioTracks[0].name || '') || /en/i.test(probe.audioTracks[0].lang || '')
+        );
+        const isSingleUntagged = (!probe.audioTracks || probe.audioTracks.length === 0 || (probe.audioTracks.length === 1 && !hasExplicitNonJpn));
+        if (!hasJpn && !isSingleUntagged) {
+          throw new Error('Requested Japanese audio not available for this episode');
+        }
+      }
+    }
+
+    // 2. Subtitle Validation
+    if (task.subPreference && task.subPreference !== 'any' && task.subPreference !== 'none') {
+      const pref = task.subPreference.toLowerCase();
+      const subs = Array.isArray(probe.subtitles) ? probe.subtitles : [];
+      if (subs.length === 0) {
+        throw new Error('No subtitles available for this episode');
+      }
+      if (pref.startsWith('eng') || pref.includes('english')) {
+        const hasEngSub = subs.some(s =>
+          /english|eng/i.test(s.label || s.name || '') || /en/i.test(s.lang || '')
+        );
+        if (!hasEngSub) {
+          throw new Error('Requested English subtitles not available for this episode');
+        }
+      }
+    }
+  }
+
+  /**
+   * Allocate unique output file path with dedicated subfolder support
+   */
+  async _allocateOutputPath(cleanTitle, format = 'mp4', subfolder = '') {
+    const ext = (format && format.toLowerCase() === 'ts') ? '.ts' : '.mp4';
+    let targetDir = this.downloadFolder;
+    const cleanSub = stripLanguageTags(subfolder);
+    if (cleanSub && typeof cleanSub === 'string' && cleanSub.trim()) {
+      targetDir = path.join(this.downloadFolder, sanitizeFilename(cleanSub.trim()));
+      this.ensureFolder(targetDir);
+    }
+    let fileName = `${cleanTitle}${ext}`;
+    let outPath = path.join(targetDir, fileName);
+    let counter = 1;
+    const pathExists = async (p) => {
+      try {
+        await fs.promises.access(p, fs.constants.F_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    while (await pathExists(outPath)) {
+      fileName = `${cleanTitle} (${counter})${ext}`;
+      outPath = path.join(targetDir, fileName);
+      counter++;
+    }
+    return { fileName, outPath };
+  }
+
+  /**
+   * Refill active queue from season backlog to maintain up to 10 active/queued slots
+   */
+  async _refillQueueFromBacklog() {
+    const activeOrQueuedCount = this.queue.filter(t =>
+      t.status === 'queued' || t.status === 'starting' || t.status === 'downloading' || t.status === 'sniffing'
+    ).length;
+
+    const slotsAvailable = 10 - activeOrQueuedCount;
+    if (slotsAvailable <= 0 || this.seasonBacklog.length === 0) return;
+
+    const toAdd = this.seasonBacklog.splice(0, slotsAvailable);
+    for (const item of toAdd) {
+      const id = `dl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const safeFormat = (item.outputFormat && item.outputFormat.toLowerCase().includes('ts')) ? 'ts' : 'mp4';
+      const { fileName, outPath } = await this._allocateOutputPath(item.title, safeFormat, item.subfolder);
+
+      const task = {
+        id,
+        url: item.url,
+        subfolder: item.subfolder || '',
+        audioPreference: item.audioPreference || 'any',
+        subPreference: item.subPreference || 'any',
+        selectedVideoUrl: '',
+        selectedAudioUrl: '',
+        selectedSubtitles: [],
+        embedSubtitles: item.embedSubtitles !== false,
+        dualAudio: Boolean(item.dualAudio),
+        dubStreamUrl: null,
+        subStreamUrl: null,
+        audioTracks: [],
+        outputFormat: safeFormat,
+        title: item.title,
+        fileName,
+        outputPath: outPath,
+        status: 'queued',
+        percent: 0,
+        speed: 'Queued',
+        etaFormatted: '',
+        segmentsText: '',
+        downloadedBytes: 0,
+        sizeFormatted: '0 MB',
+        timeFormatted: '00:00',
+        totalDurationSec: 0,
+        startTime: Date.now(),
+        customHeaders: item.customHeaders || {},
+        needsSniffing: true
+      };
+
+      this.queue.push(task);
+      this._broadcastProgress(task);
+    }
+  }
+
+  /**
+   * Sequential queue processor: ensures strictly 1 active download at a time
+   */
+  async _processQueue() {
+    if (this._isProcessingQueue) return;
+    this._isProcessingQueue = true;
+
+    try {
+      await this._refillQueueFromBacklog();
+
+      // Check if any download is already active
+      const isAnyActive = this.queue.some(t =>
+        t.status === 'downloading' || t.status === 'starting' || t.status === 'sniffing'
+      );
+      if (isAnyActive) {
+        return;
+      }
+
+      // Find the next task that is queued
+      const nextTask = this.queue.find(t => t.status === 'queued');
+      if (!nextTask) {
+        return;
+      }
+
+      this.activeTaskId = nextTask.id;
+      nextTask.status = 'starting';
+      nextTask.speed = 'Starting...';
+      nextTask.percent = 1;
+      this._broadcastProgress(nextTask);
+
+      const cancelState = { cancelled: false };
+      this.activeControllers.set(nextTask.id, cancelState);
+
+      // Execute asynchronously
+      this._executeTask(nextTask, cancelState).catch((err) => {
+        logger.error(`Error in _executeTask [${nextTask.id}]:`, err.message);
+      });
+    } finally {
+      this._isProcessingQueue = false;
+    }
+  }
+
+  /**
+   * Add a download task to the active queue and execute sequentially
+   */
+  async startDownload({
+    url,
+    title,
+    subfolder = '',
+    audioPreference = 'any',
+    subPreference = 'any',
+    selectedVideoUrl = '',
+    selectedAudioUrl = '',
+    selectedSubtitles = [],
+    embedSubtitles = true,
+    dualAudio = false,
+    dubStreamUrl = null,
+    subStreamUrl = null,
+    audioTracks = [],
+    outputFormat = 'mp4',
+    customHeaders = {}
+  }) {
     if (!url || typeof url !== 'string') {
       throw new Error('URL is required to start a download.');
     }
@@ -714,95 +1267,225 @@ class DownloadManager {
     this.ensureFolder(this.downloadFolder);
 
     const safeFormat = (outputFormat && outputFormat.toLowerCase().includes('ts')) ? 'ts' : 'mp4';
-    const { fileName, outPath } = this._allocateOutputPath(initialTitle, safeFormat);
+    const { fileName, outPath } = await this._allocateOutputPath(initialTitle, safeFormat, subfolder);
 
     const task = {
       id,
       url: trimmedUrl,
+      subfolder: subfolder || '',
+      audioPreference: audioPreference || 'any',
+      subPreference: subPreference || 'any',
       selectedVideoUrl,
       selectedAudioUrl,
+      selectedSubtitles: Array.isArray(selectedSubtitles) ? selectedSubtitles : [],
+      embedSubtitles: embedSubtitles !== false,
       dualAudio: Boolean(dualAudio),
+      dubStreamUrl: dubStreamUrl || null,
+      subStreamUrl: subStreamUrl || null,
+      audioTracks: Array.isArray(audioTracks) ? audioTracks : [],
       outputFormat: safeFormat,
       title: initialTitle,
       fileName,
       outputPath: outPath,
-      status: 'starting',
-      percent: 1,
-      speed: 'Resolving stream...',
+      status: 'queued',
+      percent: 0,
+      speed: 'Queued',
       etaFormatted: '',
       segmentsText: '',
       downloadedBytes: 0,
       sizeFormatted: '0 MB',
       timeFormatted: '00:00',
       totalDurationSec: 0,
-      startTime: Date.now()
+      startTime: Date.now(),
+      customHeaders
     };
 
-    const cancelState = { cancelled: false };
-    this.activeControllers.set(id, cancelState);
-
-    this.queue.unshift(task);
+    this.queue.push(task);
     this._broadcastProgress(task);
 
-    // Run download workflow asynchronously so UI immediately renders the progress card
-    this._executeDownloadWorkflow(task, customHeaders, cancelState).catch((err) => {
-      if (cancelState.cancelled || task.status === 'cancelled') return;
-      task.status = 'error';
-      task.error = err.message || 'Download failed';
-      this._broadcastError(task);
-    });
+    this._processQueue();
 
     return task;
   }
 
-  _allocateOutputPath(cleanTitle, format = 'mp4') {
-    const ext = (format && format.toLowerCase() === 'ts') ? '.ts' : '.mp4';
-    let fileName = `${cleanTitle}${ext}`;
-    let outPath = path.join(this.downloadFolder, fileName);
-    let counter = 1;
-    while (fs.existsSync(outPath)) {
-      fileName = `${cleanTitle} (${counter})${ext}`;
-      outPath = path.join(this.downloadFolder, fileName);
-      counter++;
+  /**
+   * Queue a full season of episodes into the backlog and initialize sliding window
+   */
+  async queueSeason({
+    url,
+    fromEp = 1,
+    toEp = 12,
+    seriesTitle = '',
+    audioPreference = 'any',
+    subPreference = 'any',
+    dualAudio = false,
+    embedSubtitles = true,
+    outputFormat = 'mp4',
+    customHeaders = {}
+  }) {
+    if (!url || typeof url !== 'string') {
+      throw new Error('URL is required to queue a season.');
     }
-    return { fileName, outPath };
+
+    const cleanUrl = url.trim();
+    const epInfo = parseEpisodeFromUrl(cleanUrl);
+    if (!epInfo) {
+      throw new Error('No episode number found in URL to generate season range (e.g. ?ep=1, /episode-1, or /ep-1).');
+    }
+    const startEp = Math.max(1, parseInt(fromEp, 10) || 1);
+    const endEp = Math.max(startEp, parseInt(toEp, 10) || startEp);
+    const resolvedTitle = sanitizeFilename(stripLanguageTags(seriesTitle || extractSeriesTitleGuess(cleanUrl)));
+    const padWidth = endEp >= 100 ? 3 : 2;
+
+    const targetSeasonDir = path.join(this.downloadFolder, resolvedTitle);
+    this.ensureFolder(targetSeasonDir);
+    this.optimizeFolderView(targetSeasonDir);
+
+    const episodes = [];
+    for (let ep = startEp; ep <= endEp; ep++) {
+      const epUrl = replaceEpisodeInUrl(cleanUrl, ep);
+      const epNumStr = String(ep).padStart(padWidth, '0');
+      const epTitle = `${resolvedTitle} - Episode ${epNumStr}`;
+      episodes.push({
+        url: epUrl,
+        title: epTitle,
+        subfolder: resolvedTitle,
+        episodeNumber: ep,
+        audioPreference,
+        subPreference,
+        dualAudio: Boolean(dualAudio),
+        embedSubtitles: embedSubtitles !== false,
+        outputFormat: outputFormat || 'mp4',
+        customHeaders
+      });
+    }
+
+    this.seasonBacklog.push(...episodes);
+    logger.info(`Queued season [${resolvedTitle}] with ${episodes.length} episodes (${startEp} to ${endEp})`);
+
+    await this._refillQueueFromBacklog();
+    this._processQueue();
+
+    return {
+      success: true,
+      seriesTitle: resolvedTitle,
+      totalEpisodes: episodes.length,
+      startEp,
+      endEp
+    };
+  }
+
+  /**
+   * Execute an individual download task with Just-In-Time sniffing and Option A error skipping
+   */
+  async _executeTask(task, cancelState) {
+    task.status = 'starting';
+    task.speed = 'Starting...';
+    task.percent = 1;
+    this._broadcastProgress(task);
+
+    try {
+      const isDirectHls = task.url.toLowerCase().includes('.m3u8') || task.url.toLowerCase().includes('/m/');
+      const isDirectMedia = /\.(mpd|mp4|webm|mkv|ts|aac|mp3|ogg|flac|m4a)(\?|$)/i.test(task.url);
+
+      let targetUrl = task.url;
+      let isHls = isDirectHls;
+
+      if (!isDirectHls && !isDirectMedia) {
+        task.status = 'sniffing';
+        task.speed = 'Sniffing episode stream...';
+        this._broadcastProgress(task);
+
+        let probe = null;
+        try {
+          probe = await this.probeUrl(task.url);
+        } catch (probeErr) {
+          throw new Error(`Sniffing failed: ${probeErr.message}`);
+        }
+
+        if (cancelState.cancelled || task.status === 'cancelled') return;
+
+        if (!probe || (probe.isWebpage && !probe.autoExtracted)) {
+          throw new Error('Stream not found on episode webpage.');
+        }
+
+        // Validate audio & subtitle preferences
+        this._validateEpisodeTracks(probe, task);
+
+        if (probe && probe.url) {
+          targetUrl = probe.url;
+          isHls = Boolean(probe.isHls || targetUrl.includes('.m3u8') || targetUrl.includes('/m/'));
+          if (probe.title && (task.title === 'CopyCat_Stream' || task.title === 'Stream Video')) {
+            task.title = sanitizeFilename(probe.title);
+            const alloc = await this._allocateOutputPath(task.title, task.outputFormat, task.subfolder);
+            task.fileName = alloc.fileName;
+            task.outputPath = alloc.outPath;
+          }
+          if (!task.dubStreamUrl && probe.dubStreamUrl) task.dubStreamUrl = probe.dubStreamUrl;
+          if (!task.subStreamUrl && probe.subStreamUrl) task.subStreamUrl = probe.subStreamUrl;
+          if ((!task.audioTracks || task.audioTracks.length === 0) && Array.isArray(probe.audioTracks)) {
+            task.audioTracks = probe.audioTracks;
+          }
+          if (task.selectedSubtitles.length === 0 && Array.isArray(probe.subtitles) && probe.subtitles.length > 0) {
+            task.selectedSubtitles = probe.subtitles;
+          }
+        }
+      }
+
+      // Route target media stream URL based on requested audio track preference (e.g. English Dub vs Japanese Sub)
+      if (/eng|dub/i.test(task.audioPreference || '')) {
+        const dubUrl = task.dubStreamUrl || (Array.isArray(task.audioTracks) && task.audioTracks.find(a => /english|en|dub/i.test(a.name || '') || /en/i.test(a.lang || ''))?.streamUrl);
+        if (dubUrl) {
+          task.dubStreamUrl = dubUrl;
+          if (!task.dualAudio) {
+            targetUrl = dubUrl;
+            isHls = Boolean(targetUrl.includes('.m3u8') || targetUrl.includes('/m/'));
+          }
+        }
+      } else if (!task.dualAudio && (/jpn|japanese|sub/i.test(task.audioPreference || ''))) {
+        const subUrl = task.subStreamUrl || (Array.isArray(task.audioTracks) && task.audioTracks.find(a => /japanese|jpn|sub/i.test(a.name || '') || /ja/i.test(a.lang || ''))?.streamUrl);
+        if (subUrl) {
+          task.subStreamUrl = subUrl;
+          targetUrl = subUrl;
+          isHls = Boolean(targetUrl.includes('.m3u8') || targetUrl.includes('/m/'));
+        }
+      }
+
+      if (task.dualAudio && !task.dubStreamUrl && Array.isArray(task.audioTracks)) {
+        const dubTrack = task.audioTracks.find(a => /english|en|dub/i.test(a.name || '') || /en/i.test(a.lang || ''));
+        if (dubTrack && dubTrack.streamUrl && dubTrack.streamUrl !== task.url) {
+          task.dubStreamUrl = dubTrack.streamUrl;
+        }
+      }
+
+      task.url = targetUrl;
+      if (cancelState.cancelled || task.status === 'cancelled') return;
+
+      if (isHls) {
+        await this._downloadHlsNative(task, task.customHeaders || {}, cancelState);
+      } else {
+        await this._spawnFfmpegDownload(task, task.customHeaders || {}, cancelState);
+      }
+    } catch (err) {
+      if (cancelState.cancelled || task.status === 'cancelled') return;
+      task.status = 'error';
+      task.error = err.message || 'Download failed';
+      task.percent = 0;
+      task.speed = 'Skipped';
+      logger.warn(`Task ${task.title || task.id} skipped (Option A): ${task.error}`);
+      this._broadcastError(task);
+    } finally {
+      this.activeTaskId = null;
+      this.activeControllers.delete(task.id);
+      // Pacing delay (250ms) between sequential episodes to avoid CDN / anti-bot rate spikes
+      setTimeout(() => {
+        this._processQueue();
+      }, 250);
+    }
   }
 
   async _executeDownloadWorkflow(task, customHeaders, cancelState) {
-    const isDirectHls = task.url.toLowerCase().includes('.m3u8') || task.url.toLowerCase().includes('/m/');
-    const isDirectMedia = /\.(mpd|mp4|webm|mkv|ts|aac|mp3|ogg|flac|m4a)(\?|$)/i.test(task.url);
-
-    let targetUrl = task.url;
-    let isHls = isDirectHls;
-
-    if (!isDirectHls && !isDirectMedia) {
-      const probe = await this.probeUrl(task.url);
-      if (cancelState.cancelled) return;
-
-      if (probe && probe.isWebpage && !probe.autoExtracted) {
-        throw new Error('Could not extract a direct video stream from this webpage.');
-      }
-
-      if (probe && probe.url) {
-        targetUrl = probe.url;
-        isHls = Boolean(probe.isHls || targetUrl.includes('.m3u8') || targetUrl.includes('/m/'));
-        if (probe.title && (task.title === 'CopyCat_Stream' || task.title === 'Stream Video')) {
-          task.title = sanitizeFilename(probe.title);
-          const alloc = this._allocateOutputPath(task.title, task.outputFormat);
-          task.fileName = alloc.fileName;
-          task.outputPath = alloc.outPath;
-        }
-      }
-    }
-
-    task.url = targetUrl;
-    if (cancelState.cancelled) return;
-
-    if (isHls) {
-      await this._downloadHlsNative(task, customHeaders, cancelState);
-    } else {
-      this._spawnFfmpegDownload(task, customHeaders);
-    }
+    return this._executeTask(task, cancelState);
   }
 
   /**
@@ -823,6 +1506,7 @@ class DownloadManager {
     const manifest = await this.resolveHlsManifest(task.url, customHeaders, cancelState, {
       selectedVideoUrl: task.selectedVideoUrl,
       selectedAudioUrl: task.selectedAudioUrl,
+      audioPreference: task.audioPreference,
       dualAudio: task.dualAudio
     });
     if (cancelState.cancelled) return;
@@ -836,26 +1520,77 @@ class DownloadManager {
       throw new Error('No video segments found in HLS playlist.');
     }
 
+    const tempDir = path.join(os.tmpdir(), `copycat_dl_${task.id}`);
+    this.ensureFolder(tempDir);
+
+    // If Dub audio (or Dual-Audio) is requested and a separate Dub stream URL exists (e.g. Miruro / strm Sub + Dub manifests)
+    let dubPlaylist = null;
+    let tempDubTs = null;
+    const wantsDubStream = Boolean((task.dualAudio || /eng|dub/i.test(task.audioPreference || '')) && task.dubStreamUrl && task.dubStreamUrl !== task.url);
+    if (wantsDubStream) {
+      try {
+        const dubManifest = await this.resolveHlsManifest(task.dubStreamUrl, customHeaders, cancelState);
+        // Verify stream durations match if Dual-Audio is requested to avoid mixing different broadcast cuts (e.g. 1-hr special vs 24m TV episode)
+        if (task.dualAudio && manifest.durationSec > 0 && dubManifest.durationSec > 0 && Math.abs(manifest.durationSec - dubManifest.durationSec) > 60) {
+          logger.warn(`Dual-audio duration mismatch between Sub (${manifest.durationSec}s) and Dub (${dubManifest.durationSec}s). Edits differ; skipping secondary track mux to prevent desync.`);
+          dubPlaylist = null;
+        } else {
+          dubPlaylist = dubManifest.audioPlaylist || dubManifest.videoPlaylist;
+        }
+        if (dubPlaylist && Array.isArray(dubPlaylist.segments) && dubPlaylist.segments.length > 0) {
+          tempDubTs = path.join(tempDir, `dub.ts`);
+        }
+      } catch (err) {
+        logger.warn('Failed to resolve dub stream manifest for dub/dual-audio download:', err.message);
+      }
+    }
+
     task.totalDurationSec = manifest.durationSec || 0;
     const audioSegCount = audioPlaylists.reduce((acc, a) => acc + (a.segments?.length || 0), 0);
-    const totalSegments = vPl.segments.length + audioSegCount;
+    const dubSegCount = dubPlaylist?.segments?.length || 0;
+    const totalSegments = vPl.segments.length + audioSegCount + dubSegCount;
     let completedSegments = 0;
     let lastReportTime = 0;
     const dlStartTime = Date.now();
 
-    const tempVideoTs = path.join(this.downloadFolder, `.temp_${task.id}_v.ts`);
+    // Resolve subtitle tracks to embed
+    let targetSubtitles = [];
+    if (task.embedSubtitles) {
+      if (Array.isArray(task.selectedSubtitles) && task.selectedSubtitles.length > 0) {
+        targetSubtitles = task.selectedSubtitles;
+      } else if (Array.isArray(manifest.subtitleTracks) && manifest.subtitleTracks.length > 0) {
+        targetSubtitles = manifest.subtitleTracks;
+      }
+    }
+
+    const tempVideoTs = path.join(tempDir, `v.ts`);
     const tempAudioFiles = audioPlaylists.map((aPl, idx) => ({
       playlist: aPl,
-      path: path.join(this.downloadFolder, `.temp_${task.id}_a${idx}.ts`),
+      path: path.join(tempDir, `a${idx}.ts`),
       lang: aPl.lang || (idx === 0 ? 'jpn' : 'eng'),
       name: aPl.name || `Track ${idx + 1}`
     }));
+    const tempSubFiles = targetSubtitles.map((s, idx) => {
+      let subName = s.label || s.name || `Subtitles ${idx + 1}`;
+      if (/english/i.test(subName)) subName = 'English';
+      else if (/indonesian/i.test(subName)) subName = 'Indonesian';
+      else if (/thai/i.test(subName)) subName = 'Thai';
+      else if (/japanese/i.test(subName)) subName = 'Japanese';
+      else if (/german/i.test(subName)) subName = 'German';
+      return {
+        sub: s,
+        path: path.join(tempDir, `s${idx}.vtt`),
+        name: subName,
+        lang: normalizeIsoLang(s.lang, subName)
+      };
+    });
 
-    const cleanupTemps = () => {
-      try { if (fs.existsSync(tempVideoTs)) fs.unlinkSync(tempVideoTs); } catch {}
-      for (const af of tempAudioFiles) {
-        try { if (fs.existsSync(af.path)) fs.unlinkSync(af.path); } catch {}
-      }
+    const cleanupTemps = async () => {
+      try {
+        if (fs.existsSync(tempDir)) {
+          await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+        }
+      } catch (_) {}
     };
 
     try {
@@ -865,28 +1600,37 @@ class DownloadManager {
           aesKey = await this._fetchBuffer(playlist.keyUrl, customHeaders, 5, 5, cancelState);
         }
 
-        const fd = fs.openSync(outTsPath, 'w');
+        const fileHandle = await fs.promises.open(outTsPath, 'w');
         try {
           if (playlist.initUrl) {
             const initBuf = await this._fetchBuffer(playlist.initUrl, customHeaders, 5, 5, cancelState);
-            fs.writeSync(fd, initBuf);
-            task.downloadedBytes += initBuf.length;
+            if (initBuf && initBuf.length > 0) {
+              await fileHandle.write(initBuf);
+              task.downloadedBytes += initBuf.length;
+            }
           }
 
           const segs = playlist.segments;
           const readyBuffers = new Map();
           let nextWriteIndex = 0;
           let nextFetchIndex = 0;
-          const concurrency = 4;
+          const concurrency = Math.min(8, Math.max(4, segs.length));
+          let isFlushing = false;
 
-          const flushReady = () => {
-            while (readyBuffers.has(nextWriteIndex)) {
-              const buf = readyBuffers.get(nextWriteIndex);
-              readyBuffers.delete(nextWriteIndex);
-              if (buf && buf.length > 0) {
-                fs.writeSync(fd, buf);
+          const flushReady = async () => {
+            if (isFlushing) return;
+            isFlushing = true;
+            try {
+              while (readyBuffers.has(nextWriteIndex)) {
+                const buf = readyBuffers.get(nextWriteIndex);
+                readyBuffers.delete(nextWriteIndex);
+                if (buf && buf.length > 0) {
+                  await fileHandle.write(buf);
+                }
+                nextWriteIndex++;
               }
-              nextWriteIndex++;
+            } finally {
+              isFlushing = false;
             }
           };
 
@@ -910,7 +1654,7 @@ class DownloadManager {
               }
 
               readyBuffers.set(segIdx, buf);
-              flushReady();
+              await flushReady();
 
               completedSegments++;
               task.downloadedBytes += buf.length;
@@ -943,9 +1687,9 @@ class DownloadManager {
           };
 
           await Promise.all(Array.from({ length: Math.min(concurrency, segs.length) }, () => worker()));
-          flushReady();
+          await flushReady();
         } finally {
-          try { fs.closeSync(fd); } catch {}
+          try { await fileHandle.close(); } catch {}
         }
       };
 
@@ -953,9 +1697,30 @@ class DownloadManager {
       for (const af of tempAudioFiles) {
         await downloadTrackToTs(af.playlist, af.path);
       }
+      if (dubPlaylist && tempDubTs) {
+        task.speed = 'Downloading English Dub audio...';
+        this._broadcastProgress(task);
+        await downloadTrackToTs(dubPlaylist, tempDubTs);
+      }
+
+      const downloadedSubFiles = [];
+      if (task.embedSubtitles && tempSubFiles.length > 0) {
+        task.speed = 'Downloading subtitles...';
+        this._broadcastProgress(task);
+        for (const sf of tempSubFiles) {
+          if (cancelState.cancelled) break;
+          const ok = await this._downloadSubtitleTrack(sf.sub, sf.path, customHeaders, cancelState);
+          if (ok) {
+            try {
+              const stat = await fs.promises.stat(sf.path);
+              if (stat.size > 10) downloadedSubFiles.push(sf);
+            } catch {}
+          }
+        }
+      }
 
       if (cancelState.cancelled) {
-        cleanupTemps();
+        await cleanupTemps();
         return;
       }
 
@@ -965,35 +1730,220 @@ class DownloadManager {
       task.etaFormatted = '~1s left';
       this._broadcastProgress(task);
 
-      if (tempAudioFiles.length === 0) {
-        // Single-stream HLS (Japanese or English):
-        // tempVideoTs contains the pristine video and audio stream from the CDN.
-        // Direct move/rename to task.outputPath (.mp4) with 0% CPU overhead and 100% native clock sync!
+      if (tempDubTs && fs.existsSync(tempDubTs)) {
+        // Mux separate video and dub audio streams into true ISO MP4 container
+        const isDubPrimary = /eng|dub/i.test(task.audioPreference || '') || /dub/i.test(task.title || task.fileName);
+        const muxArgs = [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          '-fflags', '+genpts',
+          '-i', tempVideoTs,
+          '-i', tempDubTs
+        ];
+        downloadedSubFiles.forEach((sf) => {
+          muxArgs.push('-i', sf.path);
+        });
+
+        // Map video from input 0 (tempVideoTs is guaranteed video)
+        muxArgs.push('-map', '0:v:0');
+
+        if (task.dualAudio) {
+          if (isDubPrimary) {
+            muxArgs.push(
+              '-map', '1:a:0',
+              '-metadata:s:a:0', 'title=English (Dub)',
+              '-metadata:s:a:0', 'handler_name=English (Dub)',
+              '-metadata:s:a:0', 'language=eng',
+              '-map', '0:a:0',
+              '-metadata:s:a:1', 'title=Japanese (Original)',
+              '-metadata:s:a:1', 'handler_name=Japanese (Original)',
+              '-metadata:s:a:1', 'language=jpn'
+            );
+          } else {
+            muxArgs.push(
+              '-map', '0:a:0',
+              '-metadata:s:a:0', 'title=Japanese (Original)',
+              '-metadata:s:a:0', 'handler_name=Japanese (Original)',
+              '-metadata:s:a:0', 'language=jpn',
+              '-map', '1:a:0',
+              '-metadata:s:a:1', 'title=English (Dub)',
+              '-metadata:s:a:1', 'handler_name=English (Dub)',
+              '-metadata:s:a:1', 'language=eng'
+            );
+          }
+        } else {
+          // Single Dub track requested: only English audio is included
+          muxArgs.push(
+            '-map', '1:a:0',
+            '-metadata:s:a:0', 'title=English (Dub)',
+            '-metadata:s:a:0', 'handler_name=English (Dub)',
+            '-metadata:s:a:0', 'language=eng'
+          );
+        }
+
+        downloadedSubFiles.forEach((sf, idx) => {
+          const subInputIdx = 2 + idx;
+          muxArgs.push('-map', `${subInputIdx}:s:0`);
+          if (sf.name) {
+            muxArgs.push(`-metadata:s:s:${idx}`, `title=${sf.name}`);
+            muxArgs.push(`-metadata:s:s:${idx}`, `handler_name=${sf.name}`);
+          }
+          const langCode = normalizeIsoLang(sf.lang, sf.name);
+          muxArgs.push(`-metadata:s:s:${idx}`, `language=${langCode}`);
+        });
+
+        muxArgs.push('-c:v', 'copy', '-c:a', 'copy');
+        if (downloadedSubFiles.length > 0) {
+          muxArgs.push('-c:s', 'mov_text');
+        }
+        muxArgs.push(
+          '-movflags', '+faststart',
+          task.outputPath
+        );
+
+        await new Promise((resolve, reject) => {
+          const child = spawn(ffmpegPath, muxArgs, {
+            windowsHide: true,
+            stdio: ['ignore', 'ignore', 'pipe']
+          });
+          this.activeProcesses.set(task.id, child);
+          let errText = '';
+          child.stderr.on('data', (c) => { errText += c.toString(); });
+          child.on('error', reject);
+          child.on('close', async (code) => {
+            this.activeProcesses.delete(task.id);
+            if (code === 0 && fs.existsSync(task.outputPath)) {
+              resolve();
+            } else {
+              reject(new Error(errText.trim() || `FFmpeg Dual-Audio mux exited with code ${code}`));
+            }
+          });
+        });
+      } else if (tempAudioFiles.length === 0) {
+        // Single-stream HLS: Remux MPEG-TS into true ISO MP4 container
+        // Lossless bitstream copy with faststart for instant native hardware-accelerated playback
+        const remuxArgs = [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          '-fflags', '+genpts',
+          '-i', tempVideoTs
+        ];
+        downloadedSubFiles.forEach((sf) => {
+          remuxArgs.push('-i', sf.path);
+        });
+
+        remuxArgs.push('-map', '0:v?', '-map', '0:a?');
+        const animeMatch = animeSkipResolver.parseAnimeTitleAndEpisode(task.title || task.fileName) || /(?:owarimonogatari|monogatari)/i.test(task.title || task.fileName);
+        const isDub = (/eng|dub/i.test(task.audioPreference || '')) || /dub/i.test(task.title || task.fileName);
+        if (animeMatch) {
+          const audioTitle = isDub ? 'English (Dub)' : 'Japanese (Original)';
+          const audioLang = isDub ? 'eng' : 'jpn';
+          remuxArgs.push(
+            '-metadata:s:a:0', `title=${audioTitle}`,
+            '-metadata:s:a:0', `handler_name=${audioTitle}`,
+            '-metadata:s:a:0', `language=${audioLang}`
+          );
+        }
+        downloadedSubFiles.forEach((sf, idx) => {
+          const inputIdx = 1 + idx;
+          remuxArgs.push('-map', `${inputIdx}:s:0`);
+          if (sf.name) {
+            remuxArgs.push(`-metadata:s:s:${idx}`, `title=${sf.name}`);
+            remuxArgs.push(`-metadata:s:s:${idx}`, `handler_name=${sf.name}`);
+          }
+          const langCode = normalizeIsoLang(sf.lang, sf.name);
+          remuxArgs.push(`-metadata:s:s:${idx}`, `language=${langCode}`);
+        });
+
+        remuxArgs.push('-c:v', 'copy', '-c:a', 'copy');
+        if (downloadedSubFiles.length > 0) {
+          remuxArgs.push('-c:s', 'mov_text');
+        }
+        remuxArgs.push(
+          '-movflags', '+faststart',
+          task.outputPath
+        );
+
+        let remuxSuccess = false;
         try {
-          if (fs.existsSync(task.outputPath)) fs.unlinkSync(task.outputPath);
-          fs.renameSync(tempVideoTs, task.outputPath);
-        } catch {
-          fs.copyFileSync(tempVideoTs, task.outputPath);
-          try { fs.unlinkSync(tempVideoTs); } catch {}
+          await new Promise((resolve, reject) => {
+            const child = spawn(ffmpegPath, remuxArgs, {
+              windowsHide: true,
+              stdio: ['ignore', 'ignore', 'pipe']
+            });
+            this.activeProcesses.set(task.id, child);
+            let errText = '';
+            child.stderr.on('data', (c) => { errText += c.toString(); });
+            child.on('error', reject);
+            child.on('close', async (code) => {
+              this.activeProcesses.delete(task.id);
+              if (code === 0 && fs.existsSync(task.outputPath)) {
+                remuxSuccess = true;
+                resolve();
+              } else {
+                reject(new Error(errText.trim() || `FFmpeg MP4 remux exited with code ${code}`));
+              }
+            });
+          });
+        } catch (remuxErr) {
+          logger.warn('Direct MP4 remux failed, falling back to raw container move:', remuxErr.message);
+          try {
+            if (fs.existsSync(task.outputPath)) await fs.promises.unlink(task.outputPath);
+            await fs.promises.rename(tempVideoTs, task.outputPath);
+          } catch {
+            await fs.promises.copyFile(tempVideoTs, task.outputPath);
+            try { await fs.promises.unlink(tempVideoTs); } catch {}
+          }
         }
       } else {
         // Multi-track / Dual-Audio HLS:
-        // Mux video & audio cleanly using MPEG-TS container directly into task.outputPath (.mp4)
-        // to preserve microsecond-accurate PTS timestamp synchronization without FFmpeg MP4 desync!
-        const muxArgs = ['-y', '-hide_banner', '-loglevel', 'error', '-i', tempVideoTs];
+        // Mux video, audio & subtitle tracks into true ISO MP4 container with stream titles
+        const muxArgs = [
+          '-y', '-hide_banner', '-loglevel', 'error',
+          '-fflags', '+genpts',
+          '-i', tempVideoTs
+        ];
+        const validAudioFiles = [];
         for (const af of tempAudioFiles) {
           if (fs.existsSync(af.path)) {
             muxArgs.push('-i', af.path);
+            validAudioFiles.push(af);
           }
         }
+        downloadedSubFiles.forEach((sf) => {
+          muxArgs.push('-i', sf.path);
+        });
+
         muxArgs.push('-map', '0:v:0');
-        tempAudioFiles.forEach((af, idx) => {
+        validAudioFiles.forEach((af, idx) => {
           muxArgs.push('-map', `${idx + 1}:a:0`);
           if (af.name) {
             muxArgs.push(`-metadata:s:a:${idx}`, `title=${af.name}`);
+            muxArgs.push(`-metadata:s:a:${idx}`, `handler_name=${af.name}`);
+          }
+          const langCode = /ja/i.test(af.lang || af.name) ? 'jpn' : (/en/i.test(af.lang || af.name) ? 'eng' : (af.lang || ''));
+          if (langCode) {
+            muxArgs.push(`-metadata:s:a:${idx}`, `language=${langCode}`);
           }
         });
-        muxArgs.push('-f', 'mpegts', '-c', 'copy', task.outputPath);
+
+        downloadedSubFiles.forEach((sf, idx) => {
+          const subInputIdx = 1 + validAudioFiles.length + idx;
+          muxArgs.push('-map', `${subInputIdx}:s:0`);
+          if (sf.name) {
+            muxArgs.push(`-metadata:s:s:${idx}`, `title=${sf.name}`);
+            muxArgs.push(`-metadata:s:s:${idx}`, `handler_name=${sf.name}`);
+          }
+          const langCode = normalizeIsoLang(sf.lang, sf.name);
+          muxArgs.push(`-metadata:s:s:${idx}`, `language=${langCode}`);
+        });
+
+        muxArgs.push('-c:v', 'copy', '-c:a', 'copy');
+        if (downloadedSubFiles.length > 0) {
+          muxArgs.push('-c:s', 'mov_text');
+        }
+        muxArgs.push(
+          '-movflags', '+faststart',
+          task.outputPath
+        );
 
         await new Promise((resolve, reject) => {
           const child = spawn(ffmpegPath, muxArgs, {
@@ -1005,21 +1955,29 @@ class DownloadManager {
           let errText = '';
           child.stderr.on('data', (c) => { errText += c.toString(); });
           child.on('error', reject);
-          child.on('close', (code) => {
+          child.on('close', async (code) => {
             this.activeProcesses.delete(task.id);
             if (code === 0 && fs.existsSync(task.outputPath)) {
               resolve();
             } else {
-              reject(new Error(errText.trim() || `FFmpeg TS mux exited with code ${code}`));
+              reject(new Error(errText.trim() || `FFmpeg MP4 mux exited with code ${code}`));
             }
           });
         });
       }
 
-      cleanupTemps();
-      this.activeControllers.delete(task.id);
+      // Automatic Anime Chapter Tagging via AniList & AniSkip
+      try {
+        if (fs.existsSync(task.outputPath)) {
+          task.speed = 'Tagging anime chapters...';
+          this._broadcastProgress(task);
+          await animeSkipResolver.autoTagAnimeFile(task.outputPath, task.title || task.fileName);
+        }
+      } catch (tagErr) {
+        logger.debug('Anime chapter tagging skipped or failed:', tagErr.message);
+      }
 
-      const stat = fs.statSync(task.outputPath);
+      const stat = await fs.promises.stat(task.outputPath);
       task.status = 'completed';
       task.percent = 100;
       task.speed = 'Completed';
@@ -1028,13 +1986,14 @@ class DownloadManager {
       logger.info(`HLS download & packaging completed: ${task.outputPath} (${task.sizeFormatted})`);
       this._broadcastComplete(task);
     } catch (err) {
-      cleanupTemps();
-      this.activeControllers.delete(task.id);
       if (cancelState.cancelled || task.status === 'cancelled') {
-        try { if (fs.existsSync(task.outputPath)) fs.unlinkSync(task.outputPath); } catch {}
+        try { if (fs.existsSync(task.outputPath)) await fs.promises.unlink(task.outputPath); } catch {}
         return;
       }
       throw err;
+    } finally {
+      await cleanupTemps();
+      this.activeControllers.delete(task.id);
     }
   }
 
@@ -1042,145 +2001,168 @@ class DownloadManager {
    * Execute direct FFmpeg download for progressive/non-HLS streams
    */
   _spawnFfmpegDownload(task, customHeaders = {}) {
-    const ffmpegPath = mediaResolver.FFMPEG_PATH;
-    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
-      task.status = 'error';
-      task.error = 'Bundled FFmpeg executable could not be resolved.';
-      this._broadcastError(task);
-      return;
-    }
+    return new Promise((resolve, reject) => {
+      const ffmpegPath = mediaResolver.FFMPEG_PATH;
+      if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+        task.status = 'error';
+        task.error = 'Bundled FFmpeg executable could not be resolved.';
+        this._broadcastError(task);
+        return reject(new Error(task.error));
+      }
 
-    const headersObj = getStreamHeaders(task.url, customHeaders);
-    const headersArg = Object.entries(headersObj).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n';
+      const headersObj = getStreamHeaders(task.url, customHeaders);
+      const headersArg = Object.entries(headersObj).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n';
 
-    const args = [
-      '-y',
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-extension_picky', '0',
-      '-allowed_segment_extensions', 'ALL',
-      '-headers', headersArg,
-      '-i', task.url,
-      '-c', 'copy'
-    ];
-    if (task.outputPath.endsWith('.mp4')) {
-      args.push('-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart');
-    }
-    args.push(task.outputPath);
+      const args = [
+        '-y',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-extension_picky', '0',
+        '-allowed_segment_extensions', 'ALL',
+        '-headers', headersArg,
+        '-i', task.url,
+        '-c', 'copy'
+      ];
+      if (task.outputPath.endsWith('.mp4')) {
+        args.push('-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart');
+      }
+      const animeMatch = animeSkipResolver.parseAnimeTitleAndEpisode(task.title || task.fileName) || /(?:owarimonogatari|monogatari)/i.test(task.title || task.fileName);
+      const isDub = (/eng|dub/i.test(task.audioPreference || '')) || /dub/i.test(task.title || task.fileName);
+      if (animeMatch) {
+        const audioTitle = isDub ? 'English (Dub)' : 'Japanese (Original)';
+        const audioLang = isDub ? 'eng' : 'jpn';
+        args.push(
+          '-metadata:s:a:0', `title=${audioTitle}`,
+          '-metadata:s:a:0', `handler_name=${audioTitle}`,
+          '-metadata:s:a:0', `language=${audioLang}`
+        );
+      }
+      args.push(task.outputPath);
 
-    logger.info(`Starting FFmpeg download [${task.id}]: ${task.title} -> ${task.outputPath}`);
+      logger.info(`Starting FFmpeg download [${task.id}]: ${task.title} -> ${task.outputPath}`);
 
-    try {
-      const child = spawn(ffmpegPath, args, {
-        windowsHide: true,
-        stdio: ['ignore', 'ignore', 'pipe']
-      });
+      try {
+        const child = spawn(ffmpegPath, args, {
+          windowsHide: true,
+          stdio: ['ignore', 'ignore', 'pipe']
+        });
 
-      this.activeProcesses.set(task.id, child);
-      task.status = 'downloading';
-      this._broadcastProgress(task);
+        this.activeProcesses.set(task.id, child);
+        task.status = 'downloading';
+        this._broadcastProgress(task);
 
-      let totalDuration = 0;
-      let lastReport = 0;
-      let lastStderr = '';
+        let totalDuration = 0;
+        let lastReport = 0;
+        let lastStderr = '';
 
-      child.stderr.on('data', (chunk) => {
-        const text = chunk.toString();
-        lastStderr = (lastStderr + text).slice(-3000);
+        child.stderr.on('data', (chunk) => {
+          const text = chunk.toString();
+          lastStderr = (lastStderr + text).slice(-3000);
 
-        if (!totalDuration) {
-          const durMatch = text.match(/Duration:\s*(\d\d:\d\d:\d\d\.\d\d)/);
-          if (durMatch && durMatch[1]) {
-            totalDuration = parseTimestamp(durMatch[1]);
-            task.totalDurationSec = totalDuration;
-          }
-        }
-
-        const timeMatch = text.match(/time=\s*(\d\d:\d\d:\d\d\.\d\d)/);
-        const sizeMatch = text.match(/size=\s*(\d+)kB/i);
-        const speedMatch = text.match(/speed=\s*([\d\.]+)x/i);
-
-        if (timeMatch || sizeMatch) {
-          const currentSec = timeMatch ? parseTimestamp(timeMatch[1]) : 0;
-          const currentKb = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
-          const currentSpeed = speedMatch ? `${speedMatch[1]}x` : '';
-
-          if (totalDuration > 0 && currentSec > 0) {
-            task.percent = Math.min(99, Math.round((currentSec / totalDuration) * 100));
-          } else if (task.percent < 90) {
-            task.percent = Math.min(95, task.percent + 1);
+          if (!totalDuration) {
+            const durMatch = text.match(/Duration:\s*(\d\d:\d\d:\d\d\.\d\d)/);
+            if (durMatch && durMatch[1]) {
+              totalDuration = parseTimestamp(durMatch[1]);
+              task.totalDurationSec = totalDuration;
+            }
           }
 
-          task.downloadedBytes = currentKb * 1024;
-          task.sizeFormatted = formatBytes(task.downloadedBytes);
-          task.timeFormatted = formatDuration(currentSec);
-          task.speed = currentSpeed || 'Downloading';
+          const timeMatch = text.match(/time=\s*(\d\d:\d\d:\d\d\.\d\d)/);
+          const sizeMatch = text.match(/size=\s*(\d+)kB/i);
+          const speedMatch = text.match(/speed=\s*([\d\.]+)x/i);
 
-          const now = Date.now();
-          if (now - lastReport > 250) {
-            lastReport = now;
-            this._broadcastProgress(task);
+          if (timeMatch || sizeMatch) {
+            const currentSec = timeMatch ? parseTimestamp(timeMatch[1]) : 0;
+            const currentKb = sizeMatch ? parseInt(sizeMatch[1], 10) : 0;
+            const currentSpeed = speedMatch ? `${speedMatch[1]}x` : '';
+
+            if (totalDuration > 0 && currentSec > 0) {
+              task.percent = Math.min(99, Math.round((currentSec / totalDuration) * 100));
+            } else if (task.percent < 90) {
+              task.percent = Math.min(95, task.percent + 1);
+            }
+
+            task.downloadedBytes = currentKb * 1024;
+            task.sizeFormatted = formatBytes(task.downloadedBytes);
+            task.timeFormatted = formatDuration(currentSec);
+            task.speed = currentSpeed || 'Downloading';
+
+            const now = Date.now();
+            if (now - lastReport > 250) {
+              lastReport = now;
+              this._broadcastProgress(task);
+            }
           }
-        }
-      });
+        });
 
-      child.on('error', (err) => {
-        logger.error(`Download process error [${task.id}]:`, err.message);
+        child.on('error', (err) => {
+          logger.error(`Download process error [${task.id}]:`, err.message);
+          task.status = 'error';
+          task.error = err.message;
+          this.activeProcesses.delete(task.id);
+          this.activeControllers.delete(task.id);
+          this._broadcastError(task);
+          reject(err);
+        });
+
+        child.on('close', async (code) => {
+          this.activeProcesses.delete(task.id);
+          this.activeControllers.delete(task.id);
+
+          if (task.status === 'cancelled') {
+            try {
+              if (fs.existsSync(task.outputPath)) await fs.promises.unlink(task.outputPath);
+            } catch {}
+            return resolve();
+          }
+
+          if (code === 0 && fs.existsSync(task.outputPath)) {
+            // Automatic Anime Chapter Tagging via AniList & AniSkip
+            try {
+              await animeSkipResolver.autoTagAnimeFile(task.outputPath, task.title || task.fileName);
+            } catch (tagErr) {
+              logger.debug('Anime chapter tagging skipped or failed:', tagErr.message);
+            }
+            const stat = await fs.promises.stat(task.outputPath);
+            task.status = 'completed';
+            task.percent = 100;
+            task.sizeFormatted = formatBytes(stat.size);
+            task.completedAt = Date.now();
+            logger.info(`Download completed successfully: ${task.outputPath} (${task.sizeFormatted})`);
+            this._broadcastComplete(task);
+            resolve();
+          } else {
+            let errorDetail = '';
+            const lines = lastStderr.split('\n').map((l) => l.trim()).filter(Boolean);
+            for (let i = lines.length - 1; i >= 0; i--) {
+              if (/error|invalid|forbidden|not found|failed|unsupported|denied|corrupt/i.test(lines[i])) {
+                errorDetail = lines[i];
+                break;
+              }
+            }
+            task.status = 'error';
+            task.error = errorDetail || `FFmpeg download exited with code ${code}`;
+            logger.error(`Download failed [${task.id}]: ${task.error}`);
+            this._broadcastError(task);
+            reject(new Error(task.error));
+          }
+        });
+      } catch (err) {
         task.status = 'error';
         task.error = err.message;
         this.activeProcesses.delete(task.id);
         this.activeControllers.delete(task.id);
         this._broadcastError(task);
-      });
-
-      child.on('close', (code) => {
-        this.activeProcesses.delete(task.id);
-        this.activeControllers.delete(task.id);
-
-        if (task.status === 'cancelled') {
-          try {
-            if (fs.existsSync(task.outputPath)) fs.unlinkSync(task.outputPath);
-          } catch {}
-          return;
-        }
-
-        if (code === 0 && fs.existsSync(task.outputPath)) {
-          const stat = fs.statSync(task.outputPath);
-          task.status = 'completed';
-          task.percent = 100;
-          task.sizeFormatted = formatBytes(stat.size);
-          task.completedAt = Date.now();
-          logger.info(`Download completed successfully: ${task.outputPath} (${task.sizeFormatted})`);
-          this._broadcastComplete(task);
-        } else {
-          let errorDetail = '';
-          const lines = lastStderr.split('\n').map((l) => l.trim()).filter(Boolean);
-          for (let i = lines.length - 1; i >= 0; i--) {
-            if (/error|invalid|forbidden|not found|failed|unsupported|denied|corrupt/i.test(lines[i])) {
-              errorDetail = lines[i];
-              break;
-            }
-          }
-          task.status = 'error';
-          task.error = errorDetail || `FFmpeg download exited with code ${code}`;
-          logger.error(`Download failed [${task.id}]: ${task.error}`);
-          this._broadcastError(task);
-        }
-      });
-    } catch (err) {
-      task.status = 'error';
-      task.error = err.message;
-      this.activeProcesses.delete(task.id);
-      this.activeControllers.delete(task.id);
-      this._broadcastError(task);
-    }
+        reject(err);
+      }
+    });
   }
 
   /**
    * Cancel an active or queued download
    */
-  cancelDownload(id) {
+  cancelDownload(id, shouldAdvanceQueue = true) {
     const task = this.queue.find((t) => t.id === id);
     if (!task) return false;
 
@@ -1197,7 +2179,10 @@ class DownloadManager {
     if (proc) {
       try {
         if (process.platform === 'win32' && proc.pid) {
-          spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+          try { proc.kill('SIGKILL'); } catch {}
+          const killer = spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true });
+          killer.on('error', () => {});
+          killer.unref();
         } else {
           proc.kill('SIGKILL');
         }
@@ -1209,13 +2194,78 @@ class DownloadManager {
 
     try {
       if (fs.existsSync(task.outputPath)) {
-        fs.unlinkSync(task.outputPath);
+        fs.promises.unlink(task.outputPath).catch(() => {});
       }
     } catch {}
 
+    if (this.activeTaskId === id) {
+      this.activeTaskId = null;
+    }
+
     this._broadcastProgress(task);
     this._syncTaskbarProgress();
+
+    // Advance queue to next item only when requested
+    if (shouldAdvanceQueue) {
+      this._processQueue();
+    }
     return true;
+  }
+
+  /**
+   * Emergency stop: halt all active and queued downloads and clear season backlog atomically
+   */
+  haltAllDownloads() {
+    this.seasonBacklog = [];
+    let haltedCount = 0;
+
+    // 1. Immediately cancel all queued and pending tasks first so no task can be picked up
+    for (const task of this.queue) {
+      if (task.status === 'queued' || task.status === 'starting' || task.status === 'sniffing') {
+        task.status = 'cancelled';
+        task.speed = 'Halted';
+        this._broadcastProgress(task);
+        haltedCount++;
+      }
+    }
+
+    // 2. Terminate the active task without advancing the queue
+    const currentActiveId = this.activeTaskId;
+    if (currentActiveId) {
+      this.cancelDownload(currentActiveId, false);
+      this.activeTaskId = null;
+      haltedCount++;
+    }
+
+    this._syncTaskbarProgress();
+    logger.info(`Halt all downloads completed: ${haltedCount} tasks halted`);
+    return { success: true, haltedCount };
+  }
+
+  /**
+   * Retry an individual failed or cancelled download task
+   */
+  retryDownload(id) {
+    const task = this.queue.find((t) => t.id === id);
+    if (!task) return false;
+    if (task.status !== 'error' && task.status !== 'cancelled') return false;
+
+    task.status = 'queued';
+    task.percent = 0;
+    task.speed = 'Queued for retry';
+    task.error = null;
+    task.etaFormatted = '';
+    task.segmentsText = '';
+    this._broadcastProgress(task);
+    this._processQueue();
+    return true;
+  }
+
+  /**
+   * Increment episode number in URL helper
+   */
+  incrementEpisodeUrl(url, step = 1) {
+    return incrementEpisodeUrl(url, step);
   }
 
   getQueue() {
@@ -1249,7 +2299,8 @@ class DownloadManager {
         etaFormatted: task.etaFormatted || '',
         segmentsText: task.segmentsText || '',
         sizeFormatted: task.sizeFormatted,
-        timeFormatted: task.timeFormatted
+        timeFormatted: task.timeFormatted,
+        error: task.error || null
       });
       this._syncTaskbarProgress();
     }
@@ -1291,5 +2342,13 @@ function createDownloadManager(deps) {
 
 module.exports = {
   DownloadManager,
-  createDownloadManager
+  createDownloadManager,
+  formatBytes,
+  sanitizeFilename,
+  stripLanguageTags,
+  formatDoubleDigitEpisode,
+  parseEpisodeFromUrl,
+  incrementEpisodeUrl,
+  replaceEpisodeInUrl,
+  extractSeriesTitleGuess
 };
