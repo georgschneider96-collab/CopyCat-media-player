@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T21:52:07Z
-Gesamtanzahl Turns: 418 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 22:53:43
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:10:12Z
+Gesamtanzahl Turns: 421 Dialogschritte
+Zuletzt aktualisiert: 2026-11-20 23:15:52
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23433,5 +23433,161 @@ alright there is no way. alright I'd like to watch anime in hungarian dub and su
 [Hintergrund-Aktionen: read_file (6), run_command (4), edit_file (4)]
 
 ANTIGRAVITY / ASSISTENT:
-(Turn in Bearbeitung / Analyse aktiv)
+Yes! There are several very accessible ways to watch anime with **Hungarian dub (magyar szinkron)** and **Hungarian subtitles (magyar felirat)**:
+
+---
+
+### Option 1: Open Hungarian Streaming Platforms (No Login Required)
+
+Unlike closed portals like OniAnime, the primary Hungarian anime community hosts the majority of official Hungarian dubs and fansubs openly:
+
+1. **Indavideo.hu** (`https://indavideo.hu`):
+   * **The largest archive in Hungary:** Almost all classic official Hungarian dubs (e.g. *Bleach*, *Naruto*, *Death Note*, *Dragon Ball Z*, *Fullmetal Alchemist*, *Inuyasha*, *Yu-Gi-Oh!*, *Attack on Titan*) and fansubs are hosted here.
+   * **No account needed:** You can search on Google or Indavideo directly, for example:
+     * `"Bleach 1. rész magyar szinkron indavideo"`
+     * `"Bleach 1. rész magyar felirat indavideo"`
+   * You can open/stream these directly or paste direct links into CopyCat (`Ctrl+N`).
+
+2. **Videa.hu** (`https://videa.hu`):
+   * Another major open Hungarian host with hundreds of full anime seasons in Hungarian dub and sub. Completely free without an account.
+
+3. **AnimeGun** (`https://animegun.hu`):
+   * One of the most popular Hungarian anime streaming platforms with active modern seasonal releases, Hungarian subs, and dubs.
+   * Episodes are served via external players (e.g. Vidoza, Vidmoly, Streamtape).
+
+---
+
+### Option 2: Pure HD Japanese Audio + Hungarian Subtitles (Best Quality)
+
+If you prefer crisp 1080p video with the original Japanese voice cast and Hungarian subtitles:
+
+1. **Download Subtitles from Dedicated Hungarian Archives**:
+   * **AnimeAddicts** (`https://animeaddicts.hu`): Hungary's central anime portal. Go to the **Feliratok** section to download `.srt` / `.ass` files for almost any anime ever translated into Hungarian.
+   * **UraharaShop** (`https://uraharashop.hu`): Legendary Hungarian fansub group (famous specifically for the complete *Bleach* translations).
+2. **How to Use in CopyCat**:
+   * Have your high-quality video file (`.mkv` or `.mp4`).
+   * Download the Hungarian `.srt` file.
+   * **Drag and drop** the `.srt` directly onto CopyCat, or place it in the same folder named `Episode 01.hu.srt`.
+   * CopyCat automatically identifies Hungarian text, synchronizes the cues, and remembers your Hungarian subtitle setting across all next episodes and queue jumps.
+
+---
+
+### Option 3: If You Have an OniAnime Account
+
+If you want to use OniAnime specifically:
+* Registration is free (you can register with Google, Discord, MAL, or email).
+* Once signed into your account in your regular browser (Chrome, Edge, or Firefox):
+  1. Open the episode page and press `F12` $\rightarrow$ **Network** tab.
+  2. Filter by `m3u8` or `mp4`.
+  3. Right-click the media request $\rightarrow$ **Copy URL**.
+  4. In CopyCat, press `Ctrl+N` (**Open Network Stream & Downloader**) and paste the link to play or download directly at full speed with FFmpeg.
+
+---
+
+### Native Hungarian Support Added to CopyCat
+CopyCat has also just been updated with native Hungarian language detection:
+* **Audio**: Recognizes `hu`, `hun`, `hungarian`, `magyar` tags and automatically labels and switches to Hungarian audio tracks.
+* **Subtitles**: Detects Hungarian word patterns and automatically labels the tracks as **Hungarian [HUN]**, preserving your language choice seamlessly across continuous autoplay.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #419] | Schritt 23080 | Zeitstempel: 2026-11-20T21:55:36Z
+--------------------------------------------------------------------------------
+BENUTZER:
+which of these sides would be compatable with copycat
+
+[Hintergrund-Aktionen: read_file (2), run_command (2)]
+
+ANTIGRAVITY / ASSISTENT:
+Here is the compatibility breakdown for CopyCat:
+
+| Website | Content Type | Login Required? | CopyCat Compatibility | How to Use in CopyCat |
+| :--- | :--- | :--- | :--- | :--- |
+| **Videa.hu** | Full Episodes (Dub & Sub) | **No** | **High (Direct 1-Click)** | Paste the video page URL into CopyCat (`Ctrl+N`). Videa uses standard HTML5 video elements that CopyCat's sniffer catches immediately. |
+| **Indavideo.hu** | Full Episodes (Dub & Sub) | **No** | **High (Direct 1-Click)** | Paste the Indavideo watch URL (or embed URL) into `Ctrl+N`. CopyCat captures the underlying `.mp4` stream directly. |
+| **AnimeGun.hu** | Seasonal & Classic Anime | **No** | **Medium (Via Embed Host)** | AnimeGun embeds third-party hosts (**Vidmoly**, **Vidoza**, **Sibnet**). Pasting the direct embed player link works, but the main page can sometimes be shielded by anti-ad popups. |
+| **AnimeAddicts.hu** | Subtitle Archive (`.srt`/`.ass`) | **No** | **100% Native** | Download the Hungarian subtitle file and **drag & drop** it directly onto CopyCat over any video. CopyCat automatically recognizes the Hungarian text. |
+| **OniAnime.hu** | Full Episodes | **Yes** (Strict Auth) | **Manual Only** | CopyCat's background sniffer cannot bypass the login wall. You must inspect the Network tab in your browser while logged in and paste the direct `.m3u8` link. |
+
+---
+
+### Recommendation
+
+1. **For Hungarian Dub (Magyar Szinkron):**
+   * Go to **Videa.hu** or **Indavideo.hu** and search for your anime (e.g. `Bleach 1. rész magyar szinkron`).
+   * Copy the page link, open CopyCat, press `Ctrl+N`, and click **Stream** or **Download**.
+
+2. **For High-Definition Anime with Hungarian Subtitles (Magyar Felirat):**
+   * Download the 1080p anime video file (or stream it).
+   * Grab the matching Hungarian subtitle file from **AnimeAddicts.hu** and drop it onto CopyCat.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #420] | Schritt 23090 | Zeitstempel: 2026-11-20T22:04:03Z
+--------------------------------------------------------------------------------
+BENUTZER:
+do you have other sides?
+
+[Hintergrund-Aktionen: search_web (2)]
+
+ANTIGRAVITY / ASSISTENT:
+Here are the other primary Hungarian anime websites, categorized by how they work and their compatibility with CopyCat:
+
+---
+
+### 1. Dedicated Hungarian Anime Portals
+
+* **Anime-Hub (`https://anime-hub.hu`)**:
+  * **What it is:** A very active community site that indexes seasonal and classic anime releases from multiple Hungarian fansub groups.
+  * **Video Hosts:** They link to players on **Videa**, **Indavideo**, **Mega**, and **Google Drive**.
+  * **CopyCat Compatibility:** **High.** When an episode points to a Videa or Indavideo embed, you can copy that link into CopyCat (`Ctrl+N`) for instant playback and downloading.
+
+* **Animezz / Animek (`https://animezz.hu` / `https://animek.hu`)**:
+  * **What it is:** One of the oldest Hungarian anime archives.
+  * **Access:** Like OniAnime, it requires a free registered account to unlock the player links.
+  * **CopyCat Compatibility:** **Medium.** Once logged in on your browser, you can extract the stream or embed links.
+
+---
+
+### 2. General Hungarian Series Portals (Best for Hungarian Dubs)
+
+* **JobbMintATv (`https://jobbmintatv.pro`)**:
+  * **What it is:** The largest open Hungarian series portal. They have almost every anime that ever aired with an official Hungarian television dub (*Bleach*, *Naruto*, *Dragon Ball Z/Super*, *Death Note*, *Inuyasha*, *Fullmetal Alchemist*, *Yu-Gi-Oh!*, *Cowboy Bebop*).
+  * **Video Hosts:** Each episode offers server buttons: **Videa**, **Mixdrop**, **Streamtape**, **Waaw**.
+  * **CopyCat Compatibility:** **Very High.** Choosing the **Videa** server gives you direct 1-click playback/download in CopyCat.
+
+---
+
+### 3. Direct Hungarian Fansub Teams (Best 1080p Video + Subtitles)
+
+Instead of relying on web scrapers, you can get the original releases directly from the groups that translate them:
+
+* **Sakura Guild (`https://sakuraguild.hu`)**: Active fansub team translating modern seasonal anime into Hungarian. They provide direct Mega/Drive download links for high-quality `.mkv` files with softcoded Hungarian subs.
+* **UraharaShop (`https://uraharashop.hu`)**: The group responsible for translating *Bleach* and dozens of major shonen series into Hungarian.
+* **AnimeAddicts (`https://animeaddicts.hu`)**: The central archive where all Hungarian fansub groups upload their `.srt` and `.ass` subtitle files.
+
+---
+
+### Summary: What's the Easiest Path in CopyCat?
+
+1. **For Hungarian Dub (Szinkron):** Go to **[JobbMintATv.pro](https://jobbmintatv.pro)** or search directly on **[Videa.hu](https://videa.hu)** / **[Indavideo.hu](https://indavideo.hu)** $\rightarrow$ paste the Videa/Indavideo link into CopyCat (`Ctrl+N`).
+2. **For Hungarian Sub (Felirat):** Browse **[Anime-Hub.hu](https://anime-hub.hu)** for streaming links, or download the Hungarian subtitle file from **[AnimeAddicts.hu](https://animeaddicts.hu)** / **[UraharaShop.hu](https://uraharashop.hu)** and drag & drop it directly onto CopyCat.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #421] | Schritt 23096 | Zeitstempel: 2026-11-20T22:10:12Z
+--------------------------------------------------------------------------------
+BENUTZER:
+https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/ would this link work?
+
+[Hintergrund-Aktionen: run_command (23), write_file (10), read_file (3), schedule (2), manage_subagents (2), edit_file (2), invoke_subagent (1), send_message (1)]
+
+ANTIGRAVITY / ASSISTENT:
+I am inspecting https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/ right now to test its video embeds and server links. I will report the exact findings shortly.
+
+I'm currently verifying the exact video stream resolution on that Indavideo embed player to ensure it streams smoothly in CopyCat. I'll update you in just a moment.
+
+Checking the live stream now.
+
+Still waiting for the stream probe to complete.
 

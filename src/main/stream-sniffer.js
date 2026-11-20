@@ -348,7 +348,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           // 2. Check for media streams (.m3u8, .mpd, .mp4, .webm)
           const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
           const isDash = lower.includes('.mpd');
-          const isDirectVideo = /\.(mp4|webm)(\?|$)/i.test(u);
+          const isDirectVideo = /\.(mp4|webm)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm');
 
           if (isHls || isDash || isDirectVideo) {
             if (pageIsMiruro || isStrmCdnUrl(u)) {
@@ -460,18 +460,28 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
 
       snifferWin.webContents.setAudioMuted(true);
 
-      snifferWin.webContents.on('did-finish-load', () => {
-        setTimeout(() => {
-          if (finished || !snifferWin || snifferWin.isDestroyed() || capturedStreams.length > 0) return;
-          snifferWin.webContents.executeJavaScript(`
+      const triggerPlayInAllFrames = () => {
+        if (finished || !snifferWin || snifferWin.isDestroyed() || capturedStreams.length > 0) return;
+        const frames = [
+          snifferWin.webContents.mainFrame,
+          ...(snifferWin.webContents.mainFrame?.frames || [])
+        ];
+        for (const frame of frames) {
+          if (!frame || frame.isDestroyed()) continue;
+          frame.executeJavaScript(`
             try {
               const v = document.querySelector('video');
               if (v) { v.muted = true; v.play().catch(() => {}); }
-              const playBtn = document.querySelector('[aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid');
+              const playBtn = document.querySelector('#big_play, .bigplay, .play_button, [aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid');
               if (playBtn) playBtn.click();
             } catch {}
           `).catch(() => {});
-        }, 700);
+        }
+      };
+
+      snifferWin.webContents.on('did-finish-load', () => {
+        setTimeout(triggerPlayInAllFrames, 600);
+        setTimeout(triggerPlayInAllFrames, 1800);
       });
 
       snifferWin.loadURL(normalizedUrl, {
