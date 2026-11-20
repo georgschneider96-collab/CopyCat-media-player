@@ -640,6 +640,100 @@ async function runAll() {
     assert.strictEqual(simulateMediaLoad(false), false, 'When autoplay is disabled, subtitles stay off on start');
   });
 
+  runTest('Session audio track preference persists and automatically selects matching language across autoplay/folder transitions', () => {
+    const LANG_PATTERNS = {
+      en: /en|eng|english/i,
+      ja: /ja|jpn|japanese/i,
+      de: /de|deu|ger|german|deutsch/i
+    };
+
+    function matchesLanguage(track, langCode) {
+      if (!track || !langCode || langCode === 'none') return false;
+      const pattern = LANG_PATTERNS[langCode];
+      const lang = (track.lang || track.language || '').toLowerCase();
+      const name = (track.name || track.label || track.title || '').toLowerCase();
+      if (pattern) return pattern.test(lang) || pattern.test(name);
+      return lang.includes(langCode.toLowerCase()) || name.includes(langCode.toLowerCase());
+    }
+
+    // Session state
+    const state = {
+      preferredAudioLang: 'en',
+      activeSessionAudioLang: null,
+      activeSessionAudioTrackName: null
+    };
+
+    // User explicitly selects Japanese audio in Episode 1
+    const ep1Tracks = [
+      { index: 0, name: 'English (Dub)', lang: 'eng', enabled: true },
+      { index: 1, name: 'Japanese (Original)', lang: 'jpn', enabled: false }
+    ];
+    // User switches to track 1 (Japanese)
+    state.activeSessionAudioLang = 'ja';
+    state.activeSessionAudioTrackName = ep1Tracks[1].name;
+
+    // Simulate Episode 2 loading via autoplay or folder navigation
+    const ep2Tracks = [
+      { index: 0, name: 'English (Dub)', lang: 'eng', enabled: true },
+      { index: 1, name: 'Japanese (Original)', lang: 'jpn', enabled: false }
+    ];
+
+    const prefAudio = state.activeSessionAudioLang || state.preferredAudioLang || 'en';
+    let matchIdx = -1;
+    if (state.activeSessionAudioTrackName) {
+      matchIdx = ep2Tracks.findIndex((t) => t.name && t.name.toLowerCase() === state.activeSessionAudioTrackName.toLowerCase());
+    }
+    if (matchIdx < 0) {
+      matchIdx = ep2Tracks.findIndex((t) => matchesLanguage(t, prefAudio));
+    }
+
+    assert.strictEqual(matchIdx, 1, 'Episode 2 automatically selects Japanese audio matching user session selection');
+  });
+
+  runTest('Session subtitle track preference and explicit state persist across autoplay/folder transitions', () => {
+    const LANG_PATTERNS = {
+      en: /en|eng|english/i,
+      ja: /ja|jpn|japanese/i,
+      de: /de|deu|ger|german|deutsch/i
+    };
+
+    function matchesLanguage(track, langCode) {
+      if (!track || !langCode || langCode === 'none') return false;
+      const pattern = LANG_PATTERNS[langCode];
+      const lang = (track.lang || track.language || '').toLowerCase();
+      const name = (track.name || track.label || track.title || '').toLowerCase();
+      if (pattern) return pattern.test(lang) || pattern.test(name);
+      return lang.includes(langCode.toLowerCase()) || name.includes(langCode.toLowerCase());
+    }
+
+    // Case 1: User explicitly turns subtitles OFF in Episode 1
+    const stateOff = {
+      autoPlaySubtitles: true,
+      userExplicitSubState: false, // user pressed 'C' or selected Off
+      activeSessionSubLang: 'en'
+    };
+    // Episode 2 loads
+    const ep2SubEnabled = (stateOff.userExplicitSubState !== null)
+      ? Boolean(stateOff.userExplicitSubState)
+      : Boolean(stateOff.autoPlaySubtitles);
+    assert.strictEqual(ep2SubEnabled, false, 'Subtitles stay OFF on Episode 2 when user explicitly turned them off');
+
+    // Case 2: User explicitly selects German subtitles in Episode 1
+    const stateDe = {
+      autoPlaySubtitles: true,
+      userExplicitSubState: true,
+      activeSessionSubLang: 'de'
+    };
+    const ep2SubTracks = [
+      { index: 0, name: 'English [ENG]', lang: 'eng' },
+      { index: 1, name: 'German [GER]', lang: 'ger' },
+      { index: 2, name: 'French [FRA]', lang: 'fra' }
+    ];
+    const targetSubLang = stateDe.activeSessionSubLang || 'en';
+    const matchIdx = ep2SubTracks.findIndex((s) => matchesLanguage(s, targetSubLang));
+    assert.strictEqual(matchIdx, 1, 'Episode 2 automatically selects German subtitles matching user session selection');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');

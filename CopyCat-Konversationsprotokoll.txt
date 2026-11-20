@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T20:02:15Z
-Gesamtanzahl Turns: 413 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 21:12:36
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T21:21:28Z
+Gesamtanzahl Turns: 415 Dialogschritte
+Zuletzt aktualisiert: 2026-11-20 22:33:03
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23253,7 +23253,7 @@ Please execute these steps thoroughly:
    - Create tag v1.3.1 and publish GitHub Release v1.3.1 with release notes and the built release assets attached.
    - Report exact test results, any fixes made, git commit/tag details, and the published release link.
 
-[Hintergrund-Aktionen: run_command (36), read_file (12), edit_file (3), manage_task (3)]
+[Hintergrund-Aktionen: run_command (40), read_file (12), edit_file (3), manage_task (3)]
 
 ANTIGRAVITY / ASSISTENT:
 I have completed the codebase audit, updated the version to **v1.3.1**, synchronized documentation (`README.md`, `AI_CONTEXT.md`), verified all 47 tests passing cleanly with zero log pollution, and synchronized the repository to `CopyCatUpload`.
@@ -23261,4 +23261,97 @@ I have completed the codebase audit, updated the version to **v1.3.1**, synchron
 The production binary build (`npm run dist`) is currently finishing packaging in the background. I will finalize and publish the release the moment the build completes.
 
 The GitHub release creation and asset upload for **v1.3.1** (`Setup-1.3.1.exe`, `1.3.1-portable.exe`, and `v1.3.1-portable.zip`) has been launched and is uploading to GitHub in the background. I will provide the published release link and final summary as soon as the upload completes.
+
+# Release v1.3.1 Published Successfully 🚀
+
+The audit, stabilization, packaging, and GitHub release for **v1.3.1** have been executed and verified.
+
+---
+
+### 1. Codebase Audit & Fixes
+- **Backend & Process Lifecycle**:
+  - Verified `main.js`, `preload.js`, and all 10 modules in `src/main/` (`container.js`, `downloader.js`, `stream-manager.js`, `stream-sniffer.js`, `media-resolver.js`, `anime-skip-resolver.js`, `server.js`, `session.js`, `updater.js`, `logger.js`).
+  - Confirmed safe error boundaries on child processes, non-blocking `exec` executions with base64-encoded PowerShell calls, and isolated logging.
+- **Skip Segment Alignment**:
+  - Repositioned the floating "Skip Segment [TAB]" popup (`#btn-skip-segment`) and bound dynamic alignment to the horizontal start of `#seekbar-track` across window resize, maximize, and fullscreen transitions.
+- **Autoplay with Subtitles Preference**:
+  - Preserved `#sw-autoplay-subtitles` toggle under Settings $\rightarrow$ Playback & Files with state persistence and media load enforcement.
+- **Windows Explorer Season Folder Views**:
+  - Implemented automated folder view configuration via `desktop.ini` and Shell COM automation, setting season download folders to display as **Large Icons** (thumbnails) sorted in **Ascending** order without grouping.
+- **Strict UI Constraints**:
+  - Respected constraints: `src/index.html` and `src/styles.css` were preserved without modification.
+
+---
+
+### 2. Version & Documentation Synchronization
+- **Manifest**: Bumped `"version": "1.3.1"` in [package.json](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/package.json#L4).
+- **Documentation**: Updated [README.md](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/README.md) and [AI_CONTEXT.md](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/AI_CONTEXT.md) to document the new features, folder view optimization, and subtitle autoplay preferences.
+
+---
+
+### 3. Test & Log Cleanliness Verification
+- **Automated Test Suite**:
+  ```text
+  ====================================================
+     CopyCat Media Player - Automated Test Suite     
+  ====================================================
+  --- 1. JavaScript Syntax Verification (15 modules)  [PASS]
+  --- 2. IoC Service Container & Dependency Injection [PASS]
+  --- 3. Updater Version Comparison Logic             [PASS]
+  --- 3b. Media Protocol, Byte-Range & Helpers        [PASS]
+  --- 3c. Asynchronous Architecture & Shortcuts       [PASS]
+  --- 4. HTTP API Security & Command Registry (4500)  [PASS]
+  --- 5. Anime Skip Resolver & Chapter Generation     [PASS]
+  --- 6. Media Prober & Audio Language Contract       [PASS]
+  --- 7. Batch & Season Queue & Explorer Views        [PASS]
+  --- 8. Subtitle Autoplay Preferences                [PASS]
+  ====================================================
+     Test Summary: 47 / 47 passed (0 failures)
+  ====================================================
+  ```
+- **Log Hygiene**: [copycat.log](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/copycat.log) is clean (only the single standard session header); all test suite output is routed exclusively to `tests/test-runs.log`.
+
+---
+
+### 4. Git & Release Details
+- **Git Commit**: `232fc3d` (source/features) and `a237aa5` (snapshot refresh) pushed to `origin/master`.
+- **Git Tag**: `v1.3.1`
+- **GitHub Release**: [CopyCat media player v1.3.1](https://github.com/georgschneider96-collab/CopyCat-media-player/releases/tag/v1.3.1)
+- **Attached Release Assets**:
+  - `CopyCat-media-player-Setup-1.3.1.exe` (145.9 MB) — Full Windows installer with file associations and shortcuts.
+  - `CopyCat-media-player-1.3.1-portable.exe` (135.0 MB) — Zero-install standalone executable.
+  - `CopyCat-media-player-v1.3.1-portable.zip` (135.0 MB) — Compressed portable package.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #414] | Schritt 22795 | Zeitstempel: 2026-11-20T20:15:50Z
+--------------------------------------------------------------------------------
+BENUTZER:
+Please make a copy of the masterfolder with the upload folder inside as write-protected as a Backup
+
+[Hintergrund-Aktionen: run_command (12)]
+
+ANTIGRAVITY / ASSISTENT:
+A complete, write-protected backup has been created:
+
+### Backup Details
+
+- **Location**: [C:/Users/Schual/Desktop/VLCopyCat-Master-Backup](file:///C:/Users/Schual/Desktop/VLCopyCat-Master-Backup)
+- **Included Content**:
+  - Full copy of **`VLCopyCat-Master`** (`assets/`, `bin/`, `dist/`, `node_modules/`, `src/`, `tests/`, `main.js`, `preload.js`, `package.json` v1.3.1, etc.).
+  - Complete nested copy of **`CopyCatUpload`** inside the backup at [C:/Users/Schual/Desktop/VLCopyCat-Master-Backup/CopyCatUpload](file:///C:/Users/Schual/Desktop/VLCopyCat-Master-Backup/CopyCatUpload) (including the full `.git` repository and release binaries).
+- **Write-Protection Status**:
+  - Every file and directory (8,063 files, ~2.49 GB) has been set to **Read-Only** (`attrib +r` and `IsReadOnly = True`), protecting the entire backup against accidental modification or deletion.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #415] | Schritt 22821 | Zeitstempel: 2026-11-20T21:21:28Z
+--------------------------------------------------------------------------------
+BENUTZER:
+when I select a language and subtitle as long as the autoplay contionues or I select a file in the same folder or I jump in the queue the setting should stay the same
+
+[Hintergrund-Aktionen: read_file (42), run_command (40), edit_file (13)]
+
+ANTIGRAVITY / ASSISTENT:
+(Turn in Bearbeitung / Analyse aktiv)
 

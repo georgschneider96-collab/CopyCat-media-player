@@ -215,6 +215,10 @@
     probedAudioTracks: [],
     probedSubtitleTracks: [],
     activeEmbeddedSubTrackIndex: -1,
+    activeSessionAudioLang: null,      // Tracks user-selected audio language code (e.g. 'ja', 'en', 'de')
+    activeSessionAudioTrackName: null, // Tracks user-selected audio track label/name
+    activeSessionSubLang: null,        // Tracks user-selected subtitle language code (e.g. 'en', 'de', 'ja')
+    userExplicitSubState: null,        // null (follow autoPlaySubtitles) | true (user forced ON) | false (user forced OFF)
     preferredAudioLang: 'en',
     fallbackSubtitles: true,
     embedSubtitlesOnDownload: true,
@@ -718,6 +722,57 @@
   }
 
   // ==================== MULTI-TRACK AUDIO & DUAL AUDIO SWITCHER ====================
+  const LANG_PATTERNS = {
+    en: /en|eng|english/i,
+    ja: /ja|jpn|japanese/i,
+    de: /de|deu|ger|german|deutsch/i,
+    es: /es|spa|spanish|español/i,
+    fr: /fr|fre|fra|french|français/i,
+    it: /it|ita|italian|italiano/i,
+    pt: /pt|por|portuguese|português/i,
+    ru: /ru|rus|russian/i,
+    zh: /zh|zho|chi|chinese/i,
+    ko: /ko|kor|korean/i,
+    in: /in|id|ind|indonesian/i,
+    th: /th|tha|thai/i
+  };
+
+  function detectLanguageCodeFromTrack(trackOrObj) {
+    if (!trackOrObj) return null;
+    const str = typeof trackOrObj === 'string'
+      ? trackOrObj
+      : `${trackOrObj.lang || ''} ${trackOrObj.language || ''} ${trackOrObj.name || ''} ${trackOrObj.label || ''} ${trackOrObj.title || ''}`;
+    for (const [code, pattern] of Object.entries(LANG_PATTERNS)) {
+      if (pattern.test(str)) return code;
+    }
+    const rawLang = (typeof trackOrObj === 'object' ? (trackOrObj.lang || trackOrObj.language) : null);
+    if (rawLang && typeof rawLang === 'string' && rawLang.trim().length >= 2 && rawLang.trim().toLowerCase() !== 'und') {
+      return rawLang.trim().toLowerCase();
+    }
+    return null;
+  }
+
+  function normalizeLangCode(codeOrName) {
+    if (!codeOrName || typeof codeOrName !== 'string') return null;
+    const trimmed = codeOrName.trim().toLowerCase();
+    for (const [code, pattern] of Object.entries(LANG_PATTERNS)) {
+      if (pattern.test(trimmed)) return code;
+    }
+    return trimmed;
+  }
+
+  function matchesLanguage(track, langCode) {
+    if (!track || !langCode || langCode === 'none') return false;
+    const pattern = LANG_PATTERNS[langCode];
+    const lang = (track.lang || track.language || '').toLowerCase();
+    const name = (track.name || track.label || track.title || '').toLowerCase();
+    if (pattern) {
+      return pattern.test(lang) || pattern.test(name);
+    }
+    const target = langCode.toLowerCase();
+    return lang.includes(target) || name.includes(target);
+  }
+
   function getAudioTracksList() {
     if (state.hls && Array.isArray(state.hls.audioTracks) && state.hls.audioTracks.length > 0) {
       return state.hls.audioTracks.map((t, idx) => ({
@@ -849,7 +904,7 @@
     }
   }
 
-  function setAudioTrack(trackIndex) {
+  function setAudioTrack(trackIndex, isUserInitiated = false, notify = true) {
     const tracks = getAudioTracksList();
     if (tracks.length === 0) return;
     const targetIdx = Math.max(0, Math.min(tracks.length - 1, trackIndex));
@@ -898,7 +953,18 @@
     let label = active?.name || `Track ${targetIdx + 1}`;
     if (/japanese|ja/i.test(label) || /jpn/i.test(active?.lang || '')) label = 'Japanese';
     else if (/english|en/i.test(label) || /eng/i.test(active?.lang || '')) label = 'English';
-    showToast(`Audio Track: ${label} (${targetIdx + 1}/${tracks.length})`);
+
+    if (isUserInitiated && active) {
+      const detectedLang = detectLanguageCodeFromTrack(active);
+      if (detectedLang) {
+        state.activeSessionAudioLang = detectedLang;
+      }
+      state.activeSessionAudioTrackName = active.name;
+    }
+
+    if (notify) {
+      showToast(`Audio Track: ${label} (${targetIdx + 1}/${tracks.length})`);
+    }
   }
 
   function cycleAudioTrack() {
@@ -909,7 +975,7 @@
     }
     const currentIdx = tracks.findIndex((t) => t.enabled);
     const nextIdx = (currentIdx + 1) % tracks.length;
-    setAudioTrack(nextIdx);
+    setAudioTrack(nextIdx, true, true);
   }
 
   function detectClientSubtitleLanguage(text) {
@@ -993,18 +1059,21 @@
     el.selSubTrack.value = String(currentIdx);
   }
 
-  async function selectEmbeddedSubtitleTrack(trackIdx) {
+  async function selectEmbeddedSubtitleTrack(trackIdx, isUserInitiated = false, notify = true) {
     if (!state.currentItem || !state.currentItem.filePath || !api.extractEmbeddedSubtitle) return;
     const subTracks = state.probedSubtitleTracks || [];
     const track = subTracks[trackIdx];
     if (!track) return;
 
     try {
-      showToast(`Loading ${track.name || 'embedded'} subtitle...`);
+      if (notify) showToast(`Loading ${track.name || 'embedded'} subtitle...`);
       const res = await api.extractEmbeddedSubtitle(state.currentItem.filePath, track.index !== undefined ? track.index : trackIdx);
       if (res && res.ok && res.content) {
         state.activeEmbeddedSubTrackIndex = trackIdx;
         state.subEnabled = true;
+        if (isUserInitiated) {
+          state.userExplicitSubState = true;
+        }
         if (!track.name || track.name.startsWith('Subtitle Track') || !track.lang || track.lang === 'und') {
           const detected = detectClientSubtitleLanguage(res.content);
           if (detected) {
@@ -1012,127 +1081,136 @@
             track.lang = detected.lang;
           }
         }
+        const detectedCode = detectLanguageCodeFromTrack(track) || (track.lang ? normalizeLangCode(track.lang) : null);
+        if (isUserInitiated && detectedCode) {
+          state.activeSessionSubLang = detectedCode;
+        }
         loadSubtitleData({
           name: `${track.name || 'Embedded'} Subtitle`,
           content: res.content
-        }, true);
+        }, notify, isUserInitiated);
         if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
         if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
         syncSubtitleTracksDropdown();
-      } else {
+      } else if (notify) {
         showToast('Failed to extract subtitle track');
       }
     } catch (err) {
       console.warn('Failed to extract subtitle track:', err);
-      showToast('Error extracting subtitle');
+      if (notify) showToast('Error extracting subtitle');
     }
   }
 
-  // ==================== PREFERRED LANGUAGE & FALLBACK SUBTITLES ====================
-  const LANG_PATTERNS = {
-    en: /en|eng|english/i,
-    ja: /ja|jpn|japanese/i,
-    de: /de|deu|ger|german|deutsch/i,
-    es: /es|spa|spanish|español/i,
-    fr: /fr|fre|fra|french|français/i,
-    it: /it|ita|italian|italiano/i,
-    pt: /pt|por|portuguese|português/i,
-    ru: /ru|rus|russian/i,
-    zh: /zh|zho|chi|chinese/i,
-    ko: /ko|kor|korean/i,
-    in: /in|id|ind|indonesian/i,
-    th: /th|tha|thai/i
-  };
-
-  function matchesLanguage(track, langCode) {
-    if (!track || !langCode || langCode === 'none') return false;
-    const pattern = LANG_PATTERNS[langCode];
-    if (!pattern) return false;
-    const lang = (track.lang || track.language || '').toLowerCase();
-    const name = (track.name || track.label || track.title || '').toLowerCase();
-    return pattern.test(lang) || pattern.test(name);
-  }
-
-  let languagePreferenceAppliedForCurrent = false;
+  // ==================== PREFERRED LANGUAGE & SESSION SUBTITLES ====================
+  let languagePreferenceAppliedAudio = false;
+  let languagePreferenceAppliedSub = false;
 
   async function applyLanguagePreferencesOnLoad(probe = null) {
-    if (!state.currentItem || languagePreferenceAppliedForCurrent) return;
-    const prefLang = state.preferredAudioLang || 'en';
-    if (prefLang === 'none') return;
+    if (!state.currentItem) return;
 
-    const audioTracks = getAudioTracksList();
-
-    // 1. If multiple audio tracks are detected:
-    if (audioTracks.length > 1) {
-      const matchIdx = audioTracks.findIndex((t) => matchesLanguage(t, prefLang));
-      if (matchIdx >= 0) {
-        languagePreferenceAppliedForCurrent = true;
-        const currentActive = audioTracks.findIndex((t) => t.enabled);
-        if (currentActive !== matchIdx) {
-          setAudioTrack(matchIdx);
-        }
-        return; // Preferred audio is active, no fallback subtitles needed!
-      }
-    }
-
-    // 2. Preferred audio is not available; check fallback subtitles
-    if (!state.fallbackSubtitles || !state.autoPlaySubtitles) return;
-
-    // Check if preferred language subtitle is already loaded & enabled
-    if (state.subEnabled && state.subCues.length > 0 && matchesLanguage({ name: state.subTrackName }, prefLang)) {
-      languagePreferenceAppliedForCurrent = true;
-      return;
-    }
-
-    // 2A. Check embedded subtitle tracks from ffprobe
-    const subTracks = probe?.subtitleTracks || state.probedSubtitleTracks || [];
-    const matchingSubIdx = subTracks.findIndex((s) => matchesLanguage(s, prefLang));
-    if (matchingSubIdx >= 0 && state.currentItem.filePath && api.extractEmbeddedSubtitle) {
-      languagePreferenceAppliedForCurrent = true;
-      try {
-        const subResult = await api.extractEmbeddedSubtitle(state.currentItem.filePath, matchingSubIdx);
-        if (subResult && subResult.ok && subResult.content) {
-          state.subEnabled = true;
-          state.activeEmbeddedSubTrackIndex = matchingSubIdx;
-          loadSubtitleData({
-            name: `${subTracks[matchingSubIdx].name || 'Embedded'} [${prefLang.toUpperCase()}]`,
-            content: subResult.content
-          }, false);
-          if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
-          if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
-          syncSubtitleTracksDropdown();
-          showToast(`Preferred audio unavailable: enabled ${subTracks[matchingSubIdx].name || prefLang.toUpperCase()} subtitles`);
-          return;
-        }
-      } catch (err) {
-        console.warn('Failed to extract embedded subtitle:', err);
-      }
-    }
-
-    // 2B. Check Chromium native textTracks
-    if (el.video && el.video.textTracks && el.video.textTracks.length > 0) {
-      for (let i = 0; i < el.video.textTracks.length; i++) {
-        const tt = el.video.textTracks[i];
-        if (matchesLanguage(tt, prefLang)) {
-          languagePreferenceAppliedForCurrent = true;
-          for (let j = 0; j < el.video.textTracks.length; j++) {
-            el.video.textTracks[j].mode = (j === i) ? 'showing' : 'disabled';
+    // 1. Audio Track Preference
+    if (!languagePreferenceAppliedAudio) {
+      const prefAudio = state.activeSessionAudioLang || state.preferredAudioLang || 'en';
+      if (prefAudio !== 'none') {
+        const audioTracks = getAudioTracksList();
+        if (audioTracks.length > 0) {
+          let matchIdx = -1;
+          if (state.activeSessionAudioTrackName) {
+            matchIdx = audioTracks.findIndex((t) => t.name && t.name.toLowerCase() === state.activeSessionAudioTrackName.toLowerCase());
           }
-          state.subEnabled = true;
-          if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
-          showToast(`Preferred audio unavailable: enabled ${tt.label || prefLang.toUpperCase()} subtitles`);
-          return;
+          if (matchIdx < 0) {
+            matchIdx = audioTracks.findIndex((t) => matchesLanguage(t, prefAudio));
+          }
+          if (matchIdx >= 0) {
+            languagePreferenceAppliedAudio = true;
+            const currentActive = audioTracks.findIndex((t) => t.enabled);
+            if (currentActive !== matchIdx) {
+              setAudioTrack(matchIdx, false, false);
+            }
+          } else if (audioTracks.length > 1) {
+            languagePreferenceAppliedAudio = true;
+          }
         }
       }
     }
 
-    // 2C. Check auto-detected companion subtitle (.srt / .vtt)
-    if (state.currentItem.autoSubPath && matchesLanguage({ name: state.currentItem.autoSubPath }, prefLang)) {
-      languagePreferenceAppliedForCurrent = true;
+    // 2. Subtitle Track & Visibility Preference
+    if (!languagePreferenceAppliedSub) {
+      const wantSubtitles = (state.userExplicitSubState !== null)
+        ? Boolean(state.userExplicitSubState)
+        : Boolean(state.autoPlaySubtitles);
+
+      if (!wantSubtitles) {
+        languagePreferenceAppliedSub = true;
+        state.subEnabled = false;
+        if (el.swSubEnabled) el.swSubEnabled.classList.remove('on');
+        if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'none';
+        return;
+      }
+
       state.subEnabled = true;
       if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
       if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
-      showToast(`Preferred audio unavailable: enabled subtitles`);
+
+      const targetSubLang = state.activeSessionSubLang
+        || (state.preferredAudioLang !== 'none' ? state.preferredAudioLang : 'en');
+
+      const subTracks = probe?.subtitleTracks || state.probedSubtitleTracks || [];
+
+      // 2A. Embedded subtitle tracks
+      if (subTracks.length > 0 && state.currentItem.filePath && api.extractEmbeddedSubtitle) {
+        let matchSubIdx = -1;
+        if (targetSubLang && targetSubLang !== 'none') {
+          matchSubIdx = subTracks.findIndex((s) => matchesLanguage(s, targetSubLang));
+        }
+        if (matchSubIdx < 0) {
+          matchSubIdx = subTracks.findIndex((s) => matchesLanguage(s, 'en'));
+        }
+        if (matchSubIdx < 0) {
+          matchSubIdx = 0;
+        }
+
+        if (matchSubIdx >= 0) {
+          languagePreferenceAppliedSub = true;
+          await selectEmbeddedSubtitleTrack(matchSubIdx, false, false);
+          return;
+        }
+      }
+
+      // 2B. Companion subtitle (.srt / .vtt)
+      if (state.currentItem.autoSubPath) {
+        languagePreferenceAppliedSub = true;
+        const subData = await api.readSubtitle(state.currentItem.autoSubPath);
+        if (subData) {
+          loadSubtitleData(subData, false, false);
+          return;
+        }
+      }
+
+      // 2C. Chromium native textTracks
+      if (el.video && el.video.textTracks && el.video.textTracks.length > 0) {
+        let matchTtIdx = -1;
+        if (targetSubLang && targetSubLang !== 'none') {
+          for (let i = 0; i < el.video.textTracks.length; i++) {
+            if (matchesLanguage(el.video.textTracks[i], targetSubLang)) {
+              matchTtIdx = i;
+              break;
+            }
+          }
+        }
+        if (matchTtIdx < 0) matchTtIdx = 0;
+        if (matchTtIdx >= 0) {
+          languagePreferenceAppliedSub = true;
+          for (let j = 0; j < el.video.textTracks.length; j++) {
+            el.video.textTracks[j].mode = (j === matchTtIdx) ? 'showing' : 'disabled';
+          }
+          return;
+        }
+      }
+
+      if (probe) {
+        languagePreferenceAppliedSub = true;
+      }
     }
   }
 
@@ -1752,7 +1830,7 @@
     return cues;
   }
 
-  function loadSubtitleData(subObj, notify = true) {
+  function loadSubtitleData(subObj, notify = true, isUserInitiated = false) {
     lastActiveSubCue = null;
     if (!subObj || !subObj.content) {
       clearSubtitles();
@@ -1764,6 +1842,18 @@
     state.subTrackLanguage = detected ? detected.name : '';
     state.subTrackName = detected ? `${detected.name} Subtitles` : (subObj.name || 'External Subtitles');
     state.subOffsetMs = 0;
+
+    if (isUserInitiated) {
+      state.userExplicitSubState = true;
+      state.subEnabled = true;
+      const detectedCode = detected?.lang ? normalizeLangCode(detected.lang) : detectLanguageCodeFromTrack(subObj.name);
+      if (detectedCode) {
+        state.activeSessionSubLang = detectedCode;
+      }
+      if (el.swSubEnabled) el.swSubEnabled.classList.add('on');
+      if (el.subtitleOverlay) el.subtitleOverlay.style.display = 'block';
+    }
+
     if (el.lblSubTrack) {
       el.lblSubTrack.textContent = state.subTrackName;
       el.lblSubTrack.title = subObj.name || state.subTrackName;
@@ -2116,7 +2206,8 @@
     state.probedSubtitleTracks = [];
     state.activeEmbeddedSubTrackIndex = -1;
     syncSubtitleTracksDropdown();
-    languagePreferenceAppliedForCurrent = false;
+    languagePreferenceAppliedAudio = false;
+    languagePreferenceAppliedSub = false;
     renderChapterMarkersOnSeekbar();
 
     el.video.classList.toggle('loaded', !item.isAudio);
@@ -2147,7 +2238,7 @@
     // Auto-load matching local subtitle if enabled
     if (state.autoLoadSub && item.autoSubPath) {
       const subData = await api.readSubtitle(item.autoSubPath);
-      if (subData) loadSubtitleData(subData, false);
+      if (subData) loadSubtitleData(subData, false, false);
     }
 
     // Auto-load remote stream subtitle (.vtt / .srt) if captured
@@ -2156,14 +2247,16 @@
       if (preferredSub && preferredSub.url) {
         fetch(preferredSub.url).then((r) => (r.ok ? r.text() : null)).then((vttText) => {
           if (vttText && state.currentItem === item) {
-            loadSubtitleData({ name: preferredSub.label || 'Stream Subtitles', content: vttText }, true);
+            loadSubtitleData({ name: preferredSub.label || 'Stream Subtitles', content: vttText }, false, false);
           }
         }).catch(() => {});
       }
     }
 
-    // Enforce subtitle autoplay preference
-    state.subEnabled = Boolean(state.autoPlaySubtitles);
+    // Enforce subtitle autoplay & session preferences
+    state.subEnabled = (state.userExplicitSubState !== null)
+      ? Boolean(state.userExplicitSubState)
+      : Boolean(state.autoPlaySubtitles);
     if (el.swSubEnabled) el.swSubEnabled.classList.toggle('on', state.subEnabled);
     if (el.subtitleOverlay) el.subtitleOverlay.style.display = state.subEnabled ? 'block' : 'none';
 
@@ -2453,7 +2546,7 @@
   function ingestOpenedBundle(bundle, autoPlay = true, { append = false } = {}) {
     if (!bundle) return;
     if (bundle.subtitleOnly) {
-      loadSubtitleData(bundle.subtitleOnly, true);
+      loadSubtitleData(bundle.subtitleOnly, true, true);
       return;
     }
 
@@ -4677,7 +4770,7 @@
     syncSidebarAutoCollapse();
     try {
       const sub = await api.openSubtitle();
-      if (sub) loadSubtitleData(sub, true);
+      if (sub) loadSubtitleData(sub, true, true);
     } finally {
       state.dialogOpen = false;
       syncSidebarAutoCollapse();
@@ -5096,6 +5189,7 @@
         break;
       case 'toggleSub':
         state.subEnabled = !state.subEnabled;
+        state.userExplicitSubState = state.subEnabled;
         if (el.swSubEnabled) el.swSubEnabled.classList.toggle('on', state.subEnabled);
         if (el.subtitleOverlay) el.subtitleOverlay.style.display = state.subEnabled ? 'block' : 'none';
         showToast(`Subtitles: ${state.subEnabled ? 'ON' : 'OFF'}`);
@@ -5466,6 +5560,7 @@
       case 'setSubtitleTrack': {
         if (cmd.value === 'off' || cmd.enabled === false) {
           state.subEnabled = false;
+          state.userExplicitSubState = false;
           clearSubtitles();
           syncPopoverButtonsActive();
           showToast('AI Bridge: Subtitles Off');
@@ -5473,11 +5568,12 @@
           api.readSubtitle(cmd.filePath).then((subData) => {
             if (subData) {
               state.subEnabled = true;
-              loadSubtitleData(subData, true);
+              loadSubtitleData(subData, true, true);
             }
           }).catch(() => {});
         } else if (cmd.value === 'toggle') {
           state.subEnabled = !state.subEnabled;
+          state.userExplicitSubState = state.subEnabled;
           renderSubtitleBlocksOnSeekbar();
           updateActiveSubtitleCue();
           syncPopoverButtonsActive();
@@ -5490,10 +5586,10 @@
           const v = String(cmd.value).toLowerCase();
           const tracks = getAudioTracksList();
           const matchIdx = tracks.findIndex(t => t.name.toLowerCase().includes(v) || (t.lang && t.lang.toLowerCase().includes(v)));
-          if (matchIdx >= 0) setAudioTrack(matchIdx);
+          if (matchIdx >= 0) setAudioTrack(matchIdx, true, true);
           else cycleAudioTrack();
         } else if (typeof cmd.index === 'number') {
-          setAudioTrack(cmd.index);
+          setAudioTrack(cmd.index, true, true);
         } else {
           cycleAudioTrack();
         }
@@ -6699,7 +6795,7 @@
 
     if (el.selAudioTrack) {
       el.selAudioTrack.addEventListener('change', () => {
-        setAudioTrack(Number(el.selAudioTrack.value));
+        setAudioTrack(Number(el.selAudioTrack.value), true, true);
       });
     }
 
@@ -6710,6 +6806,7 @@
         if (idx < 0) {
           state.activeEmbeddedSubTrackIndex = -1;
           state.subEnabled = false;
+          state.userExplicitSubState = false;
           syncSwitchesUI();
           if (el.subtitleOverlay) {
             el.subtitleOverlay.classList.remove('visible');
@@ -6719,11 +6816,12 @@
           syncSubtitleTracksDropdown();
           showToast('Subtitles Off');
         } else if (subTracks.length > 0) {
-          await selectEmbeddedSubtitleTrack(idx);
+          await selectEmbeddedSubtitleTrack(idx, true, true);
         } else if (state.loadedExternalSubData) {
           state.subEnabled = true;
+          state.userExplicitSubState = true;
           syncSwitchesUI();
-          loadSubtitleData(state.loadedExternalSubData, true);
+          loadSubtitleData(state.loadedExternalSubData, true, true);
         }
       });
     }
@@ -6746,6 +6844,7 @@
 
     el.swSubEnabled.addEventListener('click', () => {
       state.subEnabled = !state.subEnabled;
+      state.userExplicitSubState = state.subEnabled;
       syncSwitchesUI();
       syncPopoverButtonsActive();
       renderSubtitleBlocksOnSeekbar();
@@ -6944,6 +7043,7 @@
     if (el.swAutoplaySubtitles) {
       el.swAutoplaySubtitles.addEventListener('click', () => {
         state.autoPlaySubtitles = !state.autoPlaySubtitles;
+        state.userExplicitSubState = state.autoPlaySubtitles;
         syncSwitchesUI();
         savePreferences();
         showToast(state.autoPlaySubtitles ? 'Autoplay Subtitles: ON' : 'Autoplay Subtitles: OFF');
@@ -6952,6 +7052,8 @@
     if (el.selPreferredAudioLang) {
       el.selPreferredAudioLang.addEventListener('change', () => {
         state.preferredAudioLang = el.selPreferredAudioLang.value;
+        state.activeSessionAudioLang = el.selPreferredAudioLang.value;
+        state.activeSessionAudioTrackName = null;
         savePreferences();
         const selectedLabel = el.selPreferredAudioLang.options[el.selPreferredAudioLang.selectedIndex]?.textContent || state.preferredAudioLang;
         showToast(`Preferred Audio: ${selectedLabel}`);
