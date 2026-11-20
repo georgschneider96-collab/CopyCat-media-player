@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:36:14Z
-Gesamtanzahl Turns: 424 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 23:44:53
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:49:42Z
+Gesamtanzahl Turns: 425 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 00:03:06
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23714,7 +23714,68 @@ We investigated the background network traffic and identified three exact causes
 BENUTZER:
 I hope you divede the sniffers. by that I mean depending on what url ist pasted into the player it chooses the preferable streamsniffer. instead of making 1 massive mess of a sniffer
 
-[Hintergrund-Aktionen: run_command (18), write_file (5), edit_file (4)]
+[Hintergrund-Aktionen: run_command (21), write_file (5), edit_file (4)]
+
+ANTIGRAVITY / ASSISTENT:
+The monolithic sniffer has been refactored into a **Modular Sniffer Strategy & Router Architecture**.
+
+Instead of having a single file filled with nested `if/else` checks for every website, each platform now lives in its own dedicated, isolated sniffer strategy under `src/main/sniffers/`. When a URL is entered into CopyCat, an intelligent router inspects the URL and delegates to the preferable strategy.
+
+---
+
+### New Architecture Overview
+
+```text
+src/main/
+├── stream-sniffer.js             # Sniffer Router & Dispatcher
+└── sniffers/
+    ├── base-sniffer.js           # Shared Chromium runner, CDN header registry & TTL cache
+    ├── miruro-sniffer.js         # Dedicated Miruro & strm.cx Anime Strategy
+    ├── videa-sniffer.js          # Dedicated Hungarian Anime Strategy (Videa, JobbMintATv, Indavideo)
+    └── generic-sniffer.js        # Universal HTML5 Video & fallback Strategy
+```
+
+---
+
+### How the Strategies Are Divided
+
+| Sniffer Strategy | Matched URLs & Patterns | Platform-Specific Specialization |
+| :--- | :--- | :--- |
+| **`MiruroSniffer`**<br>[miruro-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/sniffers/miruro-sniffer.js) | `miruro.*`, `strm.cx`, `*.top/(m\|a\|s)/`, `frostheron`, `coastowl`, `keeply` | • Automated Sub/Dub switcher (captures both language stream renditions).<br>• Enforces `strm.cx` anti-hotlink Referer/Origin headers.<br>• Vidstack `<media-player>` subtitle cue extractor. |
+| **`VideaSniffer`**<br>[videa-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/sniffers/videa-sniffer.js) | `jobbmintatv.pro`, `videa.hu`, `indavideo.hu` | • Intercepts progressive MP4 streams without trailing extensions (`details.resourceType === 'media'`).<br>• Triggers Video.js big play button (`.vjs-big-play-button`).<br>• Isolates Hungarian ad network banners.<br>• Registers `videa.hu` and `embed.indavideo.hu` Referer headers. |
+| **`GenericSniffer`**<br>[generic-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/sniffers/generic-sniffer.js) | All other websites (Universal fallback) | • Standard HTML5 `<video>` and `<track>` subtitle detection.<br>• Standard `.m3u8` (HLS), `.mpd` (DASH), and `.mp4` detection.<br>• Universal play triggers (`[aria-label*="Play" i]`, `.jw-icon-display`, etc.). |
+
+---
+
+### The Sniffer Router ([stream-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/stream-sniffer.js))
+
+When `extractStreamFromWebpage(url)` is called:
+1. **Cache Check:** Checks the shared 5-minute in-memory cache for instant 0ms responses.
+2. **Strategy Routing:** Runs `getSnifferStrategy(url)`:
+   ```javascript
+   const SNIFFER_STRATEGIES = [miruroSniffer, videaSniffer, genericSniffer];
+   ```
+3. **Dispatch:** Automatically hands off the session to the preferred strategy.
+
+---
+
+### Verification & Test Suite
+* Added 4 new automated unit tests in `tests/test-suite.js` to verify routing:
+  * `MiruroSniffer` routing for Miruro / strm.cx.
+  * `VideaSniffer` routing for JobbMintATv / Videa / Indavideo.
+  * `GenericSniffer` fallback for unknown sites.
+  * Dynamic anti-hotlink header registry.
+* **Test Results:** **57 / 57 tests passed** cleanly.
+* All changes have been synchronized and committed to `origin/master` (no releases or tags created).
+
+
+--------------------------------------------------------------------------------
+[DIALOG #425] | Schritt 23658 | Zeitstempel: 2026-11-20T22:49:42Z
+--------------------------------------------------------------------------------
+BENUTZER:
+I'd like to have in the settings a new tab for editing files. I'd like to have a converter from one video file to a difrent one also I want to have an subtitle inbeder, where subtitles are looked up for the video that is put in and also a metadata editor, where metadate can be pulled up and integrated in files
+
+[Hintergrund-Aktionen: run_command (67), read_file (24), edit_file (15), write_file (6), manage_task (2)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

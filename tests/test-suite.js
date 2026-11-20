@@ -65,7 +65,8 @@ async function runAll() {
     'src/main/anime-skip-resolver.js',
     'src/main/server.js',
     'src/main/session.js',
-    'src/main/updater.js'
+    'src/main/updater.js',
+    'src/main/media-editor.js'
   ];
 
   for (const rel of jsFiles) {
@@ -86,6 +87,7 @@ async function runAll() {
     assert(container.has('media'), 'Container must have media service');
     assert(container.has('session'), 'Container must have session service');
     assert(container.has('updater'), 'Container must have updater service');
+    assert(container.has('mediaEditor'), 'Container must have mediaEditor service');
 
     const media = container.get('media');
     assert(typeof media.probeMediaFile === 'function', 'Media service must expose probeMediaFile');
@@ -784,6 +786,56 @@ async function runAll() {
     const headers = getRequiredHeadersForUrl('https://custom-cdn.example.com/video/chunk2.mp4');
     assert.strictEqual(headers['Referer'], 'https://custom-origin.com/player');
     assert.strictEqual(headers['Origin'], 'https://custom-origin.com');
+  });
+
+  // Test Group 10: Media Editor & File Processing Service
+  console.log('\n--- 10. Media Editor & File Processing Service (Converter, Subtitles, Metadata) ---');
+  const { MediaEditor } = require(path.join(projectRoot, 'src/main/media-editor'));
+  const editor = new MediaEditor();
+
+  runTest('MediaEditor exposes all required core methods', () => {
+    assert(typeof editor.probeMetadata === 'function', 'probeMetadata must be a function');
+    assert(typeof editor.convertMedia === 'function', 'convertMedia must be a function');
+    assert(typeof editor.cancelJob === 'function', 'cancelJob must be a function');
+    assert(typeof editor.searchSubtitles === 'function', 'searchSubtitles must be a function');
+    assert(typeof editor.downloadSubtitle === 'function', 'downloadSubtitle must be a function');
+    assert(typeof editor.embedSubtitles === 'function', 'embedSubtitles must be a function');
+    assert(typeof editor.applyMetadata === 'function', 'applyMetadata must be a function');
+  });
+
+  await runAsyncTest('MediaEditor searchSubtitles discovers local companion subtitle files', async () => {
+    const tmpDir = path.join(projectRoot, 'tests', 'fixtures_tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+    const dummyVideo = path.join(tmpDir, 'Bleach_Episode_01.mp4');
+    const dummySrtHun = path.join(tmpDir, 'Bleach_Episode_01.hun.srt');
+    const dummySrtEng = path.join(tmpDir, 'Bleach_Episode_01.eng.srt');
+    fs.writeFileSync(dummyVideo, 'dummy video content');
+    fs.writeFileSync(dummySrtHun, '1\n00:00:01,000 --> 00:00:04,000\nSzia vilag!\n');
+    fs.writeFileSync(dummySrtEng, '1\n00:00:01,000 --> 00:00:04,000\nHello world!\n');
+
+    try {
+      const res = await editor.searchSubtitles({ filePath: dummyVideo, lang: 'all' });
+      assert(res.success === true, 'searchSubtitles should succeed');
+      assert(Array.isArray(res.localResults), 'localResults must be an array');
+      assert.strictEqual(res.localResults.length, 2, 'Should find 2 companion subtitles');
+
+      const langs = res.localResults.map(r => r.lang);
+      assert(langs.includes('hun'), 'Should identify Hungarian subtitle');
+      assert(langs.includes('eng'), 'Should identify English subtitle');
+    } finally {
+      try {
+        fs.unlinkSync(dummyVideo);
+        fs.unlinkSync(dummySrtHun);
+        fs.unlinkSync(dummySrtEng);
+        fs.rmdirSync(tmpDir);
+      } catch {}
+    }
+  });
+
+  runTest('MediaEditor cancelJob safely handles unknown jobIds', () => {
+    const res = editor.cancelJob('nonexistent_job_123');
+    assert.strictEqual(res, false, 'Canceling nonexistent job returns false');
   });
 
   console.log('\n====================================================');

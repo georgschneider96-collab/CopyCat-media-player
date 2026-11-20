@@ -23,6 +23,7 @@ $PriorityOrder = @(
     './src/main/session.js',
     './src/main/updater.js',
     './src/main/media-resolver.js',
+    './src/main/media-editor.js',
     './src/main/downloader.js',
     './src/main/anime-skip-resolver.js',
     './src/main/stream-sniffer.js',

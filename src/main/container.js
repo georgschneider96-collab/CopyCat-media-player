@@ -364,7 +364,11 @@ function createAppContainer() {
     mainLogger: createLogger('Main')
   });
 
-  logger.info('Service Container initialized with services: window, stream, media, session, updater, downloader, logger');
+  // 8. Media Editor Service (Converter, Subtitle Embedder, Metadata Editor)
+  const { mediaEditor } = require('./media-editor');
+  container.register('mediaEditor', mediaEditor);
+
+  logger.info('Service Container initialized with services: window, stream, media, session, updater, downloader, logger, mediaEditor');
   return container;
 }
 

@@ -41,6 +41,18 @@ const copycatApi = {
   extractEmbeddedSubtitle: (filePath, trackIndex) => ipcRenderer.invoke('media:extractEmbeddedSubtitle', { filePath, trackIndex }),
   stopStream: () => ipcRenderer.invoke('media:stopStream'),
 
+  // Media Editor & File Processing Tools
+  probeMediaMetadata: (filePath) => ipcRenderer.invoke('media-editor:probe', filePath),
+  convertMedia: (opts) => ipcRenderer.invoke('media-editor:convert', opts),
+  cancelMediaJob: (jobId) => ipcRenderer.invoke('media-editor:cancel-job', jobId),
+  searchSubtitles: (queryOpts) => ipcRenderer.invoke('media-editor:search-subtitles', queryOpts),
+  downloadSubtitle: (url, targetPath) => ipcRenderer.invoke('media-editor:download-subtitle', url, targetPath),
+  embedSubtitles: (opts) => ipcRenderer.invoke('media-editor:embed-subtitles', opts),
+  applyMediaMetadata: (opts) => ipcRenderer.invoke('media-editor:apply-metadata', opts),
+  openVideoFileDialog: () => ipcRenderer.invoke('dialog:open-video-file'),
+  openSubtitleFileDialog: () => ipcRenderer.invoke('dialog:open-subtitle-file'),
+  onMediaEditorProgress: (cb) => ipcRenderer.on('media-editor:progress', (_e, data) => cb(data)),
+
   // Filesystem helpers
   getPathForFile: (file) => {
     try {

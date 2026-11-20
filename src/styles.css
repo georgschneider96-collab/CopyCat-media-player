@@ -3582,3 +3582,93 @@ html, body {
 [data-theme="light"] .top-dl-indicator:hover {
   background: rgba(0, 0, 0, 0.09);
 }
+
+/* ==================== FILE & MEDIA TOOLS (CONVERTER, SUBTITLES, METADATA) ==================== */
+.editor-subnav {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border-panel);
+}
+
+.editor-subnav-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.editor-subnav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.editor-subnav-btn.active {
+  background: var(--accent) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+.sub-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.12s ease;
+}
+
+.sub-result-row:last-child {
+  border-bottom: none;
+}
+
+.sub-result-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sub-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent);
+}
+
+[data-theme="light"] .editor-subnav {
+  background: #F1F3F5;
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .editor-subnav-btn {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .editor-subnav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .editor-subnav-btn.active {
+  background: var(--accent) !important;
+  color: #FFFFFF !important;
+}
+
+[data-theme="light"] .sub-result-row {
+  border-bottom-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .sub-result-row:hover {
+  background: rgba(0, 0, 0, 0.03);
+}

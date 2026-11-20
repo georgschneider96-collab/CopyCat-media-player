@@ -577,6 +577,10 @@
             <span class="nav-dot"></span>
             <span>Stream &amp; Download</span>
           </button>
+          <button class="settings-nav-btn" data-settings-tab="media-editor">
+            <span class="nav-dot"></span>
+            <span>File &amp; Media Tools</span>
+          </button>
           <div class="settings-group-lbl" style="margin-top:8px;">Developer &amp; AI</div>
           <button class="settings-nav-btn" data-settings-tab="ai">
             <span class="nav-dot"></span>
@@ -1088,6 +1092,347 @@
                   <div style="font-size:11.5px;color:var(--text-muted);">Automatically load and start playback in CopyCat as soon as a download finishes</div>
                 </div>
                 <button class="jux-switch on" id="sw-auto-play-dl" type="button" role="switch" aria-checked="true" title="Toggle auto-play on download completion"></button>
+              </div>
+            </div>
+
+            <!-- Panel: File & Media Tools (Converter, Subtitle Embedder, Metadata Editor) -->
+            <div class="settings-panel" data-settings-panel="media-editor" style="display:none;flex-direction:column;gap:16px;">
+              <!-- 1. Source Video Selection Card -->
+              <div class="stream-card editor-card">
+                <div class="settings-section-title" style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+                  <span style="color:var(--accent);display:inline-flex;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
+                  </span>
+                  <span>Target Video File</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                  Select a local video file to convert formats, look up &amp; embed subtitles, or inspect and update metadata tags.
+                </div>
+                <div class="stream-input-wrap">
+                  <input type="text" id="editor-source-path" class="stream-url-field" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
+                  <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" title="Browse for video file on your PC">Browse...</button>
+                  <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
+                </div>
+
+                <!-- Probed File Details Badge -->
+                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:10px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text-primary);">
+                      <span id="editor-badge-filename" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">video.mp4</span>
+                      <span id="editor-badge-size" class="update-status-pill" style="font-size:10px;padding:2px 6px;">0 MB</span>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="editor-badge-pills">
+                      <span id="editor-badge-format" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">MP4</span>
+                      <span id="editor-badge-res" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">1920x1080</span>
+                      <span id="editor-badge-duration" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">00:00</span>
+                      <span id="editor-badge-audio" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Audio</span>
+                      <span id="editor-badge-sub" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Subs</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Sub-tab Segmented Switcher -->
+              <div class="editor-subnav" style="display:flex;gap:6px;background:rgba(255,255,255,0.03);padding:4px;border-radius:9px;border:1px solid var(--border-panel);">
+                <button class="editor-subnav-btn active" data-editor-subtab="converter" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;transition:all 0.15s ease;">
+                  Format Converter
+                </button>
+                <button class="editor-subnav-btn" data-editor-subtab="subtitles" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;transition:all 0.15s ease;">
+                  Subtitle Embedder &amp; Lookup
+                </button>
+                <button class="editor-subnav-btn" data-editor-subtab="metadata" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;transition:all 0.15s ease;">
+                  Metadata &amp; Tags
+                </button>
+              </div>
+
+              <!-- 3. Sub-panel: Format Converter -->
+              <div id="subpanel-converter" class="editor-subpanel" style="display:flex;flex-direction:column;gap:14px;">
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Video &amp; Audio Container Converter</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+                    Convert between popular video formats or extract high-fidelity audio tracks using FFmpeg remuxing or encoding.
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Target Format / Container:</label>
+                      <select id="converter-format-select" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="mp4" selected>MP4 (.mp4 - Universal Compatibility)</option>
+                        <option value="mkv">MKV (.mkv - Matroska Multimedia)</option>
+                        <option value="webm">WebM (.webm - Web Video / VP9)</option>
+                        <option value="mov">MOV (.mov - Apple QuickTime)</option>
+                        <option value="avi">AVI (.avi - Audio Video Interleave)</option>
+                        <option value="mp3">MP3 (.mp3 - Audio Only Extraction)</option>
+                        <option value="aac">AAC (.aac - High Quality Audio)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Conversion Engine Mode:</label>
+                      <select id="converter-mode-select" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="remux" selected>Fast Stream Remux (Lossless, ~2 sec, 0 re-encode)</option>
+                        <option value="reencode">Re-encode (Full transcode via x264/AAC)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Extra Re-encode Options (hidden in remux mode) -->
+                  <div id="converter-reencode-options" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div>
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Video Resolution Preset:</label>
+                      <select id="converter-res-select" class="stream-url-field" style="width:100%;padding:6px 8px;font-size:12px;">
+                        <option value="original" selected>Same as Source (Preserve)</option>
+                        <option value="1080">1080p Full HD (1920x1080)</option>
+                        <option value="720">720p HD (1280x720)</option>
+                        <option value="480">480p SD (854x480)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Quality Preset (CRF):</label>
+                      <select id="converter-crf-select" class="stream-url-field" style="width:100%;padding:6px 8px;font-size:12px;">
+                        <option value="18">Visually Lossless (CRF 18)</option>
+                        <option value="23" selected>Balanced Quality &amp; Size (CRF 23)</option>
+                        <option value="28">Small File Size (CRF 28)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Custom Destination File (Optional):</label>
+                    <div class="stream-input-wrap">
+                      <input type="text" id="converter-output-path" class="stream-url-field" placeholder="Auto-generated in the same folder with new format extension" spellcheck="false" autocomplete="off" />
+                      <button class="stream-probe-btn" id="btn-converter-browse-dest" type="button" title="Choose specific output file name">Choose...</button>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-start-convert" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                      </svg>
+                      <span>Start Conversion</span>
+                    </button>
+                    <div id="converter-summary-text" style="font-size:11.5px;color:var(--text-muted);">
+                      Fast remux preserves 100% original stream bits with no quality loss.
+                    </div>
+                  </div>
+
+                  <!-- Live Conversion Progress Bar & Controls -->
+                  <div id="converter-progress-box" style="display:none;margin-top:14px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                      <span id="converter-status-label" style="font-size:12px;font-weight:600;color:var(--text-primary);">Converting...</span>
+                      <span id="converter-percent-label" style="font-size:12px;font-weight:700;color:var(--accent);">0%</span>
+                    </div>
+                    <div style="height:6px;width:100%;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;margin-bottom:8px;">
+                      <div id="converter-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width 0.2s ease;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);">
+                      <span id="converter-stats-label">Time: 00:00 | Speed: 0x | 0 fps</span>
+                      <button class="ghost-pill-btn" id="btn-converter-cancel" type="button" style="padding:3px 10px;font-size:11px;color:#ff6b6b;border-color:rgba(255,107,107,0.3);">Cancel</button>
+                    </div>
+                  </div>
+
+                  <!-- Completed notification banner -->
+                  <div id="converter-complete-banner" style="display:none;margin-top:14px;padding:12px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                      <div style="display:flex;align-items:center;gap:8px;color:#2ecc71;font-size:12.5px;font-weight:600;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>Conversion Completed Successfully!</span>
+                      </div>
+                      <div style="display:flex;gap:6px;">
+                        <button class="ghost-pill-btn" id="btn-converter-play-result" type="button" style="padding:4px 10px;font-size:11.5px;">Play Now</button>
+                        <button class="ghost-pill-btn" id="btn-converter-show-result" type="button" style="padding:4px 10px;font-size:11.5px;">Show in Folder</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. Sub-panel: Subtitle Embedder & Lookup -->
+              <div id="subpanel-subtitles" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
+                <!-- Online OpenSubtitles & Local Search Card -->
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Online Subtitle Lookup (OpenSubtitles)</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px;">
+                    Search and find matching subtitle tracks for your media without needing an API key.
+                  </div>
+                  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:180px;padding:8px 12px;font-size:12.5px;" placeholder="Movie or series name (e.g. Bleach, Interstellar)" spellcheck="false" autocomplete="off" />
+                    <select id="sub-search-lang" class="stream-url-field" style="width:130px;padding:8px 10px;font-size:12px;cursor:pointer;">
+                      <option value="hun" selected>Hungarian (hun)</option>
+                      <option value="eng">English (eng)</option>
+                      <option value="ger">German (ger)</option>
+                      <option value="jpn">Japanese (jpn)</option>
+                      <option value="spa">Spanish (spa)</option>
+                      <option value="fre">French (fre)</option>
+                      <option value="ita">Italian (ita)</option>
+                      <option value="all">All Languages</option>
+                    </select>
+                    <button class="stream-probe-btn" id="btn-sub-search-online" type="button" style="padding:0 14px;border-radius:6px;background:rgba(var(--accent-rgb),0.15);color:var(--accent);font-weight:600;">
+                      Search
+                    </button>
+                    <button class="ghost-pill-btn" id="btn-sub-detect-local" type="button" style="padding:0 12px;font-size:11.5px;">
+                      Local Files
+                    </button>
+                  </div>
+
+                  <!-- Subtitle Search Results Box -->
+                  <div id="sub-results-container" style="display:none;max-height:220px;overflow-y:auto;border:1px solid var(--border-panel);border-radius:8px;background:rgba(0,0,0,0.2);padding:6px;">
+                    <!-- Injected subtitle rows -->
+                  </div>
+                </div>
+
+                <!-- Embed Subtitle into Video Card -->
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Embed Subtitle into Video Container</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+                    Soft-mux subtitle tracks losslessly into MP4/MKV in ~2 seconds, or burn hardcoded subtitles directly into video frames.
+                  </div>
+
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Selected Subtitle File (.srt, .vtt, .ass):</label>
+                    <div class="stream-input-wrap">
+                      <input type="text" id="sub-embed-file" class="stream-url-field" placeholder="Pick a local subtitle file or click 'Use' from search above" spellcheck="false" autocomplete="off" />
+                      <button class="stream-probe-btn" id="btn-sub-browse-local" type="button" title="Browse for local subtitle file">Browse...</button>
+                    </div>
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Embedding Mode:</label>
+                      <select id="sub-embed-mode" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="soft" selected>Soft Subtitles (Lossless remux, instant, togglable)</option>
+                        <option value="hard">Hardsub Burn-in (Permanently burned into video frames)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Track Language Code:</label>
+                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="hun" placeholder="e.g. hun, eng, jpn" />
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Subtitle Track Title (Display Name in Player):</label>
+                    <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="Hungarian Subtitles" placeholder="e.g. Hungarian (Default), English Full" />
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-start-sub-embed" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      <span>Embed Subtitles</span>
+                    </button>
+                    <div style="font-size:11.5px;color:var(--text-muted);">
+                      Soft subtitles are embedded into container tracks without loss of video quality.
+                    </div>
+                  </div>
+
+                  <!-- Subtitle Embed Progress Box -->
+                  <div id="sub-embed-progress-box" style="display:none;margin-top:14px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                      <span id="sub-embed-status-label" style="font-size:12px;font-weight:600;color:var(--text-primary);">Embedding subtitles...</span>
+                      <span id="sub-embed-percent-label" style="font-size:12px;font-weight:700;color:var(--accent);">0%</span>
+                    </div>
+                    <div style="height:6px;width:100%;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;margin-bottom:8px;">
+                      <div id="sub-embed-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width 0.2s ease;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);">
+                      <span id="sub-embed-stats-label">Please wait...</span>
+                      <button class="ghost-pill-btn" id="btn-sub-embed-cancel" type="button" style="padding:3px 10px;font-size:11px;color:#ff6b6b;border-color:rgba(255,107,107,0.3);">Cancel</button>
+                    </div>
+                  </div>
+
+                  <!-- Subtitle Embed Complete Banner -->
+                  <div id="sub-embed-complete-banner" style="display:none;margin-top:14px;padding:12px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                      <div style="display:flex;align-items:center;gap:8px;color:#2ecc71;font-size:12.5px;font-weight:600;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>Subtitles Successfully Embedded!</span>
+                      </div>
+                      <div style="display:flex;gap:6px;">
+                        <button class="ghost-pill-btn" id="btn-sub-embed-play-result" type="button" style="padding:4px 10px;font-size:11.5px;">Play Now</button>
+                        <button class="ghost-pill-btn" id="btn-sub-embed-show-result" type="button" style="padding:4px 10px;font-size:11.5px;">Show in Folder</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. Sub-panel: Metadata & Tags Editor -->
+              <div id="subpanel-metadata" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
+                <div class="stream-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                    <div>
+                      <div class="settings-section-title" style="margin-bottom:2px;">Container Metadata &amp; Tag Editor</div>
+                      <div style="font-size:11.5px;color:var(--text-muted);">
+                        Read, customize, and write metadata tags directly into video files in seconds.
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <button class="ghost-pill-btn" id="btn-meta-pull" type="button" style="padding:5px 12px;font-size:11.5px;">Pull from File</button>
+                      <button class="ghost-pill-btn" id="btn-meta-detect-fn" type="button" style="padding:5px 12px;font-size:11.5px;">Auto-Detect from Filename</button>
+                    </div>
+                  </div>
+
+                  <!-- Form Fields Grid -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Title / Episode Title:</label>
+                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. The Day I Became a Shinigami" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Series / Show Name:</label>
+                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Bleach" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Season Number:</label>
+                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Episode Number:</label>
+                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Release Year / Date:</label>
+                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 2004" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Artist / Author / Studio:</label>
+                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Studio Pierrot / Tite Kubo" spellcheck="false" autocomplete="off" />
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Description / Synopsis:</label>
+                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:68px;padding:8px 10px;font-size:12px;resize:vertical;" placeholder="Enter episode or movie plot synopsis..."></textarea>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Audio Stream 1 Language Tag:</label>
+                    <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:160px;padding:7px 10px;font-size:12px;" placeholder="e.g. hun, jpn, eng" />
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-save-metadata" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                      </svg>
+                      <span>Save &amp; Integrate Metadata</span>
+                    </button>
+                    <div id="meta-save-feedback" style="font-size:11.5px;color:var(--text-muted);">
+                      Writes container tags losslessly in ~1s without re-encoding video or audio.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

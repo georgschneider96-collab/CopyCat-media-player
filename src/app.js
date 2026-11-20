@@ -535,6 +535,72 @@
     topDlFill: $('top-dl-fill'),
     streamFilenameInput: $('stream-filename-input'),
 
+    // Media Editor & File Processing Tools
+    editorSourcePath: $('editor-source-path'),
+    btnEditorBrowseFile: $('btn-editor-browse-file'),
+    btnEditorUseCurrent: $('btn-editor-use-current'),
+    editorFileBadge: $('editor-file-badge'),
+    editorBadgeFilename: $('editor-badge-filename'),
+    editorBadgeSize: $('editor-badge-size'),
+    editorBadgeFormat: $('editor-badge-format'),
+    editorBadgeRes: $('editor-badge-res'),
+    editorBadgeDuration: $('editor-badge-duration'),
+    editorBadgeAudio: $('editor-badge-audio'),
+    editorBadgeSub: $('editor-badge-sub'),
+    subpanelConverter: $('subpanel-converter'),
+    subpanelSubtitles: $('subpanel-subtitles'),
+    subpanelMetadata: $('subpanel-metadata'),
+    converterFormatSelect: $('converter-format-select'),
+    converterModeSelect: $('converter-mode-select'),
+    converterReencodeOptions: $('converter-reencode-options'),
+    converterResSelect: $('converter-res-select'),
+    converterCrfSelect: $('converter-crf-select'),
+    converterOutputPath: $('converter-output-path'),
+    btnConverterBrowseDest: $('btn-converter-browse-dest'),
+    btnStartConvert: $('btn-start-convert'),
+    converterSummaryText: $('converter-summary-text'),
+    converterProgressBox: $('converter-progress-box'),
+    converterStatusLabel: $('converter-status-label'),
+    converterPercentLabel: $('converter-percent-label'),
+    converterProgressBar: $('converter-progress-bar'),
+    converterStatsLabel: $('converter-stats-label'),
+    btnConverterCancel: $('btn-converter-cancel'),
+    converterCompleteBanner: $('converter-complete-banner'),
+    btnConverterPlayResult: $('btn-converter-play-result'),
+    btnConverterShowResult: $('btn-converter-show-result'),
+    subSearchQuery: $('sub-search-query'),
+    subSearchLang: $('sub-search-lang'),
+    btnSubSearchOnline: $('btn-sub-search-online'),
+    btnSubDetectLocal: $('btn-sub-detect-local'),
+    subResultsContainer: $('sub-results-container'),
+    subEmbedFile: $('sub-embed-file'),
+    btnSubBrowseLocal: $('btn-sub-browse-local'),
+    subEmbedMode: $('sub-embed-mode'),
+    subEmbedLang: $('sub-embed-lang'),
+    subEmbedTitle: $('sub-embed-title'),
+    btnStartSubEmbed: $('btn-start-sub-embed'),
+    subEmbedProgressBox: $('sub-embed-progress-box'),
+    subEmbedStatusLabel: $('sub-embed-status-label'),
+    subEmbedPercentLabel: $('sub-embed-percent-label'),
+    subEmbedProgressBar: $('sub-embed-progress-bar'),
+    subEmbedStatsLabel: $('sub-embed-stats-label'),
+    btnSubEmbedCancel: $('btn-sub-embed-cancel'),
+    subEmbedCompleteBanner: $('sub-embed-complete-banner'),
+    btnSubEmbedPlayResult: $('btn-sub-embed-play-result'),
+    btnSubEmbedShowResult: $('btn-sub-embed-show-result'),
+    btnMetaPull: $('btn-meta-pull'),
+    btnMetaDetectFn: $('btn-meta-detect-fn'),
+    metaFieldTitle: $('meta-field-title'),
+    metaFieldShow: $('meta-field-show'),
+    metaFieldSeason: $('meta-field-season'),
+    metaFieldEpisode: $('meta-field-episode'),
+    metaFieldYear: $('meta-field-year'),
+    metaFieldArtist: $('meta-field-artist'),
+    metaFieldComment: $('meta-field-comment'),
+    metaFieldAudioLang: $('meta-field-audio-lang'),
+    btnSaveMetadata: $('btn-save-metadata'),
+    metaSaveFeedback: $('meta-save-feedback'),
+
     btnThumbCone: $('btn-thumb-cone'),
     btnThumbPaw: $('btn-thumb-paw'),
     btnThumbPill: $('btn-thumb-pill'),
@@ -6984,6 +7050,14 @@
           renderHotkeysTable();
         } else if (target === 'stream-download') {
           if (el.streamUrlInput) setTimeout(() => el.streamUrlInput.focus(), 80);
+        } else if (target === 'media-editor') {
+          if (el.editorSourcePath && !el.editorSourcePath.value) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http') && typeof window.mediaEditorInspectTarget === 'function') {
+              el.editorSourcePath.value = cur;
+              window.mediaEditorInspectTarget(cur);
+            }
+          }
         }
       });
     });
@@ -9184,6 +9258,612 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
     });
 
+    // ==================== FILE & MEDIA TOOLS (CONVERTER, SUBTITLES, METADATA) ====================
+    function initMediaEditorUI() {
+      let currentProbedMeta = null;
+      let activeConvertJobId = null;
+      let activeSubJobId = null;
+      let lastConvertedPath = null;
+      let lastEmbeddedPath = null;
+
+      function formatBytes(bytes) {
+        if (!bytes || isNaN(bytes)) return '0 B';
+        const k = 1024;
+        const dm = 1;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+      }
+
+      function formatDurationSecs(secs) {
+        if (!secs || isNaN(secs)) return '00:00';
+        const s = Math.floor(secs);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const rem = s % 60;
+        if (h > 0) {
+          return `${h}:${m.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+        }
+        return `${m.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+      }
+
+      // Sub-tab switcher
+      document.querySelectorAll('.editor-subnav-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const subtab = btn.dataset.editorSubtab;
+          document.querySelectorAll('.editor-subnav-btn').forEach((b) => {
+            const isActive = b === btn;
+            b.classList.toggle('active', isActive);
+            b.style.background = isActive ? 'var(--accent)' : 'transparent';
+            b.style.color = isActive ? '#FFFFFF' : 'var(--text-muted)';
+          });
+          if (el.subpanelConverter) el.subpanelConverter.style.display = subtab === 'converter' ? 'flex' : 'none';
+          if (el.subpanelSubtitles) el.subpanelSubtitles.style.display = subtab === 'subtitles' ? 'flex' : 'none';
+          if (el.subpanelMetadata) el.subpanelMetadata.style.display = subtab === 'metadata' ? 'flex' : 'none';
+        });
+      });
+
+      // Probe selected target media file
+      async function inspectTargetFile(filePath) {
+        if (!filePath || !api.probeMediaMetadata) return;
+        try {
+          const meta = await api.probeMediaMetadata(filePath);
+          if (!meta || !meta.success) {
+            showToast(meta?.error || 'Failed to inspect media file');
+            return;
+          }
+          currentProbedMeta = meta;
+
+          // Update badge
+          if (el.editorFileBadge) el.editorFileBadge.style.display = 'block';
+          if (el.editorBadgeFilename) el.editorBadgeFilename.textContent = meta.filename || 'media';
+          if (el.editorBadgeSize) el.editorBadgeSize.textContent = formatBytes(meta.size);
+          if (el.editorBadgeFormat) el.editorBadgeFormat.textContent = (meta.format || 'video').toUpperCase();
+          if (el.editorBadgeRes) {
+            el.editorBadgeRes.textContent = meta.videoStream ? `${meta.videoStream.width}x${meta.videoStream.height}` : 'Audio';
+          }
+          if (el.editorBadgeDuration) el.editorBadgeDuration.textContent = formatDurationSecs(meta.duration);
+          if (el.editorBadgeAudio) {
+            const aCount = meta.audioStreams?.length || 0;
+            el.editorBadgeAudio.textContent = `${aCount} Audio Track${aCount === 1 ? '' : 's'}`;
+          }
+          if (el.editorBadgeSub) {
+            const sCount = meta.subtitleStreams?.length || 0;
+            el.editorBadgeSub.textContent = `${sCount} Subtitle${sCount === 1 ? '' : 's'}`;
+          }
+
+          // Auto-update suggested output path for converter
+          updateSuggestedOutputPath();
+
+          // Auto-populate subtitle query if empty or default
+          if (el.subSearchQuery && (!el.subSearchQuery.value || el.subSearchQuery.value.trim() === '')) {
+            const cleanName = (meta.filename || '').replace(/\.[^/.]+$/, '').replace(/[._-]/g, ' ').trim();
+            el.subSearchQuery.value = cleanName;
+          }
+
+          // Auto-fill metadata form fields
+          populateMetadataFields(meta);
+        } catch (err) {
+          console.error('inspectTargetFile error:', err);
+        }
+      }
+
+      window.mediaEditorInspectTarget = inspectTargetFile;
+
+      function updateSuggestedOutputPath() {
+        const src = el.editorSourcePath?.value?.trim();
+        if (!src || !el.converterOutputPath) return;
+        const fmt = el.converterFormatSelect?.value || 'mp4';
+        const lastDot = src.lastIndexOf('.');
+        if (lastDot !== -1) {
+          el.converterOutputPath.value = src.substring(0, lastDot) + '.' + fmt;
+        }
+      }
+
+      function populateMetadataFields(meta) {
+        if (!meta) return;
+        const tags = meta.tags || {};
+        const filename = meta.filename || '';
+        const baseName = filename.replace(/\.[^/.]+$/, '');
+
+        let parsedSeason = '';
+        let parsedEpisode = '';
+        let parsedShow = baseName;
+
+        const seMatch = baseName.match(/[sS](\d+)[eE](\d+)/i) || baseName.match(/(\d+)x(\d+)/i);
+        if (seMatch) {
+          parsedSeason = parseInt(seMatch[1], 10).toString();
+          parsedEpisode = parseInt(seMatch[2], 10).toString();
+          parsedShow = baseName.substring(0, seMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+        } else {
+          const epMatch = baseName.match(/(?:ep|episode|[._ -])(\d{1,4})(?:[._ -]|$)/i);
+          if (epMatch) {
+            parsedEpisode = parseInt(epMatch[1], 10).toString();
+            parsedShow = baseName.substring(0, epMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+          }
+        }
+
+        if (el.metaFieldTitle) el.metaFieldTitle.value = tags.title || tags.TITLE || baseName.replace(/[._]/g, ' ');
+        if (el.metaFieldShow) el.metaFieldShow.value = tags.show || tags.SHOW || tags.series || parsedShow || '';
+        if (el.metaFieldSeason) el.metaFieldSeason.value = tags.season_number || tags.season || parsedSeason || '';
+        if (el.metaFieldEpisode) el.metaFieldEpisode.value = tags.episode_sort || tags.episode_id || tags.track || parsedEpisode || '';
+        if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || tags.creation_time?.substring(0, 4) || '';
+        if (el.metaFieldArtist) el.metaFieldArtist.value = tags.artist || tags.ARTIST || tags.composer || tags.creator || '';
+        if (el.metaFieldComment) el.metaFieldComment.value = tags.comment || tags.description || tags.synopsis || '';
+        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = meta.audioStreams?.[0]?.lang || 'hun';
+      }
+
+      // Browse source video
+      if (el.btnEditorBrowseFile) {
+        el.btnEditorBrowseFile.addEventListener('click', async () => {
+          if (!api.openVideoFileDialog) return;
+          const filePath = await api.openVideoFileDialog();
+          if (filePath && el.editorSourcePath) {
+            el.editorSourcePath.value = filePath;
+            inspectTargetFile(filePath);
+          }
+        });
+      }
+
+      // Use currently playing media
+      if (el.btnEditorUseCurrent) {
+        el.btnEditorUseCurrent.addEventListener('click', () => {
+          const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+          if (cur && !cur.startsWith('http')) {
+            if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            inspectTargetFile(cur);
+            showToast('Loaded currently playing video into editor');
+          } else {
+            showToast('No local video currently playing');
+          }
+        });
+      }
+
+      if (el.editorSourcePath) {
+        el.editorSourcePath.addEventListener('change', () => {
+          const val = el.editorSourcePath.value.trim();
+          if (val) inspectTargetFile(val);
+        });
+      }
+
+      // Converter options
+      if (el.converterFormatSelect) {
+        el.converterFormatSelect.addEventListener('change', () => {
+          updateSuggestedOutputPath();
+          const fmt = el.converterFormatSelect.value;
+          if (fmt === 'mp3' || fmt === 'aac') {
+            if (el.converterSummaryText) el.converterSummaryText.textContent = 'Extracts high-fidelity audio stream to separate audio file.';
+          } else {
+            const mode = el.converterModeSelect?.value || 'remux';
+            if (el.converterSummaryText) {
+              el.converterSummaryText.textContent = mode === 'remux' 
+                ? 'Fast remux preserves 100% original stream bits with no quality loss.'
+                : 'Re-encode transcodes video & audio for compatibility or compression.';
+            }
+          }
+        });
+      }
+
+      if (el.converterModeSelect) {
+        el.converterModeSelect.addEventListener('change', () => {
+          const isReencode = el.converterModeSelect.value === 'reencode';
+          if (el.converterReencodeOptions) {
+            el.converterReencodeOptions.style.display = isReencode ? 'grid' : 'none';
+          }
+          if (el.converterSummaryText) {
+            el.converterSummaryText.textContent = isReencode
+              ? 'Re-encode transcodes video & audio for compatibility or compression.'
+              : 'Fast remux preserves 100% original stream bits with no quality loss.';
+          }
+        });
+      }
+
+      // Converter browse dest
+      if (el.btnConverterBrowseDest) {
+        el.btnConverterBrowseDest.addEventListener('click', async () => {
+          if (!api.openVideoFileDialog) return;
+          const res = await api.openVideoFileDialog();
+          if (res && el.converterOutputPath) el.converterOutputPath.value = res;
+        });
+      }
+
+      // Start conversion
+      if (el.btnStartConvert) {
+        el.btnStartConvert.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file first');
+            return;
+          }
+          const format = el.converterFormatSelect?.value || 'mp4';
+          const mode = el.converterModeSelect?.value || 'remux';
+          let outputPath = el.converterOutputPath?.value?.trim();
+          if (!outputPath) {
+            const lastDot = inputPath.lastIndexOf('.');
+            outputPath = (lastDot !== -1 ? inputPath.substring(0, lastDot) : inputPath) + '_converted.' + format;
+          }
+
+          const crf = el.converterCrfSelect?.value || '23';
+          const resolution = el.converterResSelect?.value || 'original';
+          activeConvertJobId = 'conv_' + Date.now();
+
+          if (el.converterProgressBox) el.converterProgressBox.style.display = 'block';
+          if (el.converterProgressBar) el.converterProgressBar.style.width = '0%';
+          if (el.converterPercentLabel) el.converterPercentLabel.textContent = '0%';
+          if (el.converterStatusLabel) el.converterStatusLabel.textContent = mode === 'remux' ? 'Fast Remuxing...' : 'Re-encoding...';
+          if (el.converterCompleteBanner) el.converterCompleteBanner.style.display = 'none';
+
+          try {
+            const res = await api.convertMedia({
+              jobId: activeConvertJobId,
+              inputPath,
+              outputPath,
+              format,
+              mode,
+              crf,
+              resolution,
+              faststart: true
+            });
+
+            if (res && res.success) {
+              lastConvertedPath = res.outputPath || outputPath;
+              if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+              if (el.converterCompleteBanner) el.converterCompleteBanner.style.display = 'block';
+              showToast('Conversion completed successfully!');
+              playDownloadCompletionChime();
+            } else {
+              showToast(res?.error || 'Conversion failed');
+              if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+            }
+          } catch (err) {
+            showToast('Conversion error: ' + (err.message || err));
+            if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+          } finally {
+            activeConvertJobId = null;
+          }
+        });
+      }
+
+      // Cancel conversion
+      if (el.btnConverterCancel) {
+        el.btnConverterCancel.addEventListener('click', () => {
+          if (activeConvertJobId && api.cancelMediaJob) {
+            api.cancelMediaJob(activeConvertJobId);
+            showToast('Conversion canceled');
+            if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+            activeConvertJobId = null;
+          }
+        });
+      }
+
+      // Play / Reveal converted file
+      if (el.btnConverterPlayResult) {
+        el.btnConverterPlayResult.addEventListener('click', async () => {
+          if (!lastConvertedPath) return;
+          const bundle = await api.resolvePaths([lastConvertedPath]);
+          if (bundle) ingestOpenedBundle(bundle, true, { append: false });
+          toggleSettingsModal(false);
+        });
+      }
+      if (el.btnConverterShowResult) {
+        el.btnConverterShowResult.addEventListener('click', () => {
+          if (lastConvertedPath && api.revealInExplorer) api.revealInExplorer(lastConvertedPath);
+        });
+      }
+
+      // Subtitle Search (Online & Local)
+      async function executeSubtitleSearch(query, lang) {
+        if (!api.searchSubtitles) return;
+        const filePath = el.editorSourcePath?.value?.trim();
+        if (el.subResultsContainer) {
+          el.subResultsContainer.style.display = 'block';
+          el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">Searching for matching subtitles...</div>';
+        }
+
+        try {
+          const res = await api.searchSubtitles({ query, lang, filePath });
+          if (!res || !res.success || (!res.localResults?.length && !res.onlineResults?.length)) {
+            if (el.subResultsContainer) {
+              el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">No subtitles found. Try refining the search keywords.</div>';
+            }
+            return;
+          }
+
+          renderSubtitleResults(res.localResults || [], res.onlineResults || []);
+        } catch (err) {
+          if (el.subResultsContainer) {
+            el.subResultsContainer.innerHTML = `<div style="padding:12px;font-size:12px;color:#ff6b6b;text-align:center;">Search failed: ${err.message || err}</div>`;
+          }
+        }
+      }
+
+      function renderSubtitleResults(localSubs, onlineSubs) {
+        if (!el.subResultsContainer) return;
+        el.subResultsContainer.innerHTML = '';
+
+        if (localSubs.length > 0) {
+          const secHeader = document.createElement('div');
+          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:4px 6px 6px 6px;';
+          secHeader.textContent = `Local Companion Subtitles (${localSubs.length})`;
+          el.subResultsContainer.appendChild(secHeader);
+
+          localSubs.forEach((sub) => {
+            const row = document.createElement('div');
+            row.className = 'sub-result-row';
+            row.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
+                <span class="sub-pill">${escapeHtml(sub.lang || 'LOCAL')}</span>
+                <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sub.filePath)}">${escapeHtml(sub.fileName)}</span>
+              </div>
+              <button class="ghost-pill-btn" style="padding:3px 10px;font-size:11px;font-weight:600;margin-left:8px;" type="button">Use Subtitle</button>
+            `;
+            row.querySelector('button').addEventListener('click', () => {
+              if (el.subEmbedFile) el.subEmbedFile.value = sub.filePath;
+              if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+              if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Local'} Subtitles`;
+              showToast(`Selected: ${sub.fileName}`);
+            });
+            el.subResultsContainer.appendChild(row);
+          });
+        }
+
+        if (onlineSubs.length > 0) {
+          const secHeader = document.createElement('div');
+          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:8px 6px 6px 6px;';
+          secHeader.textContent = `OpenSubtitles Results (${onlineSubs.length})`;
+          el.subResultsContainer.appendChild(secHeader);
+
+          onlineSubs.slice(0, 15).forEach((sub) => {
+            const row = document.createElement('div');
+            row.className = 'sub-result-row';
+            row.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
+                <span class="sub-pill">${escapeHtml(sub.lang || 'SUB')}</span>
+                <div style="display:flex;flex-direction:column;overflow:hidden;">
+                  <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sub.fileName)}">${escapeHtml(sub.fileName)}</span>
+                  <span style="font-size:10px;color:var(--text-muted);">${sub.downloads ? sub.downloads.toLocaleString() + ' DLs' : ''} ${sub.format ? '• ' + sub.format.toUpperCase() : ''}</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;margin-left:8px;">
+                <button class="ghost-pill-btn btn-dl-sub" style="padding:3px 8px;font-size:11px;" type="button">Download</button>
+                <button class="stream-probe-btn btn-use-sub" style="padding:3px 10px;font-size:11px;border-radius:5px;font-weight:600;background:rgba(var(--accent-rgb),0.18);color:var(--accent);" type="button">Use &amp; Embed</button>
+              </div>
+            `;
+
+            // Download handler
+            row.querySelector('.btn-dl-sub').addEventListener('click', async () => {
+              if (!sub.downloadUrl || !api.downloadSubtitle) return;
+              showToast('Downloading subtitle...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              if (dlRes && dlRes.success) {
+                showToast('Subtitle saved: ' + dlRes.targetPath);
+                if (api.revealInExplorer) api.revealInExplorer(dlRes.targetPath);
+              } else {
+                showToast('Failed to download subtitle');
+              }
+            });
+
+            // Use & Embed handler
+            row.querySelector('.btn-use-sub').addEventListener('click', async () => {
+              if (!sub.downloadUrl || !api.downloadSubtitle) return;
+              showToast('Downloading subtitle for embedder...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              if (dlRes && dlRes.success) {
+                if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
+                if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+                if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Online'} Subtitles`;
+                showToast('Subtitle ready for embedding!');
+              } else {
+                showToast('Failed to fetch subtitle');
+              }
+            });
+
+            el.subResultsContainer.appendChild(row);
+          });
+        }
+      }
+
+      if (el.btnSubSearchOnline) {
+        el.btnSubSearchOnline.addEventListener('click', () => {
+          const query = el.subSearchQuery?.value?.trim() || '';
+          const lang = el.subSearchLang?.value || 'hun';
+          if (!query) {
+            showToast('Please enter movie or series name');
+            return;
+          }
+          executeSubtitleSearch(query, lang);
+        });
+      }
+
+      if (el.btnSubDetectLocal) {
+        el.btnSubDetectLocal.addEventListener('click', () => {
+          const filePath = el.editorSourcePath?.value?.trim();
+          if (!filePath) {
+            showToast('Select a video file to look for local companion subtitles');
+            return;
+          }
+          executeSubtitleSearch('', 'all');
+        });
+      }
+
+      if (el.btnSubBrowseLocal) {
+        el.btnSubBrowseLocal.addEventListener('click', async () => {
+          if (!api.openSubtitleFileDialog) return;
+          const subPath = await api.openSubtitleFileDialog();
+          if (subPath && el.subEmbedFile) {
+            el.subEmbedFile.value = subPath;
+            showToast('Selected subtitle: ' + subPath.split(/[/\\]/).pop());
+          }
+        });
+      }
+
+      // Embed subtitle into video
+      if (el.btnStartSubEmbed) {
+        el.btnStartSubEmbed.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          const subPath = el.subEmbedFile?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file');
+            return;
+          }
+          if (!subPath) {
+            showToast('Please select a subtitle file (.srt, .vtt, .ass) to embed');
+            return;
+          }
+
+          const mode = el.subEmbedMode?.value || 'soft';
+          const lang = el.subEmbedLang?.value?.trim() || 'hun';
+          const title = el.subEmbedTitle?.value?.trim() || 'Subtitles';
+
+          activeSubJobId = 'sub_' + Date.now();
+
+          if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'block';
+          if (el.subEmbedProgressBar) el.subEmbedProgressBar.style.width = '0%';
+          if (el.subEmbedPercentLabel) el.subEmbedPercentLabel.textContent = '0%';
+          if (el.subEmbedStatusLabel) el.subEmbedStatusLabel.textContent = mode === 'soft' ? 'Remuxing subtitle track...' : 'Burning subtitles into video...';
+          if (el.subEmbedCompleteBanner) el.subEmbedCompleteBanner.style.display = 'none';
+
+          try {
+            const res = await api.embedSubtitles({
+              jobId: activeSubJobId,
+              inputPath,
+              subPath,
+              lang,
+              title,
+              mode
+            });
+
+            if (res && res.success) {
+              lastEmbeddedPath = res.outputPath;
+              if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+              if (el.subEmbedCompleteBanner) el.subEmbedCompleteBanner.style.display = 'block';
+              showToast('Subtitles embedded successfully!');
+              playDownloadCompletionChime();
+            } else {
+              showToast(res?.error || 'Failed to embed subtitles');
+              if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+            }
+          } catch (err) {
+            showToast('Embed error: ' + (err.message || err));
+            if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+          } finally {
+            activeSubJobId = null;
+          }
+        });
+      }
+
+      if (el.btnSubEmbedCancel) {
+        el.btnSubEmbedCancel.addEventListener('click', () => {
+          if (activeSubJobId && api.cancelMediaJob) {
+            api.cancelMediaJob(activeSubJobId);
+            showToast('Subtitle embedding canceled');
+            if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+            activeSubJobId = null;
+          }
+        });
+      }
+
+      if (el.btnSubEmbedPlayResult) {
+        el.btnSubEmbedPlayResult.addEventListener('click', async () => {
+          if (!lastEmbeddedPath) return;
+          const bundle = await api.resolvePaths([lastEmbeddedPath]);
+          if (bundle) ingestOpenedBundle(bundle, true, { append: false });
+          toggleSettingsModal(false);
+        });
+      }
+      if (el.btnSubEmbedShowResult) {
+        el.btnSubEmbedShowResult.addEventListener('click', () => {
+          if (lastEmbeddedPath && api.revealInExplorer) api.revealInExplorer(lastEmbeddedPath);
+        });
+      }
+
+      // Metadata & Tags Editor
+      if (el.btnMetaPull) {
+        el.btnMetaPull.addEventListener('click', () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Select a video file first');
+            return;
+          }
+          inspectTargetFile(inputPath);
+          showToast('Pulled latest file metadata tags');
+        });
+      }
+
+      if (el.btnMetaDetectFn) {
+        el.btnMetaDetectFn.addEventListener('click', () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Select a video file first');
+            return;
+          }
+          const fn = inputPath.split(/[/\\]/).pop();
+          populateMetadataFields({ filename: fn, tags: {} });
+          showToast('Parsed show, season & episode from filename');
+        });
+      }
+
+      if (el.btnSaveMetadata) {
+        el.btnSaveMetadata.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file first');
+            return;
+          }
+          if (!api.applyMediaMetadata) return;
+
+          const tags = {
+            title: el.metaFieldTitle?.value?.trim(),
+            show: el.metaFieldShow?.value?.trim(),
+            season: el.metaFieldSeason?.value?.trim(),
+            episode: el.metaFieldEpisode?.value?.trim(),
+            year: el.metaFieldYear?.value?.trim(),
+            artist: el.metaFieldArtist?.value?.trim(),
+            comment: el.metaFieldComment?.value?.trim(),
+            audioLang: el.metaFieldAudioLang?.value?.trim()
+          };
+
+          if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Saving metadata tags losslessly...';
+
+          try {
+            const res = await api.applyMediaMetadata({ inputPath, tags });
+            if (res && res.success) {
+              if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Metadata written and integrated successfully!';
+              showToast('Metadata saved into video file!');
+            } else {
+              if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Failed: ' + (res?.error || 'Unknown error');
+              showToast('Metadata save error: ' + (res?.error || 'Unknown error'));
+            }
+          } catch (err) {
+            if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Error: ' + err.message;
+            showToast('Metadata save error: ' + err.message);
+          }
+        });
+      }
+
+      // Media Editor Progress Listener
+      if (api.onMediaEditorProgress) {
+        api.onMediaEditorProgress((data) => {
+          if (!data || !data.jobId) return;
+          if (activeConvertJobId && data.jobId === activeConvertJobId) {
+            const pct = Math.min(100, Math.max(0, data.percent || 0));
+            if (el.converterProgressBar) el.converterProgressBar.style.width = pct + '%';
+            if (el.converterPercentLabel) el.converterPercentLabel.textContent = Math.round(pct) + '%';
+            if (el.converterStatsLabel) {
+              el.converterStatsLabel.textContent = `Time: ${data.time || '00:00'} | Speed: ${data.speed || '1x'} | ${data.fps || 0} fps`;
+            }
+          } else if (activeSubJobId && data.jobId === activeSubJobId) {
+            const pct = Math.min(100, Math.max(0, data.percent || 0));
+            if (el.subEmbedProgressBar) el.subEmbedProgressBar.style.width = pct + '%';
+            if (el.subEmbedPercentLabel) el.subEmbedPercentLabel.textContent = Math.round(pct) + '%';
+            if (el.subEmbedStatsLabel) {
+              el.subEmbedStatsLabel.textContent = `Time: ${data.time || '00:00'} | Speed: ${data.speed || '1x'}`;
+            }
+          }
+        });
+      }
+    }
+
     // Periodic status sync for AI Control Bridge
     setInterval(pushPlayerStatus, 1000);
     renderLibraryList({ scrollToTop: true });
@@ -9191,6 +9871,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     updateChromeSolidity();
     pushPlayerStatus();
     initDownloaderUI();
+    initMediaEditorUI();
 
     // Check if desktop shortcut exists; if missing and not dismissed, show prompt banner
     setTimeout(async () => {

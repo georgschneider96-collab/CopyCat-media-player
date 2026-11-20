@@ -1,7 +1,7 @@
 ================================================================================
 # PROJEKT-GESAMTDOKUMENTATION: VLCopyCat / CopyCat Media Player
-Aktualisiert am: 2026-11-20 23:44:53
-Enthaltene Dateien (26):
+Aktualisiert am: 2026-11-21 00:03:05
+Enthaltene Dateien (27):
   - ./package.json
   - ./README.md
   - ./AI_CONTEXT.md
@@ -13,6 +13,7 @@ Enthaltene Dateien (26):
   - ./src/main/session.js
   - ./src/main/updater.js
   - ./src/main/media-resolver.js
+  - ./src/main/media-editor.js
   - ./src/main/downloader.js
   - ./src/main/anime-skip-resolver.js
   - ./src/main/stream-sniffer.js
@@ -812,6 +813,18 @@ const copycatApi = {
   extractEmbeddedSubtitle: (filePath, trackIndex) => ipcRenderer.invoke('media:extractEmbeddedSubtitle', { filePath, trackIndex }),
   stopStream: () => ipcRenderer.invoke('media:stopStream'),
 
+  // Media Editor & File Processing Tools
+  probeMediaMetadata: (filePath) => ipcRenderer.invoke('media-editor:probe', filePath),
+  convertMedia: (opts) => ipcRenderer.invoke('media-editor:convert', opts),
+  cancelMediaJob: (jobId) => ipcRenderer.invoke('media-editor:cancel-job', jobId),
+  searchSubtitles: (queryOpts) => ipcRenderer.invoke('media-editor:search-subtitles', queryOpts),
+  downloadSubtitle: (url, targetPath) => ipcRenderer.invoke('media-editor:download-subtitle', url, targetPath),
+  embedSubtitles: (opts) => ipcRenderer.invoke('media-editor:embed-subtitles', opts),
+  applyMediaMetadata: (opts) => ipcRenderer.invoke('media-editor:apply-metadata', opts),
+  openVideoFileDialog: () => ipcRenderer.invoke('dialog:open-video-file'),
+  openSubtitleFileDialog: () => ipcRenderer.invoke('dialog:open-subtitle-file'),
+  onMediaEditorProgress: (cb) => ipcRenderer.on('media-editor:progress', (_e, data) => cb(data)),
+
   // Filesystem helpers
   getPathForFile: (file) => {
     try {
@@ -1262,7 +1275,11 @@ function createAppContainer() {
     mainLogger: createLogger('Main')
   });
 
-  logger.info('Service Container initialized with services: window, stream, media, session, updater, downloader, logger');
+  // 8. Media Editor Service (Converter, Subtitle Embedder, Metadata Editor)
+  const { mediaEditor } = require('./media-editor');
+  container.register('mediaEditor', mediaEditor);
+
+  logger.info('Service Container initialized with services: window, stream, media, session, updater, downloader, logger, mediaEditor');
   return container;
 }
 
@@ -3056,6 +3073,614 @@ module.exports = {
   buildMediaItem,
   scanMediaFolder,
   resolveCliMediaFile
+};
+``````
+
+################################################################################
+## DATEI: ./src/main/media-editor.js
+################################################################################
+
+``````javascript
+// src/main/media-editor.js
+// Dedicated Media Tools Service: Video Converter, Subtitle Lookup & Embedder, Container Metadata Editor
+// Uses bundled FFmpeg & FFprobe executables for fast, local, offline-first media processing.
+
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const http = require('http');
+const zlib = require('zlib');
+const { spawn, execFile } = require('child_process');
+const mediaResolver = require('./media-resolver');
+const { createLogger } = require('./logger');
+
+const logger = createLogger('MediaEditor');
+
+function parseTimestamp(timeStr) {
+  if (!timeStr) return 0;
+  const parts = timeStr.trim().split(':');
+  if (parts.length === 3) {
+    return (parseFloat(parts[0]) * 3600) + (parseFloat(parts[1]) * 60) + parseFloat(parts[2]);
+  }
+  if (parts.length === 2) {
+    return (parseFloat(parts[0]) * 60) + parseFloat(parts[1]);
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let val = bytes;
+  while (val >= 1024 && i < units.length - 1) {
+    val /= 1024;
+    i++;
+  }
+  return i === 0 ? `${Math.round(val)} B` : `${val.toFixed(1)} ${units[i]}`;
+}
+
+function formatDuration(sec) {
+  if (!sec || isNaN(sec) || sec <= 0) return '00:00';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+class MediaEditor {
+  constructor() {
+    this.activeJobs = new Map(); // jobId -> childProcess
+  }
+
+  /**
+   * Cancel an active conversion or embedding task
+   */
+  cancelJob(jobId) {
+    const child = this.activeJobs.get(jobId);
+    if (child) {
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+        } else {
+          child.kill('SIGKILL');
+        }
+      } catch {}
+      this.activeJobs.delete(jobId);
+      logger.info(`Cancelled media editor job [${jobId}]`);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Read container metadata, stream details and tags using ffprobe
+   */
+  async probeMetadata(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) {
+      throw new Error(`File does not exist: ${filePath}`);
+    }
+
+    const ffprobePath = mediaResolver.FFPROBE_PATH;
+    if (!ffprobePath || !fs.existsSync(ffprobePath)) {
+      throw new Error('Bundled FFprobe binary could not be found.');
+    }
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_format',
+        '-show_streams',
+        '-show_chapters',
+        filePath
+      ];
+
+      execFile(ffprobePath, args, { windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+        if (err) {
+          return reject(new Error(`Failed to probe media metadata: ${err.message}`));
+        }
+
+        try {
+          const data = JSON.parse(stdout || '{}');
+          const fmt = data.format || {};
+          const streams = data.streams || [];
+          const tags = fmt.tags || {};
+
+          const videoStreams = streams.filter((s) => s.codec_type === 'video');
+          const audioStreams = streams.filter((s) => s.codec_type === 'audio');
+          const subtitleStreams = streams.filter((s) => s.codec_type === 'subtitle');
+
+          const primaryVideo = videoStreams[0] || {};
+          const duration = parseFloat(fmt.duration || primaryVideo.duration || '0');
+          const sizeBytes = parseInt(fmt.size || '0', 10) || (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
+
+          const result = {
+            filePath,
+            fileName: path.basename(filePath),
+            formatName: fmt.format_name || path.extname(filePath).replace('.', '').toLowerCase(),
+            durationSec: duration,
+            durationFormatted: formatDuration(duration),
+            sizeBytes,
+            sizeFormatted: formatBytes(sizeBytes),
+            bitRate: parseInt(fmt.bit_rate || '0', 10),
+            chaptersCount: (data.chapters || []).length,
+            tags: {
+              title: tags.title || tags.TITLE || '',
+              show: tags.show || tags.SHOW || tags.album || '',
+              season: tags.season_number || tags.SEASON_NUMBER || tags.season || '',
+              episode: tags.episode_sort || tags.EPISODE_SORT || tags.episode || '',
+              artist: tags.artist || tags.ARTIST || tags.author || '',
+              year: tags.date || tags.DATE || tags.year || tags.creation_time?.slice(0, 4) || '',
+              description: tags.description || tags.comment || tags.COMMENT || ''
+            },
+            video: {
+              codec: primaryVideo.codec_name || 'unknown',
+              width: primaryVideo.width || 0,
+              height: primaryVideo.height || 0,
+              resolution: primaryVideo.width ? `${primaryVideo.width}x${primaryVideo.height}` : 'Unknown',
+              fps: primaryVideo.r_frame_rate ? Math.round(eval(primaryVideo.r_frame_rate) || 0) : 0
+            },
+            audioTracks: audioStreams.map((a, i) => ({
+              index: a.index,
+              trackNumber: i + 1,
+              codec: a.codec_name || 'unknown',
+              channels: a.channels || 2,
+              language: a.tags?.language || a.tags?.lang || 'und',
+              title: a.tags?.title || a.tags?.handler_name || `Audio Track ${i + 1}`,
+              isDefault: Boolean(a.disposition?.default)
+            })),
+            subtitleTracks: subtitleStreams.map((s, i) => ({
+              index: s.index,
+              trackNumber: i + 1,
+              codec: s.codec_name || 'unknown',
+              language: s.tags?.language || s.tags?.lang || 'und',
+              title: s.tags?.title || s.tags?.handler_name || `Subtitle ${i + 1}`,
+              isDefault: Boolean(s.disposition?.default)
+            }))
+          };
+
+          resolve(result);
+        } catch (parseErr) {
+          reject(new Error(`Failed to parse probe JSON output: ${parseErr.message}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * Fast metadata rewrite using FFmpeg lossless container remux
+   */
+  async applyMetadata({ inputPath, outputPath, tags, audioTracks = [] }, onProgress = null) {
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      throw new Error(`Input file does not exist: ${inputPath}`);
+    }
+
+    const ffmpegPath = mediaResolver.FFMPEG_PATH;
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+      throw new Error('Bundled FFmpeg executable could not be resolved.');
+    }
+
+    const outPath = outputPath || path.join(
+      path.dirname(inputPath),
+      `${path.basename(inputPath, path.extname(inputPath))}_tagged${path.extname(inputPath)}`
+    );
+
+    const args = ['-y', '-i', inputPath, '-map', '0', '-c', 'copy'];
+
+    if (tags) {
+      if (tags.title) args.push('-metadata', `title=${tags.title}`);
+      if (tags.show) args.push('-metadata', `show=${tags.show}`, '-metadata', `album=${tags.show}`);
+      if (tags.season) args.push('-metadata', `season_number=${tags.season}`);
+      if (tags.episode) args.push('-metadata', `episode_sort=${tags.episode}`);
+      if (tags.artist) args.push('-metadata', `artist=${tags.artist}`);
+      if (tags.year) args.push('-metadata', `date=${tags.year}`);
+      if (tags.description) args.push('-metadata', `description=${tags.description}`, '-metadata', `comment=${tags.description}`);
+    }
+
+    if (Array.isArray(audioTracks)) {
+      audioTracks.forEach((tr, i) => {
+        if (tr.language) args.push(`-metadata:s:a:${i}`, `language=${tr.language}`);
+        if (tr.title) args.push(`-metadata:s:a:${i}`, `title=${tr.title}`);
+      });
+    }
+
+    if (outPath.toLowerCase().endsWith('.mp4')) {
+      args.push('-movflags', '+faststart');
+    }
+
+    args.push(outPath);
+
+    return new Promise((resolve, reject) => {
+      const jobId = `meta_${Date.now()}`;
+      logger.info(`Applying metadata [${jobId}]: ${inputPath} -> ${outPath}`);
+
+      const child = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      this.activeJobs.set(jobId, child);
+
+      let errText = '';
+      child.stderr.on('data', (d) => { errText += d.toString(); });
+      child.on('error', (err) => {
+        this.activeJobs.delete(jobId);
+        reject(err);
+      });
+
+      child.on('close', (code) => {
+        this.activeJobs.delete(jobId);
+        if (code === 0 && fs.existsSync(outPath)) {
+          resolve({ ok: true, outputPath: outPath });
+        } else {
+          reject(new Error(errText.trim() || `FFmpeg exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  /**
+   * Convert video/audio file to a different format or container
+   */
+  async convertMedia(options, onProgress = null) {
+    const {
+      inputPath,
+      outputPath,
+      targetFormat = 'mp4',
+      mode = 'copy', // 'copy' (fast remux) or 'transcode' (re-encode)
+      crf = 20,
+      preset = 'medium',
+      audioOnly = false
+    } = options;
+
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      throw new Error(`Input file does not exist: ${inputPath}`);
+    }
+
+    const ffmpegPath = mediaResolver.FFMPEG_PATH;
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+      throw new Error('Bundled FFmpeg executable could not be resolved.');
+    }
+
+    const ext = audioOnly ? (targetFormat === 'mp3' ? '.mp3' : '.aac') : `.${targetFormat.toLowerCase().replace('.', '')}`;
+    const defaultOut = path.join(
+      path.dirname(inputPath),
+      `${path.basename(inputPath, path.extname(inputPath))}_converted${ext}`
+    );
+    const finalOut = outputPath || defaultOut;
+
+    const args = ['-y', '-i', inputPath];
+
+    if (audioOnly) {
+      args.push('-vn');
+      if (ext === '.mp3') {
+        args.push('-c:a', 'libmp3lame', '-b:a', '256k');
+      } else {
+        args.push('-c:a', 'aac', '-b:a', '256k');
+      }
+    } else if (mode === 'copy') {
+      args.push('-c', 'copy');
+      if (ext === '.mp4') {
+        args.push('-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart');
+      }
+    } else {
+      // Re-encode video
+      if (ext === '.webm') {
+        args.push('-c:v', 'libvpx-vp9', '-crf', String(crf), '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
+      } else {
+        args.push('-c:v', 'libx264', '-preset', preset, '-crf', String(crf), '-c:a', 'aac', '-b:a', '192k');
+        if (ext === '.mp4') {
+          args.push('-movflags', '+faststart');
+        }
+      }
+    }
+
+    args.push(finalOut);
+
+    const jobId = `conv_${Date.now()}`;
+    logger.info(`Starting media conversion [${jobId}]: ${inputPath} -> ${finalOut} (${mode})`);
+
+    return new Promise((resolve, reject) => {
+      const child = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      this.activeJobs.set(jobId, child);
+
+      let totalDuration = 0;
+      let lastReport = 0;
+      let lastStderr = '';
+
+      child.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        lastStderr = (lastStderr + text).slice(-3000);
+
+        if (!totalDuration) {
+          const durMatch = text.match(/Duration:\s*(\d\d:\d\d:\d\d\.\d\d)/);
+          if (durMatch && durMatch[1]) {
+            totalDuration = parseTimestamp(durMatch[1]);
+          }
+        }
+
+        const timeMatch = text.match(/time=(\d\d:\d\d:\d\d\.\d\d)/);
+        if (timeMatch && timeMatch[1]) {
+          const currentTime = parseTimestamp(timeMatch[1]);
+          const percent = totalDuration > 0 ? Math.min(100, Math.round((currentTime / totalDuration) * 100)) : 0;
+          const speedMatch = text.match(/speed=\s*([\d\.]+)x/);
+          const fpsMatch = text.match(/fps=\s*([\d\.]+)/);
+
+          const now = Date.now();
+          if (now - lastReport > 250 && typeof onProgress === 'function') {
+            lastReport = now;
+            onProgress({
+              jobId,
+              percent,
+              currentTimeFormatted: formatDuration(currentTime),
+              totalDurationFormatted: formatDuration(totalDuration),
+              speed: speedMatch ? `${speedMatch[1]}x` : '',
+              fps: fpsMatch ? fpsMatch[1] : ''
+            });
+          }
+        }
+      });
+
+      child.on('error', (err) => {
+        this.activeJobs.delete(jobId);
+        reject(err);
+      });
+
+      child.on('close', (code) => {
+        this.activeJobs.delete(jobId);
+        if (code === 0 && fs.existsSync(finalOut)) {
+          if (typeof onProgress === 'function') {
+            onProgress({ jobId, percent: 100, status: 'completed' });
+          }
+          resolve({ ok: true, jobId, outputPath: finalOut });
+        } else {
+          reject(new Error(lastStderr.trim() || `Conversion process exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  _detectSubtitleLanguage(filename) {
+    const f = String(filename || '').toLowerCase();
+    if (/(?:^|[._ -])(hu|hun|magyar)(?:[._ -]|$)/i.test(f)) return 'hun';
+    if (/(?:^|[._ -])(ja|jp|jpn|japanese)(?:[._ -]|$)/i.test(f)) return 'jpn';
+    if (/(?:^|[._ -])(de|ger|deutsch|german)(?:[._ -]|$)/i.test(f)) return 'ger';
+    if (/(?:^|[._ -])(en|eng|english)(?:[._ -]|$)/i.test(f)) return 'eng';
+    if (/(?:^|[._ -])(es|spa|spanish|espanol)(?:[._ -]|$)/i.test(f)) return 'spa';
+    if (/(?:^|[._ -])(fr|fre|fra|french|francais)(?:[._ -]|$)/i.test(f)) return 'fre';
+    if (/(?:^|[._ -])(it|ita|italian|italiano)(?:[._ -]|$)/i.test(f)) return 'ita';
+    return 'eng';
+  }
+
+  /**
+   * Search for companion subtitles locally and via online OpenSubtitles REST API
+   */
+  async searchSubtitles({ query, lang = 'eng', filePath = null }) {
+    const localResults = [];
+    const onlineResults = [];
+
+    // 1. Search local folder companion files if filePath is provided
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        const dir = path.dirname(filePath);
+        const baseName = path.basename(filePath, path.extname(filePath)).toLowerCase();
+        const files = fs.readdirSync(dir);
+
+        for (const f of files) {
+          const ext = path.extname(f).toLowerCase();
+          if (['.srt', '.vtt', '.ass', '.sub'].includes(ext)) {
+            const fLower = f.toLowerCase();
+            if (fLower.includes(baseName) || baseName.includes(path.basename(f, ext).toLowerCase())) {
+              localResults.push({
+                id: `local_${localResults.length}`,
+                source: 'local',
+                title: f,
+                fileName: f,
+                filePath: path.join(dir, f),
+                localPath: path.join(dir, f),
+                lang: this._detectSubtitleLanguage(f),
+                format: ext.replace('.', '').toUpperCase(),
+                downloadUrl: null
+              });
+            }
+          }
+        }
+      } catch (err) {
+        logger.debug('Local subtitle search notice:', err.message);
+      }
+    }
+
+    // 2. Search OpenSubtitles REST API
+    const searchQuery = query || (filePath ? path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ') : '');
+    if (searchQuery && searchQuery.trim().length > 1) {
+      try {
+        const subLang = lang === 'hu' ? 'hun' : (lang === 'de' ? 'ger' : (lang === 'ja' ? 'jpn' : lang));
+        const osList = await this._queryOpenSubtitles(searchQuery.trim(), subLang);
+        onlineResults.push(...osList);
+      } catch (err) {
+        logger.debug('Online subtitle search notice:', err.message);
+      }
+    }
+
+    return {
+      success: true,
+      results: [...localResults, ...onlineResults],
+      localResults,
+      onlineResults
+    };
+  }
+
+  _queryOpenSubtitles(query, lang = 'eng') {
+    return new Promise((resolve) => {
+      const url = `https://rest.opensubtitles.org/search/query-${encodeURIComponent(query)}/sublanguageid-${lang}`;
+      const fetchJson = (targetUrl, redirectsRemaining = 4) => {
+        const req = https.get(targetUrl, {
+          headers: { 'User-Agent': 'TemporaryUserAgent' },
+          timeout: 6000
+        }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsRemaining > 0) {
+            req.destroy();
+            return fetchJson(res.headers.location, redirectsRemaining - 1);
+          }
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              const list = JSON.parse(data || '[]');
+              if (Array.isArray(list)) {
+                const mapped = list.slice(0, 15).map((item, idx) => ({
+                  id: item.IDSubtitleFile || `os_${idx}`,
+                  source: 'opensubtitles',
+                  title: item.SubFileName || item.MovieName || `Subtitle ${idx + 1}`,
+                  fileName: item.SubFileName || `sub_${idx + 1}.srt`,
+                  lang: item.SubLanguageID || lang,
+                  format: item.SubFormat ? item.SubFormat.toUpperCase() : 'SRT',
+                  downloadUrl: item.SubDownloadLink || item.ZipDownloadLink,
+                  rating: item.SubRating || '0'
+                }));
+                return resolve(mapped);
+              }
+            } catch {}
+            resolve([]);
+          });
+        });
+        req.on('error', () => resolve([]));
+        req.on('timeout', () => { req.destroy(); resolve([]); });
+      };
+
+      fetchJson(url);
+    });
+  }
+
+  /**
+   * Download online subtitle file and gunzip if needed
+   */
+  async downloadSubtitle(downloadUrl, targetPath) {
+    if (!downloadUrl) throw new Error('Download URL required.');
+    const outPath = targetPath || path.join(
+      process.env.TEMP || process.env.TMP || 'C:\\Windows\\Temp',
+      `copycat_sub_${Date.now()}.srt`
+    );
+
+    return new Promise((resolve, reject) => {
+      const req = https.get(downloadUrl, { headers: { 'User-Agent': 'TemporaryUserAgent' }, timeout: 10000 }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          req.destroy();
+          return this.downloadSubtitle(res.headers.location, outPath).then(resolve).catch(reject);
+        }
+
+        const chunks = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          // Check if gzip compressed (magic bytes 0x1F, 0x8B)
+          if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+            zlib.gunzip(buf, (err, unzipped) => {
+              if (err) return reject(err);
+              fs.writeFileSync(outPath, unzipped);
+              resolve(outPath);
+            });
+          } else {
+            fs.writeFileSync(outPath, buf);
+            resolve(outPath);
+          }
+        });
+      });
+      req.on('error', reject);
+    });
+  }
+
+  /**
+   * Embed subtitle file into video container (Soft subremux or Hardsub burn-in)
+   */
+  async embedSubtitles(options, onProgress = null) {
+    const {
+      inputPath,
+      outputPath,
+      subPath,
+      lang = 'eng',
+      title = 'Subtitles',
+      isDefault = true,
+      mode = 'soft' // 'soft' (lossless container stream) or 'burn' (hardsub)
+    } = options;
+
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      throw new Error(`Input video does not exist: ${inputPath}`);
+    }
+    if (!subPath || !fs.existsSync(subPath)) {
+      throw new Error(`Subtitle file does not exist: ${subPath}`);
+    }
+
+    const ffmpegPath = mediaResolver.FFMPEG_PATH;
+    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+      throw new Error('Bundled FFmpeg executable could not be resolved.');
+    }
+
+    const ext = path.extname(inputPath).toLowerCase();
+    const defaultOut = path.join(
+      path.dirname(inputPath),
+      `${path.basename(inputPath, ext)}_subbed${ext}`
+    );
+    const finalOut = outputPath || defaultOut;
+
+    const args = ['-y', '-i', inputPath];
+
+    if (mode === 'burn') {
+      // Hardsub filter
+      const escapedSub = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      args.push('-vf', `subtitles='${escapedSub}'`, '-c:a', 'copy', finalOut);
+    } else {
+      // Soft subtitle remux
+      args.push('-i', subPath, '-map', '0', '-map', '1:0', '-c', 'copy');
+      if (ext === '.mp4' || ext === '.m4v') {
+        args.push('-c:s', 'mov_text');
+      } else {
+        args.push('-c:s', 'subrip');
+      }
+      args.push(
+        '-metadata:s:s:0', `language=${lang}`,
+        '-metadata:s:s:0', `title=${title}`
+      );
+      if (isDefault) {
+        args.push('-disposition:s:s:0', 'default');
+      }
+      if (ext === '.mp4') {
+        args.push('-movflags', '+faststart');
+      }
+      args.push(finalOut);
+    }
+
+    const jobId = `embed_${Date.now()}`;
+    logger.info(`Embedding subtitles [${jobId}]: ${subPath} into ${inputPath} -> ${finalOut} (${mode})`);
+
+    return new Promise((resolve, reject) => {
+      const child = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      this.activeJobs.set(jobId, child);
+
+      let lastStderr = '';
+      child.stderr.on('data', (d) => { lastStderr += d.toString(); });
+      child.on('error', (err) => {
+        this.activeJobs.delete(jobId);
+        reject(err);
+      });
+
+      child.on('close', (code) => {
+        this.activeJobs.delete(jobId);
+        if (code === 0 && fs.existsSync(finalOut)) {
+          resolve({ ok: true, jobId, outputPath: finalOut });
+        } else {
+          reject(new Error(lastStderr.trim() || `FFmpeg subtitle embed failed with code ${code}`));
+        }
+      });
+    });
+  }
+}
+
+const mediaEditorInstance = new MediaEditor();
+
+module.exports = {
+  MediaEditor,
+  mediaEditor: mediaEditorInstance
 };
 ``````
 
@@ -7515,6 +8140,117 @@ const IPC_HANDLERS = {
   },
 
   // ==========================================
+  // Media Editor & File Tools (Injected: mediaEditor, window)
+  // ==========================================
+  'media-editor:probe': {
+    type: 'handle',
+    description: 'Extract container metadata, audio/subtitle tracks and tags via FFprobe',
+    validate: (filePath) => typeof filePath === 'string' && filePath.trim().length > 0,
+    handler: ({ mediaEditor }, _evt, filePath) => {
+      return mediaEditor.probeMetadata(filePath);
+    }
+  },
+
+  'media-editor:convert': {
+    type: 'handle',
+    description: 'Convert or remux video/audio file with progress reporting',
+    validate: (opts) => opts && typeof opts.inputPath === 'string',
+    handler: ({ mediaEditor, window }, _evt, opts) => {
+      const win = window.getWindow();
+      return mediaEditor.convertMedia(opts, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('media-editor:progress', progress);
+        }
+      });
+    }
+  },
+
+  'media-editor:cancel-job': {
+    type: 'handle',
+    description: 'Cancel an active media conversion or embedding job',
+    validate: (jobId) => typeof jobId === 'string' && jobId.trim().length > 0,
+    handler: ({ mediaEditor }, _evt, jobId) => {
+      return mediaEditor.cancelJob(jobId);
+    }
+  },
+
+  'media-editor:search-subtitles': {
+    type: 'handle',
+    description: 'Search local companion subtitles and online OpenSubtitles repository',
+    handler: ({ mediaEditor }, _evt, queryOpts) => {
+      return mediaEditor.searchSubtitles(queryOpts || {});
+    }
+  },
+
+  'media-editor:download-subtitle': {
+    type: 'handle',
+    description: 'Download online subtitle file to local temp path',
+    validate: (url) => typeof url === 'string' && url.startsWith('http'),
+    handler: ({ mediaEditor }, _evt, url, targetPath) => {
+      return mediaEditor.downloadSubtitle(url, targetPath);
+    }
+  },
+
+  'media-editor:embed-subtitles': {
+    type: 'handle',
+    description: 'Embed or burn subtitle file into video container',
+    validate: (opts) => opts && typeof opts.inputPath === 'string' && typeof opts.subPath === 'string',
+    handler: ({ mediaEditor, window }, _evt, opts) => {
+      const win = window.getWindow();
+      return mediaEditor.embedSubtitles(opts, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('media-editor:progress', progress);
+        }
+      });
+    }
+  },
+
+  'media-editor:apply-metadata': {
+    type: 'handle',
+    description: 'Write container and stream metadata tags into video file via FFmpeg',
+    validate: (opts) => opts && typeof opts.inputPath === 'string',
+    handler: ({ mediaEditor }, _evt, opts) => {
+      return mediaEditor.applyMetadata(opts);
+    }
+  },
+
+  'dialog:open-video-file': {
+    type: 'handle',
+    description: 'Open native file picker for video media files',
+    handler: async ({ window }) => {
+      const { dialog } = require('electron');
+      const win = window.getWindow();
+      const res = await dialog.showOpenDialog(win, {
+        title: 'Select Video File for Editing / Conversion',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Video Files', extensions: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'flv'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      return (!res.canceled && res.filePaths.length > 0) ? res.filePaths[0] : null;
+    }
+  },
+
+  'dialog:open-subtitle-file': {
+    type: 'handle',
+    description: 'Open native file picker for subtitle files',
+    handler: async ({ window }) => {
+      const { dialog } = require('electron');
+      const win = window.getWindow();
+      const res = await dialog.showOpenDialog(win, {
+        title: 'Select Subtitle File',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Subtitle Files', extensions: ['srt', 'vtt', 'ass', 'sub', 'ssa'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      return (!res.canceled && res.filePaths.length > 0) ? res.filePaths[0] : null;
+    }
+  },
+
+  // ==========================================
   // Player Status Sync (Injected: window)
   // ==========================================
   'player:statusUpdate': {
@@ -8745,6 +9481,10 @@ module.exports = {
             <span class="nav-dot"></span>
             <span>Stream &amp; Download</span>
           </button>
+          <button class="settings-nav-btn" data-settings-tab="media-editor">
+            <span class="nav-dot"></span>
+            <span>File &amp; Media Tools</span>
+          </button>
           <div class="settings-group-lbl" style="margin-top:8px;">Developer &amp; AI</div>
           <button class="settings-nav-btn" data-settings-tab="ai">
             <span class="nav-dot"></span>
@@ -9256,6 +9996,347 @@ module.exports = {
                   <div style="font-size:11.5px;color:var(--text-muted);">Automatically load and start playback in CopyCat as soon as a download finishes</div>
                 </div>
                 <button class="jux-switch on" id="sw-auto-play-dl" type="button" role="switch" aria-checked="true" title="Toggle auto-play on download completion"></button>
+              </div>
+            </div>
+
+            <!-- Panel: File & Media Tools (Converter, Subtitle Embedder, Metadata Editor) -->
+            <div class="settings-panel" data-settings-panel="media-editor" style="display:none;flex-direction:column;gap:16px;">
+              <!-- 1. Source Video Selection Card -->
+              <div class="stream-card editor-card">
+                <div class="settings-section-title" style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+                  <span style="color:var(--accent);display:inline-flex;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
+                  </span>
+                  <span>Target Video File</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                  Select a local video file to convert formats, look up &amp; embed subtitles, or inspect and update metadata tags.
+                </div>
+                <div class="stream-input-wrap">
+                  <input type="text" id="editor-source-path" class="stream-url-field" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
+                  <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" title="Browse for video file on your PC">Browse...</button>
+                  <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
+                </div>
+
+                <!-- Probed File Details Badge -->
+                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:10px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text-primary);">
+                      <span id="editor-badge-filename" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">video.mp4</span>
+                      <span id="editor-badge-size" class="update-status-pill" style="font-size:10px;padding:2px 6px;">0 MB</span>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="editor-badge-pills">
+                      <span id="editor-badge-format" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">MP4</span>
+                      <span id="editor-badge-res" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">1920x1080</span>
+                      <span id="editor-badge-duration" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">00:00</span>
+                      <span id="editor-badge-audio" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Audio</span>
+                      <span id="editor-badge-sub" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Subs</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Sub-tab Segmented Switcher -->
+              <div class="editor-subnav" style="display:flex;gap:6px;background:rgba(255,255,255,0.03);padding:4px;border-radius:9px;border:1px solid var(--border-panel);">
+                <button class="editor-subnav-btn active" data-editor-subtab="converter" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:var(--accent);color:#fff;cursor:pointer;transition:all 0.15s ease;">
+                  Format Converter
+                </button>
+                <button class="editor-subnav-btn" data-editor-subtab="subtitles" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;transition:all 0.15s ease;">
+                  Subtitle Embedder &amp; Lookup
+                </button>
+                <button class="editor-subnav-btn" data-editor-subtab="metadata" type="button" style="flex:1;padding:8px 12px;font-size:12px;font-weight:600;border-radius:7px;border:none;background:transparent;color:var(--text-muted);cursor:pointer;transition:all 0.15s ease;">
+                  Metadata &amp; Tags
+                </button>
+              </div>
+
+              <!-- 3. Sub-panel: Format Converter -->
+              <div id="subpanel-converter" class="editor-subpanel" style="display:flex;flex-direction:column;gap:14px;">
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Video &amp; Audio Container Converter</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+                    Convert between popular video formats or extract high-fidelity audio tracks using FFmpeg remuxing or encoding.
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Target Format / Container:</label>
+                      <select id="converter-format-select" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="mp4" selected>MP4 (.mp4 - Universal Compatibility)</option>
+                        <option value="mkv">MKV (.mkv - Matroska Multimedia)</option>
+                        <option value="webm">WebM (.webm - Web Video / VP9)</option>
+                        <option value="mov">MOV (.mov - Apple QuickTime)</option>
+                        <option value="avi">AVI (.avi - Audio Video Interleave)</option>
+                        <option value="mp3">MP3 (.mp3 - Audio Only Extraction)</option>
+                        <option value="aac">AAC (.aac - High Quality Audio)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Conversion Engine Mode:</label>
+                      <select id="converter-mode-select" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="remux" selected>Fast Stream Remux (Lossless, ~2 sec, 0 re-encode)</option>
+                        <option value="reencode">Re-encode (Full transcode via x264/AAC)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <!-- Extra Re-encode Options (hidden in remux mode) -->
+                  <div id="converter-reencode-options" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;padding:10px;background:rgba(255,255,255,0.02);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div>
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Video Resolution Preset:</label>
+                      <select id="converter-res-select" class="stream-url-field" style="width:100%;padding:6px 8px;font-size:12px;">
+                        <option value="original" selected>Same as Source (Preserve)</option>
+                        <option value="1080">1080p Full HD (1920x1080)</option>
+                        <option value="720">720p HD (1280x720)</option>
+                        <option value="480">480p SD (854x480)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Quality Preset (CRF):</label>
+                      <select id="converter-crf-select" class="stream-url-field" style="width:100%;padding:6px 8px;font-size:12px;">
+                        <option value="18">Visually Lossless (CRF 18)</option>
+                        <option value="23" selected>Balanced Quality &amp; Size (CRF 23)</option>
+                        <option value="28">Small File Size (CRF 28)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Custom Destination File (Optional):</label>
+                    <div class="stream-input-wrap">
+                      <input type="text" id="converter-output-path" class="stream-url-field" placeholder="Auto-generated in the same folder with new format extension" spellcheck="false" autocomplete="off" />
+                      <button class="stream-probe-btn" id="btn-converter-browse-dest" type="button" title="Choose specific output file name">Choose...</button>
+                    </div>
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-start-convert" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                      </svg>
+                      <span>Start Conversion</span>
+                    </button>
+                    <div id="converter-summary-text" style="font-size:11.5px;color:var(--text-muted);">
+                      Fast remux preserves 100% original stream bits with no quality loss.
+                    </div>
+                  </div>
+
+                  <!-- Live Conversion Progress Bar & Controls -->
+                  <div id="converter-progress-box" style="display:none;margin-top:14px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                      <span id="converter-status-label" style="font-size:12px;font-weight:600;color:var(--text-primary);">Converting...</span>
+                      <span id="converter-percent-label" style="font-size:12px;font-weight:700;color:var(--accent);">0%</span>
+                    </div>
+                    <div style="height:6px;width:100%;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;margin-bottom:8px;">
+                      <div id="converter-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width 0.2s ease;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);">
+                      <span id="converter-stats-label">Time: 00:00 | Speed: 0x | 0 fps</span>
+                      <button class="ghost-pill-btn" id="btn-converter-cancel" type="button" style="padding:3px 10px;font-size:11px;color:#ff6b6b;border-color:rgba(255,107,107,0.3);">Cancel</button>
+                    </div>
+                  </div>
+
+                  <!-- Completed notification banner -->
+                  <div id="converter-complete-banner" style="display:none;margin-top:14px;padding:12px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                      <div style="display:flex;align-items:center;gap:8px;color:#2ecc71;font-size:12.5px;font-weight:600;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>Conversion Completed Successfully!</span>
+                      </div>
+                      <div style="display:flex;gap:6px;">
+                        <button class="ghost-pill-btn" id="btn-converter-play-result" type="button" style="padding:4px 10px;font-size:11.5px;">Play Now</button>
+                        <button class="ghost-pill-btn" id="btn-converter-show-result" type="button" style="padding:4px 10px;font-size:11.5px;">Show in Folder</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. Sub-panel: Subtitle Embedder & Lookup -->
+              <div id="subpanel-subtitles" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
+                <!-- Online OpenSubtitles & Local Search Card -->
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Online Subtitle Lookup (OpenSubtitles)</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px;">
+                    Search and find matching subtitle tracks for your media without needing an API key.
+                  </div>
+                  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:180px;padding:8px 12px;font-size:12.5px;" placeholder="Movie or series name (e.g. Bleach, Interstellar)" spellcheck="false" autocomplete="off" />
+                    <select id="sub-search-lang" class="stream-url-field" style="width:130px;padding:8px 10px;font-size:12px;cursor:pointer;">
+                      <option value="hun" selected>Hungarian (hun)</option>
+                      <option value="eng">English (eng)</option>
+                      <option value="ger">German (ger)</option>
+                      <option value="jpn">Japanese (jpn)</option>
+                      <option value="spa">Spanish (spa)</option>
+                      <option value="fre">French (fre)</option>
+                      <option value="ita">Italian (ita)</option>
+                      <option value="all">All Languages</option>
+                    </select>
+                    <button class="stream-probe-btn" id="btn-sub-search-online" type="button" style="padding:0 14px;border-radius:6px;background:rgba(var(--accent-rgb),0.15);color:var(--accent);font-weight:600;">
+                      Search
+                    </button>
+                    <button class="ghost-pill-btn" id="btn-sub-detect-local" type="button" style="padding:0 12px;font-size:11.5px;">
+                      Local Files
+                    </button>
+                  </div>
+
+                  <!-- Subtitle Search Results Box -->
+                  <div id="sub-results-container" style="display:none;max-height:220px;overflow-y:auto;border:1px solid var(--border-panel);border-radius:8px;background:rgba(0,0,0,0.2);padding:6px;">
+                    <!-- Injected subtitle rows -->
+                  </div>
+                </div>
+
+                <!-- Embed Subtitle into Video Card -->
+                <div class="stream-card">
+                  <div class="settings-section-title" style="margin-bottom:2px;">Embed Subtitle into Video Container</div>
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+                    Soft-mux subtitle tracks losslessly into MP4/MKV in ~2 seconds, or burn hardcoded subtitles directly into video frames.
+                  </div>
+
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Selected Subtitle File (.srt, .vtt, .ass):</label>
+                    <div class="stream-input-wrap">
+                      <input type="text" id="sub-embed-file" class="stream-url-field" placeholder="Pick a local subtitle file or click 'Use' from search above" spellcheck="false" autocomplete="off" />
+                      <button class="stream-probe-btn" id="btn-sub-browse-local" type="button" title="Browse for local subtitle file">Browse...</button>
+                    </div>
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Embedding Mode:</label>
+                      <select id="sub-embed-mode" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
+                        <option value="soft" selected>Soft Subtitles (Lossless remux, instant, togglable)</option>
+                        <option value="hard">Hardsub Burn-in (Permanently burned into video frames)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Track Language Code:</label>
+                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="hun" placeholder="e.g. hun, eng, jpn" />
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Subtitle Track Title (Display Name in Player):</label>
+                    <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="Hungarian Subtitles" placeholder="e.g. Hungarian (Default), English Full" />
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-start-sub-embed" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      <span>Embed Subtitles</span>
+                    </button>
+                    <div style="font-size:11.5px;color:var(--text-muted);">
+                      Soft subtitles are embedded into container tracks without loss of video quality.
+                    </div>
+                  </div>
+
+                  <!-- Subtitle Embed Progress Box -->
+                  <div id="sub-embed-progress-box" style="display:none;margin-top:14px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                      <span id="sub-embed-status-label" style="font-size:12px;font-weight:600;color:var(--text-primary);">Embedding subtitles...</span>
+                      <span id="sub-embed-percent-label" style="font-size:12px;font-weight:700;color:var(--accent);">0%</span>
+                    </div>
+                    <div style="height:6px;width:100%;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;margin-bottom:8px;">
+                      <div id="sub-embed-progress-bar" style="height:100%;width:0%;background:var(--accent);transition:width 0.2s ease;"></div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-muted);">
+                      <span id="sub-embed-stats-label">Please wait...</span>
+                      <button class="ghost-pill-btn" id="btn-sub-embed-cancel" type="button" style="padding:3px 10px;font-size:11px;color:#ff6b6b;border-color:rgba(255,107,107,0.3);">Cancel</button>
+                    </div>
+                  </div>
+
+                  <!-- Subtitle Embed Complete Banner -->
+                  <div id="sub-embed-complete-banner" style="display:none;margin-top:14px;padding:12px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                      <div style="display:flex;align-items:center;gap:8px;color:#2ecc71;font-size:12.5px;font-weight:600;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <span>Subtitles Successfully Embedded!</span>
+                      </div>
+                      <div style="display:flex;gap:6px;">
+                        <button class="ghost-pill-btn" id="btn-sub-embed-play-result" type="button" style="padding:4px 10px;font-size:11.5px;">Play Now</button>
+                        <button class="ghost-pill-btn" id="btn-sub-embed-show-result" type="button" style="padding:4px 10px;font-size:11.5px;">Show in Folder</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. Sub-panel: Metadata & Tags Editor -->
+              <div id="subpanel-metadata" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
+                <div class="stream-card">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                    <div>
+                      <div class="settings-section-title" style="margin-bottom:2px;">Container Metadata &amp; Tag Editor</div>
+                      <div style="font-size:11.5px;color:var(--text-muted);">
+                        Read, customize, and write metadata tags directly into video files in seconds.
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:6px;">
+                      <button class="ghost-pill-btn" id="btn-meta-pull" type="button" style="padding:5px 12px;font-size:11.5px;">Pull from File</button>
+                      <button class="ghost-pill-btn" id="btn-meta-detect-fn" type="button" style="padding:5px 12px;font-size:11.5px;">Auto-Detect from Filename</button>
+                    </div>
+                  </div>
+
+                  <!-- Form Fields Grid -->
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Title / Episode Title:</label>
+                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. The Day I Became a Shinigami" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Series / Show Name:</label>
+                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Bleach" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Season Number:</label>
+                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Episode Number:</label>
+                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Release Year / Date:</label>
+                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 2004" spellcheck="false" autocomplete="off" />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Artist / Author / Studio:</label>
+                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Studio Pierrot / Tite Kubo" spellcheck="false" autocomplete="off" />
+                    </div>
+                  </div>
+
+                  <div style="margin-bottom:12px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Description / Synopsis:</label>
+                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:68px;padding:8px 10px;font-size:12px;resize:vertical;" placeholder="Enter episode or movie plot synopsis..."></textarea>
+                  </div>
+
+                  <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Audio Stream 1 Language Tag:</label>
+                    <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:160px;padding:7px 10px;font-size:12px;" placeholder="e.g. hun, jpn, eng" />
+                  </div>
+
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-save-metadata" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                        <polyline points="7 3 7 8 15 8"></polyline>
+                      </svg>
+                      <span>Save &amp; Integrate Metadata</span>
+                    </button>
+                    <div id="meta-save-feedback" style="font-size:11.5px;color:var(--text-muted);">
+                      Writes container tags losslessly in ~1s without re-encoding video or audio.
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -12989,6 +14070,96 @@ html, body {
 [data-theme="light"] .top-dl-indicator:hover {
   background: rgba(0, 0, 0, 0.09);
 }
+
+/* ==================== FILE & MEDIA TOOLS (CONVERTER, SUBTITLES, METADATA) ==================== */
+.editor-subnav {
+  display: flex;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border-panel);
+}
+
+.editor-subnav-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.editor-subnav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.editor-subnav-btn.active {
+  background: var(--accent) !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+.sub-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background 0.12s ease;
+}
+
+.sub-result-row:last-child {
+  border-bottom: none;
+}
+
+.sub-result-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sub-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent);
+}
+
+[data-theme="light"] .editor-subnav {
+  background: #F1F3F5;
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .editor-subnav-btn {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .editor-subnav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .editor-subnav-btn.active {
+  background: var(--accent) !important;
+  color: #FFFFFF !important;
+}
+
+[data-theme="light"] .sub-result-row {
+  border-bottom-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .sub-result-row:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
 ``````
 
 ################################################################################
@@ -13757,6 +14928,72 @@ window.VLC_ICONS = {
     topDlPct: $('top-dl-pct'),
     topDlFill: $('top-dl-fill'),
     streamFilenameInput: $('stream-filename-input'),
+
+    // Media Editor & File Processing Tools
+    editorSourcePath: $('editor-source-path'),
+    btnEditorBrowseFile: $('btn-editor-browse-file'),
+    btnEditorUseCurrent: $('btn-editor-use-current'),
+    editorFileBadge: $('editor-file-badge'),
+    editorBadgeFilename: $('editor-badge-filename'),
+    editorBadgeSize: $('editor-badge-size'),
+    editorBadgeFormat: $('editor-badge-format'),
+    editorBadgeRes: $('editor-badge-res'),
+    editorBadgeDuration: $('editor-badge-duration'),
+    editorBadgeAudio: $('editor-badge-audio'),
+    editorBadgeSub: $('editor-badge-sub'),
+    subpanelConverter: $('subpanel-converter'),
+    subpanelSubtitles: $('subpanel-subtitles'),
+    subpanelMetadata: $('subpanel-metadata'),
+    converterFormatSelect: $('converter-format-select'),
+    converterModeSelect: $('converter-mode-select'),
+    converterReencodeOptions: $('converter-reencode-options'),
+    converterResSelect: $('converter-res-select'),
+    converterCrfSelect: $('converter-crf-select'),
+    converterOutputPath: $('converter-output-path'),
+    btnConverterBrowseDest: $('btn-converter-browse-dest'),
+    btnStartConvert: $('btn-start-convert'),
+    converterSummaryText: $('converter-summary-text'),
+    converterProgressBox: $('converter-progress-box'),
+    converterStatusLabel: $('converter-status-label'),
+    converterPercentLabel: $('converter-percent-label'),
+    converterProgressBar: $('converter-progress-bar'),
+    converterStatsLabel: $('converter-stats-label'),
+    btnConverterCancel: $('btn-converter-cancel'),
+    converterCompleteBanner: $('converter-complete-banner'),
+    btnConverterPlayResult: $('btn-converter-play-result'),
+    btnConverterShowResult: $('btn-converter-show-result'),
+    subSearchQuery: $('sub-search-query'),
+    subSearchLang: $('sub-search-lang'),
+    btnSubSearchOnline: $('btn-sub-search-online'),
+    btnSubDetectLocal: $('btn-sub-detect-local'),
+    subResultsContainer: $('sub-results-container'),
+    subEmbedFile: $('sub-embed-file'),
+    btnSubBrowseLocal: $('btn-sub-browse-local'),
+    subEmbedMode: $('sub-embed-mode'),
+    subEmbedLang: $('sub-embed-lang'),
+    subEmbedTitle: $('sub-embed-title'),
+    btnStartSubEmbed: $('btn-start-sub-embed'),
+    subEmbedProgressBox: $('sub-embed-progress-box'),
+    subEmbedStatusLabel: $('sub-embed-status-label'),
+    subEmbedPercentLabel: $('sub-embed-percent-label'),
+    subEmbedProgressBar: $('sub-embed-progress-bar'),
+    subEmbedStatsLabel: $('sub-embed-stats-label'),
+    btnSubEmbedCancel: $('btn-sub-embed-cancel'),
+    subEmbedCompleteBanner: $('sub-embed-complete-banner'),
+    btnSubEmbedPlayResult: $('btn-sub-embed-play-result'),
+    btnSubEmbedShowResult: $('btn-sub-embed-show-result'),
+    btnMetaPull: $('btn-meta-pull'),
+    btnMetaDetectFn: $('btn-meta-detect-fn'),
+    metaFieldTitle: $('meta-field-title'),
+    metaFieldShow: $('meta-field-show'),
+    metaFieldSeason: $('meta-field-season'),
+    metaFieldEpisode: $('meta-field-episode'),
+    metaFieldYear: $('meta-field-year'),
+    metaFieldArtist: $('meta-field-artist'),
+    metaFieldComment: $('meta-field-comment'),
+    metaFieldAudioLang: $('meta-field-audio-lang'),
+    btnSaveMetadata: $('btn-save-metadata'),
+    metaSaveFeedback: $('meta-save-feedback'),
 
     btnThumbCone: $('btn-thumb-cone'),
     btnThumbPaw: $('btn-thumb-paw'),
@@ -20207,6 +21444,14 @@ window.VLC_ICONS = {
           renderHotkeysTable();
         } else if (target === 'stream-download') {
           if (el.streamUrlInput) setTimeout(() => el.streamUrlInput.focus(), 80);
+        } else if (target === 'media-editor') {
+          if (el.editorSourcePath && !el.editorSourcePath.value) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http') && typeof window.mediaEditorInspectTarget === 'function') {
+              el.editorSourcePath.value = cur;
+              window.mediaEditorInspectTarget(cur);
+            }
+          }
         }
       });
     });
@@ -22407,6 +23652,612 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
     });
 
+    // ==================== FILE & MEDIA TOOLS (CONVERTER, SUBTITLES, METADATA) ====================
+    function initMediaEditorUI() {
+      let currentProbedMeta = null;
+      let activeConvertJobId = null;
+      let activeSubJobId = null;
+      let lastConvertedPath = null;
+      let lastEmbeddedPath = null;
+
+      function formatBytes(bytes) {
+        if (!bytes || isNaN(bytes)) return '0 B';
+        const k = 1024;
+        const dm = 1;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+      }
+
+      function formatDurationSecs(secs) {
+        if (!secs || isNaN(secs)) return '00:00';
+        const s = Math.floor(secs);
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const rem = s % 60;
+        if (h > 0) {
+          return `${h}:${m.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+        }
+        return `${m.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+      }
+
+      // Sub-tab switcher
+      document.querySelectorAll('.editor-subnav-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const subtab = btn.dataset.editorSubtab;
+          document.querySelectorAll('.editor-subnav-btn').forEach((b) => {
+            const isActive = b === btn;
+            b.classList.toggle('active', isActive);
+            b.style.background = isActive ? 'var(--accent)' : 'transparent';
+            b.style.color = isActive ? '#FFFFFF' : 'var(--text-muted)';
+          });
+          if (el.subpanelConverter) el.subpanelConverter.style.display = subtab === 'converter' ? 'flex' : 'none';
+          if (el.subpanelSubtitles) el.subpanelSubtitles.style.display = subtab === 'subtitles' ? 'flex' : 'none';
+          if (el.subpanelMetadata) el.subpanelMetadata.style.display = subtab === 'metadata' ? 'flex' : 'none';
+        });
+      });
+
+      // Probe selected target media file
+      async function inspectTargetFile(filePath) {
+        if (!filePath || !api.probeMediaMetadata) return;
+        try {
+          const meta = await api.probeMediaMetadata(filePath);
+          if (!meta || !meta.success) {
+            showToast(meta?.error || 'Failed to inspect media file');
+            return;
+          }
+          currentProbedMeta = meta;
+
+          // Update badge
+          if (el.editorFileBadge) el.editorFileBadge.style.display = 'block';
+          if (el.editorBadgeFilename) el.editorBadgeFilename.textContent = meta.filename || 'media';
+          if (el.editorBadgeSize) el.editorBadgeSize.textContent = formatBytes(meta.size);
+          if (el.editorBadgeFormat) el.editorBadgeFormat.textContent = (meta.format || 'video').toUpperCase();
+          if (el.editorBadgeRes) {
+            el.editorBadgeRes.textContent = meta.videoStream ? `${meta.videoStream.width}x${meta.videoStream.height}` : 'Audio';
+          }
+          if (el.editorBadgeDuration) el.editorBadgeDuration.textContent = formatDurationSecs(meta.duration);
+          if (el.editorBadgeAudio) {
+            const aCount = meta.audioStreams?.length || 0;
+            el.editorBadgeAudio.textContent = `${aCount} Audio Track${aCount === 1 ? '' : 's'}`;
+          }
+          if (el.editorBadgeSub) {
+            const sCount = meta.subtitleStreams?.length || 0;
+            el.editorBadgeSub.textContent = `${sCount} Subtitle${sCount === 1 ? '' : 's'}`;
+          }
+
+          // Auto-update suggested output path for converter
+          updateSuggestedOutputPath();
+
+          // Auto-populate subtitle query if empty or default
+          if (el.subSearchQuery && (!el.subSearchQuery.value || el.subSearchQuery.value.trim() === '')) {
+            const cleanName = (meta.filename || '').replace(/\.[^/.]+$/, '').replace(/[._-]/g, ' ').trim();
+            el.subSearchQuery.value = cleanName;
+          }
+
+          // Auto-fill metadata form fields
+          populateMetadataFields(meta);
+        } catch (err) {
+          console.error('inspectTargetFile error:', err);
+        }
+      }
+
+      window.mediaEditorInspectTarget = inspectTargetFile;
+
+      function updateSuggestedOutputPath() {
+        const src = el.editorSourcePath?.value?.trim();
+        if (!src || !el.converterOutputPath) return;
+        const fmt = el.converterFormatSelect?.value || 'mp4';
+        const lastDot = src.lastIndexOf('.');
+        if (lastDot !== -1) {
+          el.converterOutputPath.value = src.substring(0, lastDot) + '.' + fmt;
+        }
+      }
+
+      function populateMetadataFields(meta) {
+        if (!meta) return;
+        const tags = meta.tags || {};
+        const filename = meta.filename || '';
+        const baseName = filename.replace(/\.[^/.]+$/, '');
+
+        let parsedSeason = '';
+        let parsedEpisode = '';
+        let parsedShow = baseName;
+
+        const seMatch = baseName.match(/[sS](\d+)[eE](\d+)/i) || baseName.match(/(\d+)x(\d+)/i);
+        if (seMatch) {
+          parsedSeason = parseInt(seMatch[1], 10).toString();
+          parsedEpisode = parseInt(seMatch[2], 10).toString();
+          parsedShow = baseName.substring(0, seMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+        } else {
+          const epMatch = baseName.match(/(?:ep|episode|[._ -])(\d{1,4})(?:[._ -]|$)/i);
+          if (epMatch) {
+            parsedEpisode = parseInt(epMatch[1], 10).toString();
+            parsedShow = baseName.substring(0, epMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+          }
+        }
+
+        if (el.metaFieldTitle) el.metaFieldTitle.value = tags.title || tags.TITLE || baseName.replace(/[._]/g, ' ');
+        if (el.metaFieldShow) el.metaFieldShow.value = tags.show || tags.SHOW || tags.series || parsedShow || '';
+        if (el.metaFieldSeason) el.metaFieldSeason.value = tags.season_number || tags.season || parsedSeason || '';
+        if (el.metaFieldEpisode) el.metaFieldEpisode.value = tags.episode_sort || tags.episode_id || tags.track || parsedEpisode || '';
+        if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || tags.creation_time?.substring(0, 4) || '';
+        if (el.metaFieldArtist) el.metaFieldArtist.value = tags.artist || tags.ARTIST || tags.composer || tags.creator || '';
+        if (el.metaFieldComment) el.metaFieldComment.value = tags.comment || tags.description || tags.synopsis || '';
+        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = meta.audioStreams?.[0]?.lang || 'hun';
+      }
+
+      // Browse source video
+      if (el.btnEditorBrowseFile) {
+        el.btnEditorBrowseFile.addEventListener('click', async () => {
+          if (!api.openVideoFileDialog) return;
+          const filePath = await api.openVideoFileDialog();
+          if (filePath && el.editorSourcePath) {
+            el.editorSourcePath.value = filePath;
+            inspectTargetFile(filePath);
+          }
+        });
+      }
+
+      // Use currently playing media
+      if (el.btnEditorUseCurrent) {
+        el.btnEditorUseCurrent.addEventListener('click', () => {
+          const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+          if (cur && !cur.startsWith('http')) {
+            if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            inspectTargetFile(cur);
+            showToast('Loaded currently playing video into editor');
+          } else {
+            showToast('No local video currently playing');
+          }
+        });
+      }
+
+      if (el.editorSourcePath) {
+        el.editorSourcePath.addEventListener('change', () => {
+          const val = el.editorSourcePath.value.trim();
+          if (val) inspectTargetFile(val);
+        });
+      }
+
+      // Converter options
+      if (el.converterFormatSelect) {
+        el.converterFormatSelect.addEventListener('change', () => {
+          updateSuggestedOutputPath();
+          const fmt = el.converterFormatSelect.value;
+          if (fmt === 'mp3' || fmt === 'aac') {
+            if (el.converterSummaryText) el.converterSummaryText.textContent = 'Extracts high-fidelity audio stream to separate audio file.';
+          } else {
+            const mode = el.converterModeSelect?.value || 'remux';
+            if (el.converterSummaryText) {
+              el.converterSummaryText.textContent = mode === 'remux' 
+                ? 'Fast remux preserves 100% original stream bits with no quality loss.'
+                : 'Re-encode transcodes video & audio for compatibility or compression.';
+            }
+          }
+        });
+      }
+
+      if (el.converterModeSelect) {
+        el.converterModeSelect.addEventListener('change', () => {
+          const isReencode = el.converterModeSelect.value === 'reencode';
+          if (el.converterReencodeOptions) {
+            el.converterReencodeOptions.style.display = isReencode ? 'grid' : 'none';
+          }
+          if (el.converterSummaryText) {
+            el.converterSummaryText.textContent = isReencode
+              ? 'Re-encode transcodes video & audio for compatibility or compression.'
+              : 'Fast remux preserves 100% original stream bits with no quality loss.';
+          }
+        });
+      }
+
+      // Converter browse dest
+      if (el.btnConverterBrowseDest) {
+        el.btnConverterBrowseDest.addEventListener('click', async () => {
+          if (!api.openVideoFileDialog) return;
+          const res = await api.openVideoFileDialog();
+          if (res && el.converterOutputPath) el.converterOutputPath.value = res;
+        });
+      }
+
+      // Start conversion
+      if (el.btnStartConvert) {
+        el.btnStartConvert.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file first');
+            return;
+          }
+          const format = el.converterFormatSelect?.value || 'mp4';
+          const mode = el.converterModeSelect?.value || 'remux';
+          let outputPath = el.converterOutputPath?.value?.trim();
+          if (!outputPath) {
+            const lastDot = inputPath.lastIndexOf('.');
+            outputPath = (lastDot !== -1 ? inputPath.substring(0, lastDot) : inputPath) + '_converted.' + format;
+          }
+
+          const crf = el.converterCrfSelect?.value || '23';
+          const resolution = el.converterResSelect?.value || 'original';
+          activeConvertJobId = 'conv_' + Date.now();
+
+          if (el.converterProgressBox) el.converterProgressBox.style.display = 'block';
+          if (el.converterProgressBar) el.converterProgressBar.style.width = '0%';
+          if (el.converterPercentLabel) el.converterPercentLabel.textContent = '0%';
+          if (el.converterStatusLabel) el.converterStatusLabel.textContent = mode === 'remux' ? 'Fast Remuxing...' : 'Re-encoding...';
+          if (el.converterCompleteBanner) el.converterCompleteBanner.style.display = 'none';
+
+          try {
+            const res = await api.convertMedia({
+              jobId: activeConvertJobId,
+              inputPath,
+              outputPath,
+              format,
+              mode,
+              crf,
+              resolution,
+              faststart: true
+            });
+
+            if (res && res.success) {
+              lastConvertedPath = res.outputPath || outputPath;
+              if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+              if (el.converterCompleteBanner) el.converterCompleteBanner.style.display = 'block';
+              showToast('Conversion completed successfully!');
+              playDownloadCompletionChime();
+            } else {
+              showToast(res?.error || 'Conversion failed');
+              if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+            }
+          } catch (err) {
+            showToast('Conversion error: ' + (err.message || err));
+            if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+          } finally {
+            activeConvertJobId = null;
+          }
+        });
+      }
+
+      // Cancel conversion
+      if (el.btnConverterCancel) {
+        el.btnConverterCancel.addEventListener('click', () => {
+          if (activeConvertJobId && api.cancelMediaJob) {
+            api.cancelMediaJob(activeConvertJobId);
+            showToast('Conversion canceled');
+            if (el.converterProgressBox) el.converterProgressBox.style.display = 'none';
+            activeConvertJobId = null;
+          }
+        });
+      }
+
+      // Play / Reveal converted file
+      if (el.btnConverterPlayResult) {
+        el.btnConverterPlayResult.addEventListener('click', async () => {
+          if (!lastConvertedPath) return;
+          const bundle = await api.resolvePaths([lastConvertedPath]);
+          if (bundle) ingestOpenedBundle(bundle, true, { append: false });
+          toggleSettingsModal(false);
+        });
+      }
+      if (el.btnConverterShowResult) {
+        el.btnConverterShowResult.addEventListener('click', () => {
+          if (lastConvertedPath && api.revealInExplorer) api.revealInExplorer(lastConvertedPath);
+        });
+      }
+
+      // Subtitle Search (Online & Local)
+      async function executeSubtitleSearch(query, lang) {
+        if (!api.searchSubtitles) return;
+        const filePath = el.editorSourcePath?.value?.trim();
+        if (el.subResultsContainer) {
+          el.subResultsContainer.style.display = 'block';
+          el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">Searching for matching subtitles...</div>';
+        }
+
+        try {
+          const res = await api.searchSubtitles({ query, lang, filePath });
+          if (!res || !res.success || (!res.localResults?.length && !res.onlineResults?.length)) {
+            if (el.subResultsContainer) {
+              el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">No subtitles found. Try refining the search keywords.</div>';
+            }
+            return;
+          }
+
+          renderSubtitleResults(res.localResults || [], res.onlineResults || []);
+        } catch (err) {
+          if (el.subResultsContainer) {
+            el.subResultsContainer.innerHTML = `<div style="padding:12px;font-size:12px;color:#ff6b6b;text-align:center;">Search failed: ${err.message || err}</div>`;
+          }
+        }
+      }
+
+      function renderSubtitleResults(localSubs, onlineSubs) {
+        if (!el.subResultsContainer) return;
+        el.subResultsContainer.innerHTML = '';
+
+        if (localSubs.length > 0) {
+          const secHeader = document.createElement('div');
+          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:4px 6px 6px 6px;';
+          secHeader.textContent = `Local Companion Subtitles (${localSubs.length})`;
+          el.subResultsContainer.appendChild(secHeader);
+
+          localSubs.forEach((sub) => {
+            const row = document.createElement('div');
+            row.className = 'sub-result-row';
+            row.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
+                <span class="sub-pill">${escapeHtml(sub.lang || 'LOCAL')}</span>
+                <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sub.filePath)}">${escapeHtml(sub.fileName)}</span>
+              </div>
+              <button class="ghost-pill-btn" style="padding:3px 10px;font-size:11px;font-weight:600;margin-left:8px;" type="button">Use Subtitle</button>
+            `;
+            row.querySelector('button').addEventListener('click', () => {
+              if (el.subEmbedFile) el.subEmbedFile.value = sub.filePath;
+              if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+              if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Local'} Subtitles`;
+              showToast(`Selected: ${sub.fileName}`);
+            });
+            el.subResultsContainer.appendChild(row);
+          });
+        }
+
+        if (onlineSubs.length > 0) {
+          const secHeader = document.createElement('div');
+          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:8px 6px 6px 6px;';
+          secHeader.textContent = `OpenSubtitles Results (${onlineSubs.length})`;
+          el.subResultsContainer.appendChild(secHeader);
+
+          onlineSubs.slice(0, 15).forEach((sub) => {
+            const row = document.createElement('div');
+            row.className = 'sub-result-row';
+            row.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
+                <span class="sub-pill">${escapeHtml(sub.lang || 'SUB')}</span>
+                <div style="display:flex;flex-direction:column;overflow:hidden;">
+                  <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sub.fileName)}">${escapeHtml(sub.fileName)}</span>
+                  <span style="font-size:10px;color:var(--text-muted);">${sub.downloads ? sub.downloads.toLocaleString() + ' DLs' : ''} ${sub.format ? '• ' + sub.format.toUpperCase() : ''}</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;margin-left:8px;">
+                <button class="ghost-pill-btn btn-dl-sub" style="padding:3px 8px;font-size:11px;" type="button">Download</button>
+                <button class="stream-probe-btn btn-use-sub" style="padding:3px 10px;font-size:11px;border-radius:5px;font-weight:600;background:rgba(var(--accent-rgb),0.18);color:var(--accent);" type="button">Use &amp; Embed</button>
+              </div>
+            `;
+
+            // Download handler
+            row.querySelector('.btn-dl-sub').addEventListener('click', async () => {
+              if (!sub.downloadUrl || !api.downloadSubtitle) return;
+              showToast('Downloading subtitle...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              if (dlRes && dlRes.success) {
+                showToast('Subtitle saved: ' + dlRes.targetPath);
+                if (api.revealInExplorer) api.revealInExplorer(dlRes.targetPath);
+              } else {
+                showToast('Failed to download subtitle');
+              }
+            });
+
+            // Use & Embed handler
+            row.querySelector('.btn-use-sub').addEventListener('click', async () => {
+              if (!sub.downloadUrl || !api.downloadSubtitle) return;
+              showToast('Downloading subtitle for embedder...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              if (dlRes && dlRes.success) {
+                if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
+                if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+                if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Online'} Subtitles`;
+                showToast('Subtitle ready for embedding!');
+              } else {
+                showToast('Failed to fetch subtitle');
+              }
+            });
+
+            el.subResultsContainer.appendChild(row);
+          });
+        }
+      }
+
+      if (el.btnSubSearchOnline) {
+        el.btnSubSearchOnline.addEventListener('click', () => {
+          const query = el.subSearchQuery?.value?.trim() || '';
+          const lang = el.subSearchLang?.value || 'hun';
+          if (!query) {
+            showToast('Please enter movie or series name');
+            return;
+          }
+          executeSubtitleSearch(query, lang);
+        });
+      }
+
+      if (el.btnSubDetectLocal) {
+        el.btnSubDetectLocal.addEventListener('click', () => {
+          const filePath = el.editorSourcePath?.value?.trim();
+          if (!filePath) {
+            showToast('Select a video file to look for local companion subtitles');
+            return;
+          }
+          executeSubtitleSearch('', 'all');
+        });
+      }
+
+      if (el.btnSubBrowseLocal) {
+        el.btnSubBrowseLocal.addEventListener('click', async () => {
+          if (!api.openSubtitleFileDialog) return;
+          const subPath = await api.openSubtitleFileDialog();
+          if (subPath && el.subEmbedFile) {
+            el.subEmbedFile.value = subPath;
+            showToast('Selected subtitle: ' + subPath.split(/[/\\]/).pop());
+          }
+        });
+      }
+
+      // Embed subtitle into video
+      if (el.btnStartSubEmbed) {
+        el.btnStartSubEmbed.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          const subPath = el.subEmbedFile?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file');
+            return;
+          }
+          if (!subPath) {
+            showToast('Please select a subtitle file (.srt, .vtt, .ass) to embed');
+            return;
+          }
+
+          const mode = el.subEmbedMode?.value || 'soft';
+          const lang = el.subEmbedLang?.value?.trim() || 'hun';
+          const title = el.subEmbedTitle?.value?.trim() || 'Subtitles';
+
+          activeSubJobId = 'sub_' + Date.now();
+
+          if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'block';
+          if (el.subEmbedProgressBar) el.subEmbedProgressBar.style.width = '0%';
+          if (el.subEmbedPercentLabel) el.subEmbedPercentLabel.textContent = '0%';
+          if (el.subEmbedStatusLabel) el.subEmbedStatusLabel.textContent = mode === 'soft' ? 'Remuxing subtitle track...' : 'Burning subtitles into video...';
+          if (el.subEmbedCompleteBanner) el.subEmbedCompleteBanner.style.display = 'none';
+
+          try {
+            const res = await api.embedSubtitles({
+              jobId: activeSubJobId,
+              inputPath,
+              subPath,
+              lang,
+              title,
+              mode
+            });
+
+            if (res && res.success) {
+              lastEmbeddedPath = res.outputPath;
+              if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+              if (el.subEmbedCompleteBanner) el.subEmbedCompleteBanner.style.display = 'block';
+              showToast('Subtitles embedded successfully!');
+              playDownloadCompletionChime();
+            } else {
+              showToast(res?.error || 'Failed to embed subtitles');
+              if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+            }
+          } catch (err) {
+            showToast('Embed error: ' + (err.message || err));
+            if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+          } finally {
+            activeSubJobId = null;
+          }
+        });
+      }
+
+      if (el.btnSubEmbedCancel) {
+        el.btnSubEmbedCancel.addEventListener('click', () => {
+          if (activeSubJobId && api.cancelMediaJob) {
+            api.cancelMediaJob(activeSubJobId);
+            showToast('Subtitle embedding canceled');
+            if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
+            activeSubJobId = null;
+          }
+        });
+      }
+
+      if (el.btnSubEmbedPlayResult) {
+        el.btnSubEmbedPlayResult.addEventListener('click', async () => {
+          if (!lastEmbeddedPath) return;
+          const bundle = await api.resolvePaths([lastEmbeddedPath]);
+          if (bundle) ingestOpenedBundle(bundle, true, { append: false });
+          toggleSettingsModal(false);
+        });
+      }
+      if (el.btnSubEmbedShowResult) {
+        el.btnSubEmbedShowResult.addEventListener('click', () => {
+          if (lastEmbeddedPath && api.revealInExplorer) api.revealInExplorer(lastEmbeddedPath);
+        });
+      }
+
+      // Metadata & Tags Editor
+      if (el.btnMetaPull) {
+        el.btnMetaPull.addEventListener('click', () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Select a video file first');
+            return;
+          }
+          inspectTargetFile(inputPath);
+          showToast('Pulled latest file metadata tags');
+        });
+      }
+
+      if (el.btnMetaDetectFn) {
+        el.btnMetaDetectFn.addEventListener('click', () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Select a video file first');
+            return;
+          }
+          const fn = inputPath.split(/[/\\]/).pop();
+          populateMetadataFields({ filename: fn, tags: {} });
+          showToast('Parsed show, season & episode from filename');
+        });
+      }
+
+      if (el.btnSaveMetadata) {
+        el.btnSaveMetadata.addEventListener('click', async () => {
+          const inputPath = el.editorSourcePath?.value?.trim();
+          if (!inputPath) {
+            showToast('Please select a target video file first');
+            return;
+          }
+          if (!api.applyMediaMetadata) return;
+
+          const tags = {
+            title: el.metaFieldTitle?.value?.trim(),
+            show: el.metaFieldShow?.value?.trim(),
+            season: el.metaFieldSeason?.value?.trim(),
+            episode: el.metaFieldEpisode?.value?.trim(),
+            year: el.metaFieldYear?.value?.trim(),
+            artist: el.metaFieldArtist?.value?.trim(),
+            comment: el.metaFieldComment?.value?.trim(),
+            audioLang: el.metaFieldAudioLang?.value?.trim()
+          };
+
+          if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Saving metadata tags losslessly...';
+
+          try {
+            const res = await api.applyMediaMetadata({ inputPath, tags });
+            if (res && res.success) {
+              if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Metadata written and integrated successfully!';
+              showToast('Metadata saved into video file!');
+            } else {
+              if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Failed: ' + (res?.error || 'Unknown error');
+              showToast('Metadata save error: ' + (res?.error || 'Unknown error'));
+            }
+          } catch (err) {
+            if (el.metaSaveFeedback) el.metaSaveFeedback.textContent = 'Error: ' + err.message;
+            showToast('Metadata save error: ' + err.message);
+          }
+        });
+      }
+
+      // Media Editor Progress Listener
+      if (api.onMediaEditorProgress) {
+        api.onMediaEditorProgress((data) => {
+          if (!data || !data.jobId) return;
+          if (activeConvertJobId && data.jobId === activeConvertJobId) {
+            const pct = Math.min(100, Math.max(0, data.percent || 0));
+            if (el.converterProgressBar) el.converterProgressBar.style.width = pct + '%';
+            if (el.converterPercentLabel) el.converterPercentLabel.textContent = Math.round(pct) + '%';
+            if (el.converterStatsLabel) {
+              el.converterStatsLabel.textContent = `Time: ${data.time || '00:00'} | Speed: ${data.speed || '1x'} | ${data.fps || 0} fps`;
+            }
+          } else if (activeSubJobId && data.jobId === activeSubJobId) {
+            const pct = Math.min(100, Math.max(0, data.percent || 0));
+            if (el.subEmbedProgressBar) el.subEmbedProgressBar.style.width = pct + '%';
+            if (el.subEmbedPercentLabel) el.subEmbedPercentLabel.textContent = Math.round(pct) + '%';
+            if (el.subEmbedStatsLabel) {
+              el.subEmbedStatsLabel.textContent = `Time: ${data.time || '00:00'} | Speed: ${data.speed || '1x'}`;
+            }
+          }
+        });
+      }
+    }
+
     // Periodic status sync for AI Control Bridge
     setInterval(pushPlayerStatus, 1000);
     renderLibraryList({ scrollToTop: true });
@@ -22414,6 +24265,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     updateChromeSolidity();
     pushPlayerStatus();
     initDownloaderUI();
+    initMediaEditorUI();
 
     // Check if desktop shortcut exists; if missing and not dismissed, show prompt banner
     setTimeout(async () => {
@@ -22506,7 +24358,8 @@ async function runAll() {
     'src/main/anime-skip-resolver.js',
     'src/main/server.js',
     'src/main/session.js',
-    'src/main/updater.js'
+    'src/main/updater.js',
+    'src/main/media-editor.js'
   ];
 
   for (const rel of jsFiles) {
@@ -22527,6 +24380,7 @@ async function runAll() {
     assert(container.has('media'), 'Container must have media service');
     assert(container.has('session'), 'Container must have session service');
     assert(container.has('updater'), 'Container must have updater service');
+    assert(container.has('mediaEditor'), 'Container must have mediaEditor service');
 
     const media = container.get('media');
     assert(typeof media.probeMediaFile === 'function', 'Media service must expose probeMediaFile');
@@ -23227,6 +25081,56 @@ async function runAll() {
     assert.strictEqual(headers['Origin'], 'https://custom-origin.com');
   });
 
+  // Test Group 10: Media Editor & File Processing Service
+  console.log('\n--- 10. Media Editor & File Processing Service (Converter, Subtitles, Metadata) ---');
+  const { MediaEditor } = require(path.join(projectRoot, 'src/main/media-editor'));
+  const editor = new MediaEditor();
+
+  runTest('MediaEditor exposes all required core methods', () => {
+    assert(typeof editor.probeMetadata === 'function', 'probeMetadata must be a function');
+    assert(typeof editor.convertMedia === 'function', 'convertMedia must be a function');
+    assert(typeof editor.cancelJob === 'function', 'cancelJob must be a function');
+    assert(typeof editor.searchSubtitles === 'function', 'searchSubtitles must be a function');
+    assert(typeof editor.downloadSubtitle === 'function', 'downloadSubtitle must be a function');
+    assert(typeof editor.embedSubtitles === 'function', 'embedSubtitles must be a function');
+    assert(typeof editor.applyMetadata === 'function', 'applyMetadata must be a function');
+  });
+
+  await runAsyncTest('MediaEditor searchSubtitles discovers local companion subtitle files', async () => {
+    const tmpDir = path.join(projectRoot, 'tests', 'fixtures_tmp');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+    const dummyVideo = path.join(tmpDir, 'Bleach_Episode_01.mp4');
+    const dummySrtHun = path.join(tmpDir, 'Bleach_Episode_01.hun.srt');
+    const dummySrtEng = path.join(tmpDir, 'Bleach_Episode_01.eng.srt');
+    fs.writeFileSync(dummyVideo, 'dummy video content');
+    fs.writeFileSync(dummySrtHun, '1\n00:00:01,000 --> 00:00:04,000\nSzia vilag!\n');
+    fs.writeFileSync(dummySrtEng, '1\n00:00:01,000 --> 00:00:04,000\nHello world!\n');
+
+    try {
+      const res = await editor.searchSubtitles({ filePath: dummyVideo, lang: 'all' });
+      assert(res.success === true, 'searchSubtitles should succeed');
+      assert(Array.isArray(res.localResults), 'localResults must be an array');
+      assert.strictEqual(res.localResults.length, 2, 'Should find 2 companion subtitles');
+
+      const langs = res.localResults.map(r => r.lang);
+      assert(langs.includes('hun'), 'Should identify Hungarian subtitle');
+      assert(langs.includes('eng'), 'Should identify English subtitle');
+    } finally {
+      try {
+        fs.unlinkSync(dummyVideo);
+        fs.unlinkSync(dummySrtHun);
+        fs.unlinkSync(dummySrtEng);
+        fs.rmdirSync(tmpDir);
+      } catch {}
+    }
+  });
+
+  runTest('MediaEditor cancelJob safely handles unknown jobIds', () => {
+    const res = editor.cancelJob('nonexistent_job_123');
+    assert.strictEqual(res, false, 'Canceling nonexistent job returns false');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');
@@ -23274,6 +25178,7 @@ $PriorityOrder = @(
     './src/main/session.js',
     './src/main/updater.js',
     './src/main/media-resolver.js',
+    './src/main/media-editor.js',
     './src/main/downloader.js',
     './src/main/anime-skip-resolver.js',
     './src/main/stream-sniffer.js',

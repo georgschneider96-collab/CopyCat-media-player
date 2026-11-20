@@ -665,6 +665,117 @@ const IPC_HANDLERS = {
   },
 
   // ==========================================
+  // Media Editor & File Tools (Injected: mediaEditor, window)
+  // ==========================================
+  'media-editor:probe': {
+    type: 'handle',
+    description: 'Extract container metadata, audio/subtitle tracks and tags via FFprobe',
+    validate: (filePath) => typeof filePath === 'string' && filePath.trim().length > 0,
+    handler: ({ mediaEditor }, _evt, filePath) => {
+      return mediaEditor.probeMetadata(filePath);
+    }
+  },
+
+  'media-editor:convert': {
+    type: 'handle',
+    description: 'Convert or remux video/audio file with progress reporting',
+    validate: (opts) => opts && typeof opts.inputPath === 'string',
+    handler: ({ mediaEditor, window }, _evt, opts) => {
+      const win = window.getWindow();
+      return mediaEditor.convertMedia(opts, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('media-editor:progress', progress);
+        }
+      });
+    }
+  },
+
+  'media-editor:cancel-job': {
+    type: 'handle',
+    description: 'Cancel an active media conversion or embedding job',
+    validate: (jobId) => typeof jobId === 'string' && jobId.trim().length > 0,
+    handler: ({ mediaEditor }, _evt, jobId) => {
+      return mediaEditor.cancelJob(jobId);
+    }
+  },
+
+  'media-editor:search-subtitles': {
+    type: 'handle',
+    description: 'Search local companion subtitles and online OpenSubtitles repository',
+    handler: ({ mediaEditor }, _evt, queryOpts) => {
+      return mediaEditor.searchSubtitles(queryOpts || {});
+    }
+  },
+
+  'media-editor:download-subtitle': {
+    type: 'handle',
+    description: 'Download online subtitle file to local temp path',
+    validate: (url) => typeof url === 'string' && url.startsWith('http'),
+    handler: ({ mediaEditor }, _evt, url, targetPath) => {
+      return mediaEditor.downloadSubtitle(url, targetPath);
+    }
+  },
+
+  'media-editor:embed-subtitles': {
+    type: 'handle',
+    description: 'Embed or burn subtitle file into video container',
+    validate: (opts) => opts && typeof opts.inputPath === 'string' && typeof opts.subPath === 'string',
+    handler: ({ mediaEditor, window }, _evt, opts) => {
+      const win = window.getWindow();
+      return mediaEditor.embedSubtitles(opts, (progress) => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('media-editor:progress', progress);
+        }
+      });
+    }
+  },
+
+  'media-editor:apply-metadata': {
+    type: 'handle',
+    description: 'Write container and stream metadata tags into video file via FFmpeg',
+    validate: (opts) => opts && typeof opts.inputPath === 'string',
+    handler: ({ mediaEditor }, _evt, opts) => {
+      return mediaEditor.applyMetadata(opts);
+    }
+  },
+
+  'dialog:open-video-file': {
+    type: 'handle',
+    description: 'Open native file picker for video media files',
+    handler: async ({ window }) => {
+      const { dialog } = require('electron');
+      const win = window.getWindow();
+      const res = await dialog.showOpenDialog(win, {
+        title: 'Select Video File for Editing / Conversion',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Video Files', extensions: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'flv'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      return (!res.canceled && res.filePaths.length > 0) ? res.filePaths[0] : null;
+    }
+  },
+
+  'dialog:open-subtitle-file': {
+    type: 'handle',
+    description: 'Open native file picker for subtitle files',
+    handler: async ({ window }) => {
+      const { dialog } = require('electron');
+      const win = window.getWindow();
+      const res = await dialog.showOpenDialog(win, {
+        title: 'Select Subtitle File',
+        properties: ['openFile'],
+        filters: [
+          { name: 'Subtitle Files', extensions: ['srt', 'vtt', 'ass', 'sub', 'ssa'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+      return (!res.canceled && res.filePaths.length > 0) ? res.filePaths[0] : null;
+    }
+  },
+
+  // ==========================================
   // Player Status Sync (Injected: window)
   // ==========================================
   'player:statusUpdate': {
