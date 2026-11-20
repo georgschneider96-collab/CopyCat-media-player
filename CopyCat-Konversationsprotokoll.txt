@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:10:12Z
-Gesamtanzahl Turns: 421 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 23:15:52
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:22:19Z
+Gesamtanzahl Turns: 423 Dialogschritte
+Zuletzt aktualisiert: 2026-11-20 23:40:26
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23580,7 +23580,7 @@ Instead of relying on web scrapers, you can get the original releases directly f
 BENUTZER:
 https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/ would this link work?
 
-[Hintergrund-Aktionen: run_command (23), write_file (10), read_file (3), schedule (2), manage_subagents (2), edit_file (2), invoke_subagent (1), send_message (1)]
+[Hintergrund-Aktionen: run_command (24), write_file (10), read_file (3), schedule (2), manage_subagents (2), edit_file (2), invoke_subagent (1), send_message (1)]
 
 ANTIGRAVITY / ASSISTENT:
 I am inspecting https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/ right now to test its video embeds and server links. I will report the exact findings shortly.
@@ -23590,4 +23590,83 @@ I'm currently verifying the exact video stream resolution on that Indavideo embe
 Checking the live stream now.
 
 Still waiting for the stream probe to complete.
+
+**Yes, this link works!** 
+
+Here is what the live inspection of `https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/` revealed:
+
+---
+
+### What Was Found
+
+1. **No Cloudflare or Login Walls**:
+   * The page loads freely without any bot challenge or account requirement.
+2. **Auto-Embedded Player**:
+   * It directly embeds an **Indavideo** player (`https://embed.indavideo.hu/player/video/29cb5bf1aa`) containing ***Bleach OVA #01 magyar felirattal [NKWT]***.
+3. **Stream Type**:
+   * The embedded player serves a standard progressive MP4 stream (`.mp4`) via HTTP 206 Partial Content.
+
+---
+
+### How to Play or Download It in CopyCat
+
+1. Press **`Ctrl+N`** in CopyCat (**Open Network Stream & Downloader**).
+2. Paste the URL:
+   ```text
+   https://jobbmintatv.pro/online/Bleach/0_evad/1_resz/
+   ```
+3. CopyCat's background sniffer will load the page, trigger the embedded Indavideo player, capture the direct video stream, and start playback or queue it for download.
+*(Alternatively, pasting the direct Indavideo embed URL `https://embed.indavideo.hu/player/video/29cb5bf1aa` also works immediately.)*
+
+
+--------------------------------------------------------------------------------
+[DIALOG #422] | Schritt 23198 | Zeitstempel: 2026-11-20T22:18:07Z
+--------------------------------------------------------------------------------
+BENUTZER:
+what about this url https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/
+
+[Hintergrund-Aktionen: run_command (3), send_message (1)]
+
+ANTIGRAVITY / ASSISTENT:
+I am checking https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/ right now to inspect the video player and servers for Season 1 Episode 1. I'll report the exact findings shortly.
+
+**Yes, this link works seamlessly in CopyCat!**
+
+Here is what we confirmed during the stream inspection of `https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/`:
+
+---
+
+### 1. Audio & Language
+* **Audio Track:** This episode features the official **Hungarian Dub (*Magyar szinkron*)** (the broadcast dub by Animax / AXN).
+* Unlike the OVA (`0_evad/1_resz/`) which had Japanese audio with Hungarian subtitles, Episode 1 of Season 1 is fully dubbed in Hungarian.
+* With the recent update, CopyCat's audio selector automatically recognizes and tags Hungarian (`hu` / `magyar`) tracks.
+
+---
+
+### 2. Video Provider & Stream Architecture
+* **Underlying Host:** The episode embeds **Videa** ([videa.hu player](https://videa.hu/player?v=syCYGZsuSRZgSkIU)).
+* **Delivery:** Videa delivers the episode as a standard **progressive MP4 stream** (served from `video4.videa.hu`) with standard HTTP 206 byte-range support.
+* **Compatibility:** Full seeking, fast-forwarding, buffer caching, and offline downloading work without issues.
+
+---
+
+### 3. How to Play or Download in CopyCat
+
+1. Press **`Ctrl + N`** in CopyCat.
+2. Paste either:
+   * The page URL: `https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/`
+   * Or the direct Videa embed URL: `https://videa.hu/player?v=syCYGZsuSRZgSkIU`
+3. Click **Play** or **Download**. CopyCat's stream sniffer will automatically trigger the iframe player, capture the media URL, and start playback or queue the download.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #423] | Schritt 23212 | Zeitstempel: 2026-11-20T22:22:19Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+(Kein Textinhalt / Bild- bzw. Medienanhang übertragen)
+
+[Hintergrund-Aktionen: run_command (115), manage_task (36), edit_file (17), write_file (15)]
+
+ANTIGRAVITY / ASSISTENT:
+(Turn in Bearbeitung / Analyse aktiv)
 
