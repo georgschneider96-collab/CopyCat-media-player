@@ -31,6 +31,12 @@ CopyCat media player/
 │   │   ├── media-resolver.js # Fast local ffprobe media analyzer, byte-range handler & subtitle extraction
 │   │   ├── downloader.js     # Native stream downloader, sliding-window season queue, JIT sniffer, Dual-Audio muxer & Explorer view optimizer
 │   │   ├── anime-skip-resolver.js # Automated AniList/MyAnimeList & AniSkip resolver with FFmpeg chapter embedding
+│   │   ├── stream-sniffer.js # Modular Sniffer Router & Dispatcher
+│   │   ├── sniffers/
+│   │   │   ├── base-sniffer.js   # Dynamic CDN Header Registry, cache & headless Chromium runner
+│   │   │   ├── miruro-sniffer.js # Miruro & strm.cx Anime Sniffer with Sub/Dub discovery
+│   │   │   ├── videa-sniffer.js  # Hungarian Anime & Video Host Sniffer (Videa, JobbMintATv, Indavideo)
+│   │   │   └── generic-sniffer.js# Universal HTML5 Video & fallback sniffer
 │   │   ├── ipc.js            # Declarative IPC Registry with input validation & injected services
 │   │   └── server.js         # Local HTTP Server (`127.0.0.1:4500`) with dynamic CommandRegistry
 │   ├── index.html        # Player DOM: Top Header, Left Library Sidebar, Center Video Stage,

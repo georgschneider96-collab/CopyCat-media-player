@@ -57,6 +57,10 @@ async function runAll() {
     'src/main/media-resolver.js',
     'src/main/stream-manager.js',
     'src/main/stream-sniffer.js',
+    'src/main/sniffers/base-sniffer.js',
+    'src/main/sniffers/miruro-sniffer.js',
+    'src/main/sniffers/videa-sniffer.js',
+    'src/main/sniffers/generic-sniffer.js',
     'src/main/downloader.js',
     'src/main/anime-skip-resolver.js',
     'src/main/server.js',
@@ -732,6 +736,54 @@ async function runAll() {
     const targetSubLang = stateDe.activeSessionSubLang || 'en';
     const matchIdx = ep2SubTracks.findIndex((s) => matchesLanguage(s, targetSubLang));
     assert.strictEqual(matchIdx, 1, 'Episode 2 automatically selects German subtitles matching user session selection');
+  });
+
+  console.log('\n--- 9. Modular Sniffer Strategy Router & Dispatcher ---');
+
+  const {
+    getSnifferStrategy,
+    SNIFFER_STRATEGIES,
+    registerStreamHostHeaders,
+    getRequiredHeadersForUrl
+  } = require('../src/main/stream-sniffer');
+
+  runTest('getSnifferStrategy routes Miruro & strm.cx URLs to MiruroSniffer', () => {
+    const s1 = getSnifferStrategy('https://www.miruro.cx/watch/series?ep=1');
+    const s2 = getSnifferStrategy('https://strm.cx/embed/video123');
+    const s3 = getSnifferStrategy('https://coralarch.coastowl.top/m/index.m3u8');
+    assert.strictEqual(s1.name, 'MiruroSniffer');
+    assert.strictEqual(s2.name, 'MiruroSniffer');
+    assert.strictEqual(s3.name, 'MiruroSniffer');
+  });
+
+  runTest('getSnifferStrategy routes Hungarian anime hosts to VideaSniffer', () => {
+    const s1 = getSnifferStrategy('https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/');
+    const s2 = getSnifferStrategy('https://videa.hu/player?v=syCYGZsuSRZgSkIU');
+    const s3 = getSnifferStrategy('https://embed.indavideo.hu/player/video/29cb5bf1aa');
+    assert.strictEqual(s1.name, 'VideaSniffer');
+    assert.strictEqual(s2.name, 'VideaSniffer');
+    assert.strictEqual(s3.name, 'VideaSniffer');
+  });
+
+  runTest('getSnifferStrategy falls back to GenericSniffer for unknown or generic video sites', () => {
+    const s1 = getSnifferStrategy('https://example.com/videos/stream');
+    const s2 = getSnifferStrategy('https://myvideosite.org/watch?id=42');
+    const s3 = getSnifferStrategy('');
+    const s4 = getSnifferStrategy(null);
+    assert.strictEqual(s1.name, 'GenericSniffer');
+    assert.strictEqual(s2.name, 'GenericSniffer');
+    assert.strictEqual(s3.name, 'GenericSniffer');
+    assert.strictEqual(s4.name, 'GenericSniffer');
+  });
+
+  runTest('registerStreamHostHeaders and getRequiredHeadersForUrl manage dynamic anti-hotlink headers', () => {
+    registerStreamHostHeaders('https://custom-cdn.example.com/video/chunk1.mp4', {
+      Referer: 'https://custom-origin.com/player',
+      Origin: 'https://custom-origin.com'
+    });
+    const headers = getRequiredHeadersForUrl('https://custom-cdn.example.com/video/chunk2.mp4');
+    assert.strictEqual(headers['Referer'], 'https://custom-origin.com/player');
+    assert.strictEqual(headers['Origin'], 'https://custom-origin.com');
   });
 
   console.log('\n====================================================');

@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:22:19Z
-Gesamtanzahl Turns: 423 Dialogschritte
-Zuletzt aktualisiert: 2026-11-20 23:40:26
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-20T22:36:14Z
+Gesamtanzahl Turns: 424 Dialogschritte
+Zuletzt aktualisiert: 2026-11-20 23:44:53
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -23665,7 +23665,56 @@ Here is what we confirmed during the stream inspection of `https://jobbmintatv.p
 BENUTZER:
 (Kein Textinhalt / Bild- bzw. Medienanhang übertragen)
 
-[Hintergrund-Aktionen: run_command (115), manage_task (36), edit_file (17), write_file (15)]
+[Hintergrund-Aktionen: run_command (118), manage_task (36), edit_file (17), write_file (15)]
+
+ANTIGRAVITY / ASSISTENT:
+### Why that warning appeared in your screenshot
+
+In the screenshot, CopyCat detected that `https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/` is an HTML webpage, but the headless sniffer initially timed out and didn't auto-extract the video stream. 
+
+We investigated the background network traffic and identified three exact causes:
+
+1. **Extension-less video stream URL:** Videa serves its video stream as a signed progressive MP4 from `video4.videa.hu/static/360p/5.965786.1987961.1.0.1.1?md5=...&expires=...`. Because the URL does not contain `.mp4` or `.m3u8` in the query path, the sniffer previously ignored it instead of detecting Chromium's `resourceType === 'media'` event.
+2. **Third-party ad iframe delays:** JobbMintATv embeds several external banner frames (e.g. ad networks) that delayed the sniffer's frame inspection loop.
+3. **FFmpeg demuxer flag mismatch:** In `downloader.js`, the HLS-specific flags (`-allowed_segment_extensions ALL` and `-extension_picky 0`) were being passed to FFmpeg for direct MP4 URLs, causing FFmpeg to throw `Option allowed_segment_extensions not found. Error opening input files: Option not found`.
+
+---
+
+### What was fixed
+
+* **Media Engine Sniffing:** Updated [stream-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/stream-sniffer.js) to intercept Chromium's native `resourceType === 'media'` requests and progressive CDN endpoints (including Videa and Indavideo), capturing the direct media stream even without file extension indicators in the URL.
+* **Frame Timeout Protection:** Subframe script inspection is now raced against individual timeouts so cross-origin ad iframes can never hang or stall the sniffer.
+* **FFmpeg Progressive MP4 Fix:** In [downloader.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/downloader.js), HLS segment flags are now strictly conditioned on HLS streams (`isHls`), allowing direct MP4 streams to download and remux at full speed (~30x realtime).
+* **Automated Test Suite:** All 49 automated unit tests continue to pass cleanly (49/49).
+
+---
+
+### How to use it now
+
+1. Restart or reload your CopyCat instance so the updated backend code is loaded.
+2. Press **`Ctrl + N`** (Stream & Download).
+3. Paste the URL:
+   ```text
+   https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/
+   ```
+4. Click **Probe** (or click **Play in CopyCat** / **Download to PC**).
+5. CopyCat will now auto-extract the stream:
+   ```text
+   ✓ Direct Media Stream Auto-Extracted!
+   Bleach 1.évad 01.rész
+   Format: MP4/Stream • Ready to Play or Download
+   ```
+
+*(Note: You can also paste the direct Videa player link `https://videa.hu/player?v=syCYGZsuSRZgSkIU` directly if you ever want to bypass the host page entirely).*
+
+
+--------------------------------------------------------------------------------
+[DIALOG #424] | Schritt 23596 | Zeitstempel: 2026-11-20T22:36:14Z
+--------------------------------------------------------------------------------
+BENUTZER:
+I hope you divede the sniffers. by that I mean depending on what url ist pasted into the player it chooses the preferable streamsniffer. instead of making 1 massive mess of a sniffer
+
+[Hintergrund-Aktionen: run_command (18), write_file (5), edit_file (4)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

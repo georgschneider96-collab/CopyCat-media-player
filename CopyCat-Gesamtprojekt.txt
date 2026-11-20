@@ -1,7 +1,7 @@
 ================================================================================
 # PROJEKT-GESAMTDOKUMENTATION: VLCopyCat / CopyCat Media Player
-Aktualisiert am: 2026-11-20 23:40:25
-Enthaltene Dateien (22):
+Aktualisiert am: 2026-11-20 23:44:53
+Enthaltene Dateien (26):
   - ./package.json
   - ./README.md
   - ./AI_CONTEXT.md
@@ -16,6 +16,10 @@ Enthaltene Dateien (22):
   - ./src/main/downloader.js
   - ./src/main/anime-skip-resolver.js
   - ./src/main/stream-sniffer.js
+  - ./src/main/sniffers/base-sniffer.js
+  - ./src/main/sniffers/miruro-sniffer.js
+  - ./src/main/sniffers/videa-sniffer.js
+  - ./src/main/sniffers/generic-sniffer.js
   - ./src/main/ipc.js
   - ./src/main/server.js
   - ./src/index.html
@@ -378,6 +382,12 @@ CopyCat media player/
 │   │   ├── media-resolver.js # Fast local ffprobe media analyzer, byte-range handler & subtitle extraction
 │   │   ├── downloader.js     # Native stream downloader, sliding-window season queue, JIT sniffer, Dual-Audio muxer & Explorer view optimizer
 │   │   ├── anime-skip-resolver.js # Automated AniList/MyAnimeList & AniSkip resolver with FFmpeg chapter embedding
+│   │   ├── stream-sniffer.js # Modular Sniffer Router & Dispatcher
+│   │   ├── sniffers/
+│   │   │   ├── base-sniffer.js   # Dynamic CDN Header Registry, cache & headless Chromium runner
+│   │   │   ├── miruro-sniffer.js # Miruro & strm.cx Anime Sniffer with Sub/Dub discovery
+│   │   │   ├── videa-sniffer.js  # Hungarian Anime & Video Host Sniffer (Videa, JobbMintATv, Indavideo)
+│   │   │   └── generic-sniffer.js# Universal HTML5 Video & fallback sniffer
 │   │   ├── ipc.js            # Declarative IPC Registry with input validation & injected services
 │   │   └── server.js         # Local HTTP Server (`127.0.0.1:4500`) with dynamic CommandRegistry
 │   ├── index.html        # Player DOM: Top Header, Left Library Sidebar, Center Video Stage,
@@ -6016,22 +6026,103 @@ module.exports = {
 
 ``````javascript
 // src/main/stream-sniffer.js
-// Headless Webpage Stream & Subtitle Sniffer + Dynamic CDN Header Registry for CopyCat Media Player
-// Features:
-//  - Dynamic CDN Header Registry: records exact Referer/Origin headers for any sniffed stream host
-//  - Universal pattern matching for strm.cx / *.top/(m|a|s)/ CDNs (frostheron, coastowl, keeply, etc.)
-//  - 5-minute in-memory sniff cache for instant 0ms re-probes (Probe -> Play -> Download)
-//  - 450ms settle window to prioritize Master HLS playlists and capture companion .vtt/.srt subtitles
+// Modular Sniffer Router & Dispatcher for CopyCat Media Player
+// Routes stream sniffing tasks to specialized strategies (Miruro, Videa, Generic HTML5)
+
+const {
+  isStrmCdnUrl,
+  registerStreamHostHeaders,
+  getRequiredHeadersForUrl,
+  sniffCache,
+  SNIFF_CACHE_TTL_MS,
+  runSnifferSession,
+  logger
+} = require('./sniffers/base-sniffer');
+
+const miruroSniffer = require('./sniffers/miruro-sniffer');
+const videaSniffer = require('./sniffers/videa-sniffer');
+const genericSniffer = require('./sniffers/generic-sniffer');
+
+// Ordered list of specialized sniffer strategies (highest specificity to fallback)
+const SNIFFER_STRATEGIES = [
+  miruroSniffer,
+  videaSniffer,
+  genericSniffer
+];
+
+/**
+ * Resolve the most appropriate sniffer strategy for a given URL
+ * @param {string} url
+ * @returns {object} The matching sniffer strategy
+ */
+function getSnifferStrategy(url) {
+  if (!url || typeof url !== 'string') return genericSniffer;
+  const trimmed = url.trim();
+  const matched = SNIFFER_STRATEGIES.find((strategy) => {
+    try {
+      return typeof strategy.matches === 'function' && strategy.matches(trimmed);
+    } catch {
+      return false;
+    }
+  });
+  return matched || genericSniffer;
+}
+
+/**
+ * Sniff and extract the primary media stream and companion subtitles from any webpage URL
+ * Automatically routes to the optimal sniffer strategy based on URL pattern and host.
+ *
+ * @param {string} webpageUrl
+ * @param {number} timeoutMs
+ * @returns {Promise<{ streamUrl: string, title: string, isHls: boolean, isDash: boolean, subtitles: Array<{url: string, label: string}>, pageUrl: string } | null>}
+ */
+function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
+  const normalizedUrl = (webpageUrl || '').trim();
+
+  // 1. Check in-memory 5-minute sniff cache for instant re-probes
+  const cached = sniffCache.get(normalizedUrl);
+  if (cached && (Date.now() - cached.timestamp < SNIFF_CACHE_TTL_MS)) {
+    if (cached.result && Array.isArray(cached.result.subtitles) && cached.result.subtitles.length > 0) {
+      logger.info('Returning cached stream sniff result with subtitles for:', normalizedUrl);
+      return Promise.resolve(cached.result);
+    }
+  }
+
+  // 2. Select specialized sniffer strategy based on URL
+  const strategy = getSnifferStrategy(normalizedUrl);
+  logger.info(`[Router] Selected sniffer strategy "${strategy.name}" for target: ${normalizedUrl}`);
+
+  // 3. Delegate to core runner with selected strategy
+  return runSnifferSession(normalizedUrl, timeoutMs, strategy);
+}
+
+module.exports = {
+  extractStreamFromWebpage,
+  registerStreamHostHeaders,
+  getRequiredHeadersForUrl,
+  isStrmCdnUrl,
+  getSnifferStrategy,
+  SNIFFER_STRATEGIES
+};
+``````
+
+################################################################################
+## DATEI: ./src/main/sniffers/base-sniffer.js
+################################################################################
+
+``````javascript
+// src/main/sniffers/base-sniffer.js
+// Core Browser Engine, Dynamic CDN Header Registry & Shared Infrastructure for Sniffer Strategies
 
 const { BrowserWindow, session } = require('electron');
-const { createLogger } = require('./logger');
+const { createLogger } = require('../logger');
 
 const logger = createLogger('StreamSniffer');
 
 const SNIFF_CACHE_TTL_MS = 5 * 60 * 1000;
 const sniffCache = new Map(); // webpageUrl -> { timestamp, result }
 
-// Dynamic registry mapping CDN hostnames (e.g. coralarch.coastowl.top) -> { Referer, Origin }
+// Dynamic registry mapping CDN hostnames (e.g. coralarch.coastowl.top, video4.videa.hu) -> { Referer, Origin }
 const hostHeaderRegistry = new Map();
 
 /**
@@ -6086,24 +6177,13 @@ function getRequiredHeadersForUrl(targetUrl, customHeaders = {}) {
 }
 
 /**
- * Sniff and extract the primary media stream and companion subtitles from any webpage URL
+ * Run a headless sniffer session using a specialized Strategy object
  * @param {string} webpageUrl
  * @param {number} timeoutMs
- * @returns {Promise<{ streamUrl: string, title: string, isHls: boolean, isDash: boolean, subtitles: Array<{url: string, label: string}>, pageUrl: string } | null>}
+ * @param {object} strategy
  */
-function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
+function runSnifferSession(webpageUrl, timeoutMs, strategy) {
   const normalizedUrl = (webpageUrl || '').trim();
-  const cached = sniffCache.get(normalizedUrl);
-  if (cached && (Date.now() - cached.timestamp < SNIFF_CACHE_TTL_MS)) {
-    if (cached.result && Array.isArray(cached.result.subtitles) && cached.result.subtitles.length > 0) {
-      logger.info('Returning cached stream sniff result with subtitles for:', normalizedUrl);
-      return Promise.resolve(cached.result);
-    }
-  }
-
-  const pageIsMiruro = /miruro|strm\.cx/i.test(normalizedUrl);
-  let pageOrigin = '';
-  try { pageOrigin = new URL(normalizedUrl).origin; } catch {}
 
   return new Promise((resolve) => {
     let finished = false;
@@ -6116,6 +6196,9 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
     let activeLangCheck = null;
     let switchTriggered = false;
     let streamIndexAtSwitch = -1;
+
+    let pageOrigin = '';
+    try { pageOrigin = new URL(normalizedUrl).origin; } catch {}
 
     const collectInPageSubtitles = async () => {
       if (!snifferWin || snifferWin.isDestroyed()) return;
@@ -6208,13 +6291,13 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
                 return results;
               })()
             `).catch(() => []);
-            const timeoutPromise = new Promise(r => setTimeout(() => r([]), 450));
+            const timeoutPromise = new Promise((r) => setTimeout(() => r([]), 450));
             const list = await Promise.race([execPromise, timeoutPromise]);
 
             if (Array.isArray(list)) {
               for (const item of list) {
                 if (item && item.label && (item.content || item.url)) {
-                  if (!capturedSubtitles.some(s => s.label === item.label)) {
+                  if (!capturedSubtitles.some((s) => s.label === item.label)) {
                     capturedSubtitles.push(item);
                   }
                 }
@@ -6237,7 +6320,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
         try {
           await Promise.race([
             collectInPageSubtitles(),
-            new Promise(r => setTimeout(r, 600))
+            new Promise((r) => setTimeout(r, 600))
           ]);
         } catch {}
         try {
@@ -6295,12 +6378,13 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
         isHls: primary.isHls,
         isDash: primary.isDash,
         subtitles: capturedSubtitles.slice(0, 8),
-        pageUrl: normalizedUrl
+        pageUrl: normalizedUrl,
+        strategy: strategy.name
       };
     };
 
     timer = setTimeout(async () => {
-      logger.debug('Sniffer timeout reached');
+      logger.debug(`[${strategy.name}] Sniffer timeout reached (${timeoutMs}ms)`);
       await finalize(buildResultFromCaptured());
     }, timeoutMs);
 
@@ -6314,28 +6398,34 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
 
       sniffSession.webRequest.onBeforeSendHeaders((details, callback) => {
         const u = details.url;
-        if (isStrmCdnUrl(u)) {
-          details.requestHeaders['Referer'] = 'https://strm.cx/';
-          details.requestHeaders['Origin'] = 'https://strm.cx';
-          registerStreamHostHeaders(u, {
-            Referer: 'https://strm.cx/',
-            Origin: 'https://strm.cx'
+        const lower = u.toLowerCase();
+
+        // 1. Delegate to strategy-specific headers hook if available
+        if (typeof strategy.onBeforeSendHeaders === 'function') {
+          const handled = strategy.onBeforeSendHeaders(details, {
+            registerStreamHostHeaders,
+            pageOrigin,
+            normalizedUrl
           });
-        } else {
-          // Record any live Referer/Origin that the embedded player sets on media CDN hosts
-          const ref = details.requestHeaders['Referer'] || details.requestHeaders['referer'] || details.referrer || '';
-          const orig = details.requestHeaders['Origin'] || details.requestHeaders['origin'] || '';
-          if (ref || orig || pageIsMiruro) {
-            const effectiveRef = pageIsMiruro ? 'https://strm.cx/' : (ref || (pageOrigin ? `${pageOrigin}/` : ''));
-            const effectiveOrig = pageIsMiruro ? 'https://strm.cx' : (orig || pageOrigin || '');
-            if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4|\.vtt|\.srt|\/sub/i.test(u) || details.resourceType === 'media' || lower.includes('videa.hu') || lower.includes('indavideo.hu'))) {
-              registerStreamHostHeaders(u, {
-                Referer: effectiveRef,
-                Origin: effectiveOrig
-              });
-            }
+          if (handled) {
+            return callback({ cancel: false, requestHeaders: details.requestHeaders });
           }
         }
+
+        // 2. Default dynamic CDN header registration
+        const ref = details.requestHeaders['Referer'] || details.requestHeaders['referer'] || details.referrer || '';
+        const orig = details.requestHeaders['Origin'] || details.requestHeaders['origin'] || '';
+        if (ref || orig) {
+          const effectiveRef = ref || (pageOrigin ? `${pageOrigin}/` : '');
+          const effectiveOrig = orig || pageOrigin || '';
+          if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4|\.vtt|\.srt|\/sub/i.test(u) || details.resourceType === 'media' || lower.includes('videa.hu') || lower.includes('indavideo.hu'))) {
+            registerStreamHostHeaders(u, {
+              Referer: effectiveRef,
+              Origin: effectiveOrig
+            });
+          }
+        }
+
         callback({ cancel: false, requestHeaders: details.requestHeaders });
       });
 
@@ -6343,6 +6433,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
         const u = details.url;
         const lower = u.toLowerCase();
 
+        // Check if request is considered an ad
         const isAd = (
           lower.includes('google-analytics') ||
           lower.includes('doubleclick') ||
@@ -6350,13 +6441,14 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           lower.includes('popads') ||
           lower.includes('exoclick') ||
           lower.includes('adocean') ||
-          lower.includes('2mdn.net')
+          lower.includes('2mdn.net') ||
+          (typeof strategy.isAdUrl === 'function' && strategy.isAdUrl(u, details))
         );
 
         if (!isAd && !finished) {
           // 1. Check for subtitle tracks (.vtt / .srt or CDN /s/ /sub/ paths)
           if ((/\.(vtt|srt)(\?|$)/i.test(u) || lower.includes('/sub.vtt') || lower.includes('/subtitles/') || /\/s\/[a-zA-Z0-9_\-]+/i.test(u) || /\.top\/s\//i.test(u) || lower.includes('/sub/')) && !lower.includes('thumb') && !lower.includes('sprite')) {
-            if (pageIsMiruro || isStrmCdnUrl(u)) {
+            if (isStrmCdnUrl(u)) {
               registerStreamHostHeaders(u, {
                 Referer: 'https://strm.cx/',
                 Origin: 'https://strm.cx'
@@ -6372,106 +6464,62 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
             }
           }
 
-          // 2. Check for media streams (.m3u8, .mpd, .mp4, .webm, or resourceType === 'media')
-          const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|ico)(\?|$)/i.test(u);
-          if (!isStaticAsset) {
-            const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
-            const isDash = lower.includes('.mpd');
-            const isDirectVideo = details.resourceType === 'media' || /\.(mp4|webm|m4v|mkv)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm') || (lower.includes('video') && /\/static\/[0-9]+p\//.test(lower));
+          // 2. Check for media streams via strategy classifier or universal defaults
+          let mediaCheck = null;
+          if (typeof strategy.classifyMediaRequest === 'function') {
+            mediaCheck = strategy.classifyMediaRequest(details, u, lower);
+          }
 
-            if (isHls || isDash || isDirectVideo) {
-            if (pageIsMiruro || isStrmCdnUrl(u)) {
+          if (!mediaCheck) {
+            const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|ico)(\?|$)/i.test(u);
+            if (!isStaticAsset) {
+              const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
+              const isDash = lower.includes('.mpd');
+              const isDirectVideo = details.resourceType === 'media' || /\.(mp4|webm|m4v|mkv)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm') || (lower.includes('video') && /\/static\/[0-9]+p\//.test(lower));
+              if (isHls || isDash || isDirectVideo) {
+                mediaCheck = { isHls, isDash, isDirectVideo };
+              }
+            }
+          }
+
+          if (mediaCheck) {
+            const { isHls, isDash } = mediaCheck;
+            if (isStrmCdnUrl(u)) {
               registerStreamHostHeaders(u, {
                 Referer: 'https://strm.cx/',
                 Origin: 'https://strm.cx'
               });
             }
             if (!capturedStreams.some((s) => s.url === u)) {
-              logger.info('Sniffer captured media stream:', u);
+              logger.info(`[${strategy.name}] Sniffer captured media stream:`, u);
               capturedStreams.push({ url: u, isHls, isDash });
 
-              if (capturedStreams.length === 1 && (pageIsMiruro || isStrmCdnUrl(u))) {
-                if (snifferWin && !snifferWin.isDestroyed()) {
-                  snifferWin.webContents.executeJavaScript(`
-                    new Promise((resolve) => {
-                      try {
-                        const langBtn = document.querySelector('button[aria-label="Language"]') || 
-                          Array.from(document.querySelectorAll('button')).find(b => /^(sub|dub)$/i.test((b.innerText || '').trim()));
-                        if (!langBtn) return resolve({ hasAlternate: false });
-                        const currentText = (langBtn.innerText || '').trim().toLowerCase();
-                        const target = currentText === 'sub' ? 'dub' : 'sub';
-                        langBtn.click();
-                        setTimeout(() => {
-                          try {
-                            const candidates = Array.from(document.querySelectorAll(
-                              '[role="menuitem"], [role="option"], [data-radix-collection-item], [role="menu"] *, button, div, span'
-                            ));
-                            const targetEl = candidates.find(el => (el.innerText || '').trim().toLowerCase() === target);
-                            if (targetEl) {
-                              targetEl.click();
-                              return resolve({ hasAlternate: true, current: currentText, target });
-                            }
-                            langBtn.click();
-                            return resolve({ hasAlternate: false, current: currentText });
-                          } catch {
-                            return resolve({ hasAlternate: false });
-                          }
-                        }, 350);
-                      } catch {
-                        return resolve({ hasAlternate: false });
-                      }
-                    });
-                  `).then((langCheck) => {
-                    activeLangCheck = langCheck;
-                    if (langCheck && langCheck.hasAlternate) {
-                      switchTriggered = true;
-                      streamIndexAtSwitch = capturedStreams.length;
-                      logger.info(`Detected alternate language track (${langCheck.target}), waiting for alternate stream...`);
-                      if (settleTimer) clearTimeout(settleTimer);
-                      settleTimer = setTimeout(() => {
-                        finalize(buildResultFromCaptured(langCheck));
-                      }, 2500);
-                    } else {
-                      if (settleTimer) clearTimeout(settleTimer);
-                      settleTimer = setTimeout(() => {
-                        finalize(buildResultFromCaptured(langCheck));
-                      }, 850);
-                    }
-                  }).catch(() => {
-                    if (!settleTimer) {
-                      settleTimer = setTimeout(() => {
-                        finalize(buildResultFromCaptured());
-                      }, 850);
-                    }
-                  });
-                } else if (!settleTimer) {
-                  settleTimer = setTimeout(() => {
-                    finalize(buildResultFromCaptured());
-                  }, 850);
-                }
-              } else if (switchTriggered && capturedStreams.length > streamIndexAtSwitch) {
-                // An alternate stream arrived after switching language!
-                if (settleTimer) clearTimeout(settleTimer);
-                settleTimer = setTimeout(() => {
-                  finalize(buildResultFromCaptured(activeLangCheck));
-                }, 850);
-              } else if (!switchTriggered && capturedStreams.length >= 2) {
-                // Secondary streams of the current primary rendition loaded
-                if (activeLangCheck && !activeLangCheck.hasAlternate) {
-                  if (settleTimer) clearTimeout(settleTimer);
-                  settleTimer = setTimeout(() => {
-                    finalize(buildResultFromCaptured(activeLangCheck));
-                  }, 750);
-                }
+              // If strategy provides a stream capture hook (e.g. Miruro sub/dub switch)
+              if (typeof strategy.onStreamCaptured === 'function') {
+                strategy.onStreamCaptured({
+                  streamUrl: u,
+                  capturedStreams,
+                  snifferWin,
+                  settleTimer,
+                  resetSettleTimer: (ms, cb) => {
+                    if (settleTimer) clearTimeout(settleTimer);
+                    settleTimer = setTimeout(cb, ms);
+                  },
+                  finalizeWithResult: (check) => finalize(buildResultFromCaptured(check)),
+                  onAlternateLanguageDetected: (check) => {
+                    activeLangCheck = check;
+                    switchTriggered = true;
+                    streamIndexAtSwitch = capturedStreams.length;
+                  }
+                });
               } else if (!settleTimer) {
                 settleTimer = setTimeout(() => {
                   finalize(buildResultFromCaptured());
-                }, 850);
+                }, strategy.settleDelayMs || 850);
               }
             }
           }
         }
-      }
 
         callback({});
       });
@@ -6496,13 +6544,14 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           snifferWin.webContents.mainFrame,
           ...(snifferWin.webContents.mainFrame?.frames || [])
         ];
+        const extraSelectors = strategy.playSelectors ? `, ${strategy.playSelectors}` : '';
         for (const frame of frames) {
           if (!frame || frame.isDestroyed()) continue;
           frame.executeJavaScript(`
             try {
               const v = document.querySelector('video');
               if (v) { v.muted = true; v.play().catch(() => {}); }
-              const playBtn = document.querySelector('#big_play, .bigplay, .play_button, [aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid, .vjs-big-play-button');
+              const playBtn = document.querySelector('#big_play, .bigplay, .play_button, [aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid, .vjs-big-play-button${extraSelectors}');
               if (playBtn) playBtn.click();
             } catch {}
           `).catch(() => {});
@@ -6510,28 +6559,288 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
       };
 
       snifferWin.webContents.on('did-finish-load', () => {
-        setTimeout(triggerPlayInAllFrames, 600);
-        setTimeout(triggerPlayInAllFrames, 1800);
+        setTimeout(triggerPlayInAllFrames, 500);
+        setTimeout(triggerPlayInAllFrames, 1600);
+        setTimeout(triggerPlayInAllFrames, 3200);
       });
 
       snifferWin.loadURL(normalizedUrl, {
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+        userAgent: strategy.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
       }).catch((err) => {
-        logger.debug('Sniffer page load notice:', err.message);
+        logger.debug(`[${strategy.name}] Sniffer page load notice:`, err.message);
       });
     } catch (err) {
-      logger.error('Failed to launch stream sniffer:', err.message);
+      logger.error(`[${strategy.name}] Failed to launch stream sniffer:`, err.message);
       finalize(null);
     }
   });
 }
 
 module.exports = {
-  extractStreamFromWebpage,
+  isStrmCdnUrl,
   registerStreamHostHeaders,
   getRequiredHeadersForUrl,
-  isStrmCdnUrl
+  sniffCache,
+  SNIFF_CACHE_TTL_MS,
+  runSnifferSession,
+  logger
 };
+``````
+
+################################################################################
+## DATEI: ./src/main/sniffers/miruro-sniffer.js
+################################################################################
+
+``````javascript
+// src/main/sniffers/miruro-sniffer.js
+// Dedicated Sniffer Strategy for Miruro & strm.cx Anime Streaming Platforms
+
+const { isStrmCdnUrl, logger } = require('./base-sniffer');
+
+const miruroSniffer = {
+  name: 'MiruroSniffer',
+
+  /**
+   * Determine if this sniffer owns the given URL
+   */
+  matches(url) {
+    if (!url || typeof url !== 'string') return false;
+    return isStrmCdnUrl(url) || /miruro|strm\.cx/i.test(url);
+  },
+
+  playSelectors: '.vds-play-button, media-player [aria-label*="Play" i]',
+  settleDelayMs: 850,
+
+  /**
+   * Custom request header handler for Miruro & strm.cx CDN domains
+   */
+  onBeforeSendHeaders(details, { registerStreamHostHeaders }) {
+    const u = details.url;
+    if (isStrmCdnUrl(u)) {
+      details.requestHeaders['Referer'] = 'https://strm.cx/';
+      details.requestHeaders['Origin'] = 'https://strm.cx';
+      registerStreamHostHeaders(u, {
+        Referer: 'https://strm.cx/',
+        Origin: 'https://strm.cx'
+      });
+      return true;
+    }
+    return false;
+  },
+
+  /**
+   * Classify media stream requests (.m3u8, /m/ playlists, /a/ audio, DASH)
+   */
+  classifyMediaRequest(details, u, lower) {
+    const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
+    const isDash = lower.includes('.mpd');
+    const isDirectVideo = /\.(mp4|webm)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm');
+    if (isHls || isDash || isDirectVideo) {
+      return { isHls, isDash, isDirectVideo };
+    }
+    return null;
+  },
+
+  /**
+   * Automated sub/dub alternate stream discovery on first captured rendition
+   */
+  onStreamCaptured({ capturedStreams, snifferWin, resetSettleTimer, finalizeWithResult, onAlternateLanguageDetected }) {
+    if (capturedStreams.length === 1) {
+      if (snifferWin && !snifferWin.isDestroyed()) {
+        snifferWin.webContents.executeJavaScript(`
+          new Promise((resolve) => {
+            try {
+              const langBtn = document.querySelector('button[aria-label="Language"]') || 
+                Array.from(document.querySelectorAll('button')).find(b => /^(sub|dub)$/i.test((b.innerText || '').trim()));
+              if (!langBtn) return resolve({ hasAlternate: false });
+              const currentText = (langBtn.innerText || '').trim().toLowerCase();
+              const target = currentText === 'sub' ? 'dub' : 'sub';
+              langBtn.click();
+              setTimeout(() => {
+                try {
+                  const candidates = Array.from(document.querySelectorAll(
+                    '[role="menuitem"], [role="option"], [data-radix-collection-item], [role="menu"] *, button, div, span'
+                  ));
+                  const targetEl = candidates.find(el => (el.innerText || '').trim().toLowerCase() === target);
+                  if (targetEl) {
+                    targetEl.click();
+                    return resolve({ hasAlternate: true, current: currentText, target });
+                  }
+                  langBtn.click();
+                  return resolve({ hasAlternate: false, current: currentText });
+                } catch {
+                  return resolve({ hasAlternate: false });
+                }
+              }, 350);
+            } catch {
+              return resolve({ hasAlternate: false });
+            }
+          });
+        `).then((langCheck) => {
+          if (langCheck && langCheck.hasAlternate) {
+            onAlternateLanguageDetected(langCheck);
+            logger.info(`[MiruroSniffer] Detected alternate language track (${langCheck.target}), waiting for alternate stream...`);
+            resetSettleTimer(2500, () => finalizeWithResult(langCheck));
+          } else {
+            resetSettleTimer(850, () => finalizeWithResult(langCheck));
+          }
+        }).catch(() => {
+          resetSettleTimer(850, () => finalizeWithResult());
+        });
+      } else {
+        resetSettleTimer(850, () => finalizeWithResult());
+      }
+    } else if (capturedStreams.length >= 2) {
+      resetSettleTimer(750, () => finalizeWithResult());
+    }
+  }
+};
+
+module.exports = miruroSniffer;
+``````
+
+################################################################################
+## DATEI: ./src/main/sniffers/videa-sniffer.js
+################################################################################
+
+``````javascript
+// src/main/sniffers/videa-sniffer.js
+// Dedicated Sniffer Strategy for Hungarian Anime & Video Streaming Hosts (Videa, JobbMintATv, Indavideo)
+
+const videaSniffer = {
+  name: 'VideaSniffer',
+
+  /**
+   * Determine if this sniffer owns the given URL
+   */
+  matches(url) {
+    if (!url || typeof url !== 'string') return false;
+    return /videa\.hu|jobbmintatv\.pro|indavideo\.hu/i.test(url);
+  },
+
+  playSelectors: '.vjs-big-play-button, #big_play, .play_button, .vjs-play-control',
+  settleDelayMs: 650,
+
+  /**
+   * Filter out known video ad networks common on Hungarian aggregator sites
+   */
+  isAdUrl(url, _details) {
+    const lower = url.toLowerCase();
+    return (
+      lower.includes('adocean') ||
+      lower.includes('2mdn.net') ||
+      lower.includes('indidata.com') ||
+      lower.includes('gemius.pl') ||
+      lower.includes('cfusion-internet.com')
+    );
+  },
+
+  /**
+   * Register host headers for Videa and Indavideo CDN edges
+   */
+  onBeforeSendHeaders(details, { registerStreamHostHeaders, pageOrigin }) {
+    const u = details.url;
+    const lower = u.toLowerCase();
+    const ref = details.requestHeaders['Referer'] || details.requestHeaders['referer'] || details.referrer || '';
+    const orig = details.requestHeaders['Origin'] || details.requestHeaders['origin'] || '';
+
+    if (lower.includes('videa.hu')) {
+      const effectiveRef = ref || 'https://videa.hu/';
+      const effectiveOrig = orig || 'https://videa.hu';
+      registerStreamHostHeaders(u, { Referer: effectiveRef, Origin: effectiveOrig });
+      return true;
+    }
+
+    if (lower.includes('indavideo.hu')) {
+      const effectiveRef = ref || 'https://embed.indavideo.hu/';
+      const effectiveOrig = orig || 'https://embed.indavideo.hu';
+      registerStreamHostHeaders(u, { Referer: effectiveRef, Origin: effectiveOrig });
+      return true;
+    }
+
+    if (ref || orig) {
+      registerStreamHostHeaders(u, {
+        Referer: ref || (pageOrigin ? `${pageOrigin}/` : ''),
+        Origin: orig || pageOrigin || ''
+      });
+      return true;
+    }
+
+    return false;
+  },
+
+  /**
+   * Classify progressive MP4 media streams or HLS playlists from Videa & Indavideo
+   */
+  classifyMediaRequest(details, u, lower) {
+    const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|ico)(\?|$)/i.test(u);
+    if (isStaticAsset) return null;
+
+    const isHls = lower.includes('.m3u8') || lower.includes('/m/');
+    const isDash = lower.includes('.mpd');
+    const isDirectVideo = (
+      details.resourceType === 'media' ||
+      /\.(mp4|webm|m4v)(\?|$)/i.test(u) ||
+      lower.includes('.mp4') ||
+      (lower.includes('video') && /\/static\/[0-9]+p\//.test(lower)) ||
+      (lower.includes('indavideo.hu') && details.resourceType === 'media')
+    );
+
+    if (isHls || isDash || isDirectVideo) {
+      return { isHls, isDash, isDirectVideo };
+    }
+    return null;
+  }
+};
+
+module.exports = videaSniffer;
+``````
+
+################################################################################
+## DATEI: ./src/main/sniffers/generic-sniffer.js
+################################################################################
+
+``````javascript
+// src/main/sniffers/generic-sniffer.js
+// Universal Fallback Sniffer Strategy for General Web Media & HTML5 Video Platforms
+
+const genericSniffer = {
+  name: 'GenericSniffer',
+
+  /**
+   * Universal catch-all fallback
+   */
+  matches(_url) {
+    return true;
+  },
+
+  playSelectors: '#big_play, .bigplay, .play_button, [aria-label*="Play" i], .jw-icon-display, .plyr__control--overlaid',
+  settleDelayMs: 850,
+
+  /**
+   * Classify universal media stream requests (.m3u8, .mpd, .mp4, .webm, or resourceType === 'media')
+   */
+  classifyMediaRequest(details, u, lower) {
+    const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|ico)(\?|$)/i.test(u);
+    if (isStaticAsset) return null;
+
+    const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
+    const isDash = lower.includes('.mpd');
+    const isDirectVideo = (
+      details.resourceType === 'media' ||
+      /\.(mp4|webm|m4v|mkv)(\?|$)/i.test(u) ||
+      lower.includes('.mp4') ||
+      lower.includes('.webm')
+    );
+
+    if (isHls || isDash || isDirectVideo) {
+      return { isHls, isDash, isDirectVideo };
+    }
+    return null;
+  }
+};
+
+module.exports = genericSniffer;
 ``````
 
 ################################################################################
@@ -22189,6 +22498,10 @@ async function runAll() {
     'src/main/media-resolver.js',
     'src/main/stream-manager.js',
     'src/main/stream-sniffer.js',
+    'src/main/sniffers/base-sniffer.js',
+    'src/main/sniffers/miruro-sniffer.js',
+    'src/main/sniffers/videa-sniffer.js',
+    'src/main/sniffers/generic-sniffer.js',
     'src/main/downloader.js',
     'src/main/anime-skip-resolver.js',
     'src/main/server.js',
@@ -22866,6 +23179,54 @@ async function runAll() {
     assert.strictEqual(matchIdx, 1, 'Episode 2 automatically selects German subtitles matching user session selection');
   });
 
+  console.log('\n--- 9. Modular Sniffer Strategy Router & Dispatcher ---');
+
+  const {
+    getSnifferStrategy,
+    SNIFFER_STRATEGIES,
+    registerStreamHostHeaders,
+    getRequiredHeadersForUrl
+  } = require('../src/main/stream-sniffer');
+
+  runTest('getSnifferStrategy routes Miruro & strm.cx URLs to MiruroSniffer', () => {
+    const s1 = getSnifferStrategy('https://www.miruro.cx/watch/series?ep=1');
+    const s2 = getSnifferStrategy('https://strm.cx/embed/video123');
+    const s3 = getSnifferStrategy('https://coralarch.coastowl.top/m/index.m3u8');
+    assert.strictEqual(s1.name, 'MiruroSniffer');
+    assert.strictEqual(s2.name, 'MiruroSniffer');
+    assert.strictEqual(s3.name, 'MiruroSniffer');
+  });
+
+  runTest('getSnifferStrategy routes Hungarian anime hosts to VideaSniffer', () => {
+    const s1 = getSnifferStrategy('https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/');
+    const s2 = getSnifferStrategy('https://videa.hu/player?v=syCYGZsuSRZgSkIU');
+    const s3 = getSnifferStrategy('https://embed.indavideo.hu/player/video/29cb5bf1aa');
+    assert.strictEqual(s1.name, 'VideaSniffer');
+    assert.strictEqual(s2.name, 'VideaSniffer');
+    assert.strictEqual(s3.name, 'VideaSniffer');
+  });
+
+  runTest('getSnifferStrategy falls back to GenericSniffer for unknown or generic video sites', () => {
+    const s1 = getSnifferStrategy('https://example.com/videos/stream');
+    const s2 = getSnifferStrategy('https://myvideosite.org/watch?id=42');
+    const s3 = getSnifferStrategy('');
+    const s4 = getSnifferStrategy(null);
+    assert.strictEqual(s1.name, 'GenericSniffer');
+    assert.strictEqual(s2.name, 'GenericSniffer');
+    assert.strictEqual(s3.name, 'GenericSniffer');
+    assert.strictEqual(s4.name, 'GenericSniffer');
+  });
+
+  runTest('registerStreamHostHeaders and getRequiredHeadersForUrl manage dynamic anti-hotlink headers', () => {
+    registerStreamHostHeaders('https://custom-cdn.example.com/video/chunk1.mp4', {
+      Referer: 'https://custom-origin.com/player',
+      Origin: 'https://custom-origin.com'
+    });
+    const headers = getRequiredHeadersForUrl('https://custom-cdn.example.com/video/chunk2.mp4');
+    assert.strictEqual(headers['Referer'], 'https://custom-origin.com/player');
+    assert.strictEqual(headers['Origin'], 'https://custom-origin.com');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');
@@ -22916,6 +23277,10 @@ $PriorityOrder = @(
     './src/main/downloader.js',
     './src/main/anime-skip-resolver.js',
     './src/main/stream-sniffer.js',
+    './src/main/sniffers/base-sniffer.js',
+    './src/main/sniffers/miruro-sniffer.js',
+    './src/main/sniffers/videa-sniffer.js',
+    './src/main/sniffers/generic-sniffer.js',
     './src/main/ipc.js',
     './src/main/server.js',
     './src/index.html',
