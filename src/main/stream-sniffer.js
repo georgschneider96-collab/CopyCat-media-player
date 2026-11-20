@@ -110,7 +110,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
         for (const frame of frames) {
           if (!frame || frame.isDestroyed()) continue;
           try {
-            const list = await frame.executeJavaScript(`
+            const execPromise = frame.executeJavaScript(`
               (async () => {
                 const results = [];
                 const formatTime = (sec) => {
@@ -191,6 +191,8 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
                 return results;
               })()
             `).catch(() => []);
+            const timeoutPromise = new Promise(r => setTimeout(() => r([]), 450));
+            const list = await Promise.race([execPromise, timeoutPromise]);
 
             if (Array.isArray(list)) {
               for (const item of list) {
@@ -216,7 +218,10 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
 
       if (snifferWin && !snifferWin.isDestroyed()) {
         try {
-          await collectInPageSubtitles();
+          await Promise.race([
+            collectInPageSubtitles(),
+            new Promise(r => setTimeout(r, 600))
+          ]);
         } catch {}
         try {
           snifferWin.destroy();
@@ -240,7 +245,10 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
     const buildResultFromCaptured = (langCheck = null) => {
       if (capturedStreams.length === 0) return null;
       const primary = capturedStreams[0];
-      const pageTitle = snifferWin && !snifferWin.isDestroyed() ? snifferWin.webContents.getTitle() : '';
+      let pageTitle = '';
+      try {
+        if (snifferWin && !snifferWin.isDestroyed()) pageTitle = snifferWin.webContents.getTitle();
+      } catch {}
       const check = langCheck || activeLangCheck;
 
       let subStreamUrl = primary.url;
@@ -303,7 +311,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           if (ref || orig || pageIsMiruro) {
             const effectiveRef = pageIsMiruro ? 'https://strm.cx/' : (ref || (pageOrigin ? `${pageOrigin}/` : ''));
             const effectiveOrig = pageIsMiruro ? 'https://strm.cx' : (orig || pageOrigin || '');
-            if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4|\.vtt|\.srt|\/sub/i.test(u))) {
+            if (effectiveRef && (/\.m3u8|\/m\/|\/a\/|\.mpd|\.mp4|\.vtt|\.srt|\/sub/i.test(u) || details.resourceType === 'media' || lower.includes('videa.hu') || lower.includes('indavideo.hu'))) {
               registerStreamHostHeaders(u, {
                 Referer: effectiveRef,
                 Origin: effectiveOrig
@@ -323,7 +331,9 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
           lower.includes('doubleclick') ||
           lower.includes('adservice') ||
           lower.includes('popads') ||
-          lower.includes('exoclick')
+          lower.includes('exoclick') ||
+          lower.includes('adocean') ||
+          lower.includes('2mdn.net')
         );
 
         if (!isAd && !finished) {
@@ -345,12 +355,14 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
             }
           }
 
-          // 2. Check for media streams (.m3u8, .mpd, .mp4, .webm)
-          const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
-          const isDash = lower.includes('.mpd');
-          const isDirectVideo = /\.(mp4|webm)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm');
+          // 2. Check for media streams (.m3u8, .mpd, .mp4, .webm, or resourceType === 'media')
+          const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|webp|svg|woff|woff2|ttf|eot|ico)(\?|$)/i.test(u);
+          if (!isStaticAsset) {
+            const isHls = lower.includes('.m3u8') || lower.includes('/m/') || lower.includes('/pl.');
+            const isDash = lower.includes('.mpd');
+            const isDirectVideo = details.resourceType === 'media' || /\.(mp4|webm|m4v|mkv)(\?|$)/i.test(u) || lower.includes('.mp4') || lower.includes('.webm') || (lower.includes('video') && /\/static\/[0-9]+p\//.test(lower));
 
-          if (isHls || isDash || isDirectVideo) {
+            if (isHls || isDash || isDirectVideo) {
             if (pageIsMiruro || isStrmCdnUrl(u)) {
               registerStreamHostHeaders(u, {
                 Referer: 'https://strm.cx/',
@@ -442,6 +454,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
             }
           }
         }
+      }
 
         callback({});
       });
@@ -472,7 +485,7 @@ function extractStreamFromWebpage(webpageUrl, timeoutMs = 9500) {
             try {
               const v = document.querySelector('video');
               if (v) { v.muted = true; v.play().catch(() => {}); }
-              const playBtn = document.querySelector('#big_play, .bigplay, .play_button, [aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid');
+              const playBtn = document.querySelector('#big_play, .bigplay, .play_button, [aria-label*="Play" i], .vds-play-button, .jw-icon-display, .plyr__control--overlaid, .vjs-big-play-button');
               if (playBtn) playBtn.click();
             } catch {}
           `).catch(() => {});

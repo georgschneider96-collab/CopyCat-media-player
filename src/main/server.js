@@ -463,10 +463,11 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
     // 3. GET /api/status or /status
     if (req.method === 'GET' && (pathname === '/api/status' || pathname === '/status')) {
       const win = window.getWindow();
+      const isWinValid = Boolean(win && !win.isDestroyed());
       return sendJson(res, 200, {
         ok: true,
         ...window.getStatus(),
-        minimized: win?.isMinimized() || false,
+        minimized: isWinValid ? win.isMinimized() : false,
         pipActive: window.isInPipMode,
         pipBounds: window.isInPipMode ? window.lastPipBounds : null
       });

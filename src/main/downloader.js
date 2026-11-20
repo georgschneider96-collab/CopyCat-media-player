@@ -53,7 +53,7 @@ function formatDoubleDigitEpisode(str) {
 function sanitizeFilename(name) {
   let clean = formatDoubleDigitEpisode(stripLanguageTags(name || 'video'))
     .replace(/^Watch\s+/i, '')
-    .replace(/\s*[-–—|·]\s*(Miruro|Watch Online|Full HD).*$/i, '')
+    .replace(/\s*[-–—|·]\s*(Miruro|Watch Online|Full HD|JobbMintATv(?:\.pro)?|Indavideo|Online Ingyen Nézhető).*$/i, '')
     .replace(/[\\/:*?"<>|]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
@@ -943,6 +943,30 @@ class DownloadManager {
                     }
                   } catch {}
 
+                  let sizeFormatted = 'Live Stream';
+                  let sizeBytes = 0;
+                  if (!sniffed.isHls && !sniffed.isDash && sniffed.streamUrl) {
+                    try {
+                      const clientMod = sniffed.streamUrl.startsWith('http:') ? http : https;
+                      const headLen = await new Promise((r) => {
+                        const hreq = clientMod.request(sniffed.streamUrl, {
+                          method: 'HEAD',
+                          headers: getStreamHeaders(sniffed.streamUrl),
+                          timeout: 3000
+                        }, (hres) => {
+                          const len = parseInt(hres.headers['content-length'] || '0', 10);
+                          r(len);
+                        });
+                        hreq.on('error', () => r(0));
+                        hreq.end();
+                      });
+                      if (headLen > 0) {
+                        sizeBytes = headLen;
+                        sizeFormatted = formatBytes(headLen);
+                      }
+                    } catch {}
+                  }
+
                   const extracted = await enrichHlsProbe({
                     url: sniffed.streamUrl,
                     originalUrl: trimmed,
@@ -953,8 +977,8 @@ class DownloadManager {
                     isWebpage: false,
                     contentType: sniffed.isHls ? 'application/vnd.apple.mpegurl' : 'video/mp4',
                     format: sniffed.isHls ? 'HLS (1080p Stream)' : (sniffed.isDash ? 'DASH (mpd)' : 'MP4/Stream'),
-                    sizeBytes: 0,
-                    sizeFormatted: 'Live Stream',
+                    sizeBytes,
+                    sizeFormatted,
                     autoExtracted: true
                   }, sniffed);
                   return resolve(extracted);
@@ -2013,17 +2037,21 @@ class DownloadManager {
       const headersObj = getStreamHeaders(task.url, customHeaders);
       const headersArg = Object.entries(headersObj).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n';
 
+      const isHls = task.url.includes('.m3u8') || Boolean(task.isHls);
       const args = [
         '-y',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-extension_picky', '0',
-        '-allowed_segment_extensions', 'ALL',
+        '-reconnect_delay_max', '5'
+      ];
+      if (isHls) {
+        args.push('-extension_picky', '0', '-allowed_segment_extensions', 'ALL');
+      }
+      args.push(
         '-headers', headersArg,
         '-i', task.url,
         '-c', 'copy'
-      ];
+      );
       if (task.outputPath.endsWith('.mp4')) {
         args.push('-bsf:a', 'aac_adtstoasc', '-movflags', '+faststart');
       }
