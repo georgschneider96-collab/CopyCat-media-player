@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:21:53Z
-Gesamtanzahl Turns: 442 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 12:32:11
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:43:21Z
+Gesamtanzahl Turns: 443 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 12:45:31
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24926,6 +24926,44 @@ BENUTZER:
 do you see the problem with the window fit. also lets leave audio stream langueage empty even after metadata rip
 
 [Hintergrund-Aktionen: read_file (9), edit_file (9), run_command (3)]
+
+ANTIGRAVITY / ASSISTENT:
+Both issues have been fixed:
+
+---
+
+### 1. Window Fit Fix (Horizontal Clipping & Vertical Layout)
+
+* **Fixed Horizontal Clipping on the `Subtitle Embedder & Lookup` Tab** ([styles.css](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/styles.css#L1624-L1717), [app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10118-L10134)):
+  * **Why it happened**: `.settings-modal` used `grid-template-columns: 230px 1fr` without `min-width: 0` on `.settings-main`. In CSS Grid/Flexbox, long unbreakable subtitle filenames with `white-space: nowrap` (such as `BLEACH.Thousand-Year.Blood.War.S01E01...srt`) forced the `1fr` column wider than the modal box, clipping the right side of the window (`×`, `Use Playing`, `✓ Auto-Preloaded`, `Metadata & Tags`, `Search`, and `Use & Embed`).
+  * **The Fix**: Changed the grid column to `230px minmax(0, 1fr)` and applied `min-width: 0; max-width: 100%; overflow-x: hidden;` down the flex hierarchy (`.settings-main`, `.settings-content`, `.settings-panel`, `.editor-subpanel`, `.stream-card`, `.sub-result-row`, and the inner filename containers). Long subtitle filenames now truncate cleanly with `...` while keeping all right-hand buttons inside the modal.
+* **Fixed Vertical Fit on Both `Subtitle Embedder` and `Metadata & Tags` Tabs** ([index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html#L1099-L1452)):
+  * Compacted card paddings and gaps, placed `Embedding Mode`, `Track Language Code`, and `Subtitle Track Title` on a single 3-column row, and placed `Audio Stream 1 Language Tag (Optional)` alongside the **`Save & Integrate Metadata`** button so the entire form and Save button fit inside the window at once.
+
+---
+
+### 2. Audio Stream 1 Language Tag Left Empty
+
+* **Always Blank by Default & After Metadata Rip** ([app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L9671-L9673), [media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L228-L233)):
+  * Removed automatic pre-filling of `#meta-field-audio-lang` (`eng` / probed language).
+  * The **`Audio Stream 1 Language Tag (Optional)`** field now stays completely empty after probing, filename auto-detection, and online metadata ripping, and will only write an audio language tag if you explicitly type one in.
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **73 / 73 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **Git Push**: Committed and pushed to `origin/master` (commit `6b33d92`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #443] | Schritt 24982 | Zeitstempel: 2026-11-21T11:43:21Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+let's get rid of the text ordered best to worst and also with the #number
+
+[Hintergrund-Aktionen: edit_file (2), read_file (1), run_command (1)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

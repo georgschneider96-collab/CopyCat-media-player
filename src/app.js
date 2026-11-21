@@ -10032,7 +10032,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
         if (el.subResultsContainer) {
           el.subResultsContainer.style.display = 'block';
-          el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">Searching and ranking matching subtitles (Best to Worst)...</div>';
+          el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">Searching for matching subtitles...</div>';
         }
 
         try {
@@ -10092,8 +10092,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
         if (onlineSubs.length > 0) {
           const secHeader = document.createElement('div');
-          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:8px 6px 6px 6px;display:flex;align-items:center;justify-content:space-between;';
-          secHeader.innerHTML = `<span>OpenSubtitles Results (${onlineSubs.length})</span><span style="font-size:10px;color:var(--text-muted);font-weight:500;text-transform:none;">Ordered Best to Worst</span>`;
+          secHeader.style.cssText = 'font-size:10.5px;font-weight:700;letter-spacing:0.5px;color:var(--accent);text-transform:uppercase;margin:8px 6px 6px 6px;';
+          secHeader.textContent = `OpenSubtitles Results (${onlineSubs.length})`;
           el.subResultsContainer.appendChild(secHeader);
 
           onlineSubs.slice(0, 20).forEach((sub, idx) => {
@@ -10117,7 +10117,6 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
             row.innerHTML = `
               <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0;">
-                <span style="font-size:10.5px;font-weight:700;color:var(--text-muted);min-width:18px;flex-shrink:0;">#${idx + 1}</span>
                 <span class="sub-pill" style="flex-shrink:0;">${escapeHtml(sub.lang || 'SUB')}</span>
                 <div style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-width:0;">
                   <div style="display:flex;align-items:center;gap:6px;overflow:hidden;min-width:0;">
