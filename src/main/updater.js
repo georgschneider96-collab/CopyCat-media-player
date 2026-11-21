@@ -46,6 +46,56 @@ function isNewerVersion(currentVer, latestTag) {
 }
 
 /**
+ * Extract trusted SHA-256 checksum for release asset from release body or companion metadata
+ * @param {Object} release
+ * @param {Object} asset
+ * @returns {string|null}
+ */
+function extractExpectedSha256(release, asset) {
+  if (!release || !asset) return null;
+  const body = release.body || '';
+  const assetName = asset.name || '';
+
+  // 1. Filename-bound hash: `<hash> *CopyCat-Setup.exe` or `CopyCat-Setup.exe: <hash>`
+  if (assetName) {
+    const escapedName = assetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const nameBoundPattern = new RegExp(`([a-fA-F0-9]{64})\\s+[*]?${escapedName}|${escapedName}[:\\s]+([a-fA-F0-9]{64})`, 'i');
+    const match = body.match(nameBoundPattern);
+    if (match) return (match[1] || match[2]).toLowerCase();
+  }
+
+  // 2. Explicit SHA-256 tag in release notes: `SHA-256: <hash>` or `Checksum: <hash>`
+  const explicitMatch = body.match(/(?:sha[-_]?256|checksum)[\s:=]+([a-fA-F0-9]{64})/i);
+  if (explicitMatch) return explicitMatch[1].toLowerCase();
+
+  return null;
+}
+
+/**
+ * Fetch remote companion .sha256 checksum file
+ * @param {string} url
+ * @param {number} maxRedirects
+ * @returns {Promise<string|null>}
+ */
+function fetchCompanionSha256(url, maxRedirects = 4) {
+  return new Promise((resolve) => {
+    if (!url || maxRedirects <= 0) return resolve(null);
+    https.get(url, { headers: { 'User-Agent': 'CopyCat-Media-Player' }, timeout: 6000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchCompanionSha256(res.headers.location, maxRedirects - 1).then(resolve);
+      }
+      if (res.statusCode !== 200) return resolve(null);
+      let content = '';
+      res.on('data', chunk => content += chunk);
+      res.on('end', () => {
+        const hashMatch = content.match(/([a-fA-F0-9]{64})/);
+        resolve(hashMatch ? hashMatch[1].toLowerCase() : null);
+      });
+    }).on('error', () => resolve(null));
+  });
+}
+
+/**
  * Query GitHub Releases API for latest release info
  * @returns {Promise<Object>}
  */
@@ -85,11 +135,21 @@ function checkForUpdates() {
           const isNewer = isNewerVersion(currentVersion, latestTag);
 
           let asset = null;
+          let checksumAsset = null;
           if (Array.isArray(release.assets) && release.assets.length > 0) {
             asset = release.assets.find((a) => a.name.toLowerCase().includes('setup') && a.name.endsWith('.exe'))
               || release.assets.find((a) => a.name.endsWith('.exe'))
               || release.assets[0];
+
+            checksumAsset = release.assets.find((a) =>
+              a.name.endsWith('.sha256') ||
+              a.name.toLowerCase().includes('checksums') ||
+              a.name.toLowerCase().includes('sha256sums') ||
+              a.name === 'latest.yml'
+            );
           }
+
+          const expectedSha256 = extractExpectedSha256(release, asset);
 
           logger.info(`Update check: current=${currentVersion}, latest=${latestTag}, available=${isNewer}`);
           resolve({
@@ -103,7 +163,9 @@ function checkForUpdates() {
             asset: asset ? {
               name: asset.name,
               size: asset.size,
-              downloadUrl: asset.browser_download_url
+              downloadUrl: asset.browser_download_url,
+              sha256: expectedSha256,
+              checksumUrl: checksumAsset ? checksumAsset.browser_download_url : null
             } : null
           });
         } catch (err) {
@@ -269,6 +331,18 @@ async function downloadAndInstallUpdate(asset, win) {
 
   try {
     logger.info(`Starting download of update asset: ${asset.name}`);
+    let expectedSha256 = asset.sha256 || null;
+    if (!expectedSha256 && asset.checksumUrl) {
+      try {
+        expectedSha256 = await fetchCompanionSha256(asset.checksumUrl);
+        if (expectedSha256) {
+          logger.info(`Retrieved companion SHA-256 checksum: ${expectedSha256}`);
+        }
+      } catch (chkErr) {
+        logger.warn('Failed to fetch companion checksum:', chkErr.message);
+      }
+    }
+
     const downloadedPath = await downloadUpdateAsset(
       asset.downloadUrl,
       asset.name,
@@ -276,7 +350,8 @@ async function downloadAndInstallUpdate(asset, win) {
         if (win && !win.isDestroyed()) {
           win.webContents.send('updater:downloadProgress', progress);
         }
-      }
+      },
+      expectedSha256
     );
 
     logger.info(`Download completed successfully: ${downloadedPath}`);
@@ -314,5 +389,6 @@ module.exports = {
   isNewerVersion,
   checkForUpdates,
   downloadUpdateAsset,
-  downloadAndInstallUpdate
+  downloadAndInstallUpdate,
+  extractExpectedSha256
 };

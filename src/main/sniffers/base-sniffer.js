@@ -283,6 +283,11 @@ function runSnifferSession(webpageUrl, timeoutMs, strategy) {
       const partition = `sniffer-${Date.now()}`;
       const sniffSession = session.fromPartition(partition);
 
+      // Block all device permissions for the ephemeral sniffer session
+      if (typeof sniffSession.setPermissionRequestHandler === 'function') {
+        sniffSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+      }
+
       sniffSession.webRequest.onBeforeSendHeaders((details, callback) => {
         const u = details.url;
         const lower = u.toLowerCase();
@@ -424,6 +429,37 @@ function runSnifferSession(webpageUrl, timeoutMs, strategy) {
       });
 
       snifferWin.webContents.setAudioMuted(true);
+
+      // Hardened Security Isolation Boundary for Headless Sniffer Window:
+      // 1. Block opening any popup or secondary window
+      if (typeof snifferWin.webContents.setWindowOpenHandler === 'function') {
+        snifferWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      }
+
+      // 2. Allow only http: and https: protocols; block file://, javascript:, custom schemes
+      snifferWin.webContents.on('will-navigate', (event, navUrl) => {
+        try {
+          const u = new URL(navUrl);
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+            event.preventDefault();
+            logger.warn(`Blocked sniffer navigation to forbidden protocol: ${navUrl}`);
+          }
+        } catch {
+          event.preventDefault();
+        }
+      });
+
+      // 3. Block subframes from navigating to local loopback endpoints or local files
+      snifferWin.webContents.on('will-frame-navigate', (event) => {
+        try {
+          const u = new URL(event.url);
+          const h = u.hostname.toLowerCase();
+          if (h === '127.0.0.1' || h === 'localhost' || h === '::1' || u.protocol === 'file:') {
+            event.preventDefault();
+            logger.warn(`Blocked sniffer frame navigation to local target: ${event.url}`);
+          }
+        } catch {}
+      });
 
       const triggerPlayInAllFrames = () => {
         if (finished || !snifferWin || snifferWin.isDestroyed() || capturedStreams.length > 0) return;

@@ -3,9 +3,18 @@
 
 const http = require('http');
 const fs = require('fs');
+const path = require('path');
 const { createLogger } = require('./logger');
 
 const logger = createLogger('Server');
+
+let appVersion = '1.3.1';
+try {
+  const pkgPath = path.join(__dirname, '..', '..', 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    appVersion = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || '1.3.1';
+  }
+} catch {}
 
 /**
  * Robust HTTP Response Helper
@@ -396,6 +405,18 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
     const urlObj = new URL(req.url || '/', `http://127.0.0.1:${currentPort}`);
     const pathname = urlObj.pathname;
 
+    // 0. Anti-DNS Rebinding Host Guard:
+    // Ensure the Host header strictly targets local loopback. Rejects external domain rebinding to 127.0.0.1.
+    const rawHost = (req.headers.host || '').trim();
+    const hostHeader = rawHost.split(':')[0].toLowerCase();
+    const allowedLoopbackHosts = ['127.0.0.1', 'localhost', '::1', '[::1]'];
+    if (hostHeader && !allowedLoopbackHosts.includes(hostHeader)) {
+      logger.warn(`Blocked potential DNS rebinding attack with Host: ${rawHost}`);
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Forbidden Host header (DNS Rebinding Guard)' }));
+      return;
+    }
+
     // 1. Security Origin Guard: Protect against cross-site CSRF/rebinding attacks from external web browsers.
     // Media streaming routes (/api/stream, /api/thumb) are requested by Electron's file:/// renderer,
     // which Chromium network security tags as sec-fetch-site: cross-site.
@@ -409,6 +430,16 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: false, error: 'Cross-origin browser requests forbidden' }));
       return;
+    }
+
+    // Block untrusted browser-initiated null-origin requests on control endpoint
+    if (origin === 'null' && pathname === '/api/control' && req.method === 'POST') {
+      if (secFetchSite && secFetchSite !== 'none') {
+        logger.warn(`Blocked untrusted null origin request on /api/control (Sec-Fetch-Site: ${secFetchSite})`);
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Untrusted null origin on control endpoint' }));
+        return;
+      }
     }
 
     if (origin && origin !== 'null') {
@@ -443,7 +474,7 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
     if (req.method === 'GET' && pathname === '/') {
       return sendJson(res, 200, {
         name: 'CopyCat media player Local AI Control Bridge',
-        version: '1.2.0',
+        version: appVersion,
         port: currentPort,
         ffmpegEnabled: media.hasFfmpeg(),
         endpoints: {

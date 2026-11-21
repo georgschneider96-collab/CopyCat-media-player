@@ -659,6 +659,7 @@
   let audioCtx = null;
   let gainNode = null;
   let limiterNode = null;
+  let softClipperNode = null;
   let compressorNode = null;
   let delayNode = null;
   let analyserNode = null;
@@ -699,15 +700,27 @@
 
       gainNode = audioCtx.createGain();
 
-      // Dedicated Brickwall Peak Limiter downstream of the 200% Gain Boost:
-      // Prevents digital clipping/oversaturation when boosting quiet audio signals up to 200%,
-      // while preserving 100% transparent dynamics below -0.5 dBFS.
+      // Downstream Safety Peak Limiter & Soft-Clipper downstream of the 200% Gain Boost:
+      // 1. Fast peak compressor stage: Attenuates heavy gain overshoot with 20:1 ratio and -0.5 dBFS threshold
       limiterNode = audioCtx.createDynamicsCompressor();
-      limiterNode.threshold.value = -0.5; // True peak ceiling in dBFS
-      limiterNode.knee.value = 0.0;       // Hard knee for instant limiting
-      limiterNode.ratio.value = 20.0;     // 20:1 brickwall limiting ratio
-      limiterNode.attack.value = 0.002;   // 2ms ultra-fast lookahead attack
-      limiterNode.release.value = 0.05;   // 50ms fast recovery to prevent audible volume pumping
+      limiterNode.threshold.value = -0.5; // Peak ceiling in dBFS
+      limiterNode.knee.value = 0.0;       // Hard knee for rapid response
+      limiterNode.ratio.value = 20.0;     // 20:1 high compression ratio
+      limiterNode.attack.value = 0.002;   // 2ms ultra-fast attack
+      limiterNode.release.value = 0.05;   // 50ms fast recovery to prevent volume pumping
+
+      // 2. Oversampled Soft-Clipper stage: Sigmoid tanh curve catches any instantaneous micro-transients
+      // during the 2ms attack window to prevent harsh digital clipping on boosted audio
+      softClipperNode = audioCtx.createWaveShaper();
+      const clipSamples = 1024;
+      const clipCurve = new Float32Array(clipSamples);
+      const tanhNorm = Math.tanh(1.25);
+      for (let i = 0; i < clipSamples; i++) {
+        const x = (i * 2) / clipSamples - 1;
+        clipCurve[i] = Math.tanh(x * 1.25) / tanhNorm;
+      }
+      softClipperNode.curve = clipCurve;
+      softClipperNode.oversample = '2x';
 
       source.connect(bass);
       bass.connect(mid);
@@ -717,7 +730,8 @@
       delayNode.connect(analyserNode);
       analyserNode.connect(gainNode);
       gainNode.connect(limiterNode);
-      limiterNode.connect(audioCtx.destination);
+      limiterNode.connect(softClipperNode);
+      softClipperNode.connect(audioCtx.destination);
 
       eqNodes = [bass, mid, treble];
       applyEqualizer();

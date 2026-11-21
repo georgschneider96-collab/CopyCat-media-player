@@ -96,8 +96,8 @@ async function runAll() {
   });
 
   // Test Group 3: Updater Semver & Version Comparison
-  console.log('\n--- 3. Updater Version Comparison Logic ---');
-  const { isNewerVersion } = require(path.join(projectRoot, 'src/main/updater'));
+  console.log('\n--- 3. Updater Version Comparison Logic & Checksum Extraction ---');
+  const { isNewerVersion, extractExpectedSha256 } = require(path.join(projectRoot, 'src/main/updater'));
   runTest('Semver comparison edge cases', () => {
     assert.strictEqual(isNewerVersion('1.0.0', '1.0.1'), true, '1.0.1 > 1.0.0');
     assert.strictEqual(isNewerVersion('v1.2.0', 'v1.3.0'), true, 'v1.3.0 > v1.2.0');
@@ -107,6 +107,24 @@ async function runAll() {
     // Pre-release edge cases
     assert.strictEqual(isNewerVersion('1.3.0', 'v1.3.0-beta.1'), false, '1.3.0 stable is newer than 1.3.0-beta.1');
     assert.strictEqual(isNewerVersion('1.3.0-beta.1', 'v1.3.0'), true, '1.3.0 stable upgrades 1.3.0-beta.1');
+  });
+
+  runTest('extractExpectedSha256 extracts trusted hashes from release notes and companion data', () => {
+    const fakeRelease1 = {
+      body: 'Release notes v1.3.1\n\nSHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nEnjoy!'
+    };
+    const hash1 = extractExpectedSha256(fakeRelease1, { name: 'CopyCat-Setup.exe' });
+    assert.strictEqual(hash1, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+
+    const fakeRelease2 = {
+      body: 'Check checksums:\na1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2 *CopyCat-Setup-1.3.1.exe\nother file...'
+    };
+    const hash2 = extractExpectedSha256(fakeRelease2, { name: 'CopyCat-Setup-1.3.1.exe' });
+    assert.strictEqual(hash2, 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2');
+
+    const fakeRelease3 = { body: 'Just a regular release without checksums.' };
+    const hash3 = extractExpectedSha256(fakeRelease3, { name: 'Setup.exe' });
+    assert.strictEqual(hash3, null);
   });
 
   // Test Group 3b: Media Resolver & Byte-Range Handling (RFC 7233)
@@ -266,6 +284,55 @@ async function runAll() {
       headers: { 'sec-fetch-site': 'cross-site' }
     });
     assert.strictEqual(res.status, 403);
+  });
+
+  function rawHttpRequest(options, postData = null) {
+    return new Promise((resolve, reject) => {
+      const req = http.request(options, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => resolve({ status: res.statusCode, body }));
+      });
+      req.on('error', reject);
+      if (postData) req.write(postData);
+      req.end();
+    });
+  }
+
+  await runAsyncTest('Block DNS rebinding attacks with unauthorized Host header', async () => {
+    const res = await rawHttpRequest({
+      hostname: '127.0.0.1',
+      port: testPort,
+      path: '/api/status',
+      headers: { Host: 'evil-attacker.com:4598' }
+    });
+    assert.strictEqual(res.status, 403);
+    const json = JSON.parse(res.body);
+    assert.strictEqual(json.ok, false);
+    assert(json.error.includes('DNS Rebinding Guard'));
+  });
+
+  await runAsyncTest('Block untrusted null origin POST to /api/control with cross-site context', async () => {
+    const res = await fetch(`http://127.0.0.1:${testPort}/api/control`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'null',
+        'sec-fetch-site': 'cross-site'
+      },
+      body: JSON.stringify({ action: 'togglePlay' })
+    });
+    assert.strictEqual(res.status, 403);
+    const json = await res.json();
+    assert.strictEqual(json.ok, false);
+  });
+
+  await runAsyncTest('GET / discovery response dynamically reflects package.json version', async () => {
+    const res = await fetch(`http://127.0.0.1:${testPort}/`);
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    const expectedVer = require(path.join(projectRoot, 'package.json')).version;
+    assert.strictEqual(json.version, expectedVer);
   });
 
   await runAsyncTest('Allow Sec-Fetch-Site: cross-site for internal media stream routes from Electron renderer', async () => {
