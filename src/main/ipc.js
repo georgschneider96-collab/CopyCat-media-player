@@ -389,6 +389,18 @@ const IPC_HANDLERS = {
         };
       }
 
+      // Check if dropped item is a Windows Internet Shortcut (.url)
+      const urlPaths = valid.filter((p) => path.extname(p).toLowerCase() === '.url');
+      if (!collectedMediaItems.length && !subPaths.length && urlPaths.length) {
+        try {
+          const raw = fs.readFileSync(urlPaths[0], 'utf8');
+          const m = raw.match(/URL=(https?:\/\/[^\r\n]+)/i);
+          if (m && m[1]) {
+            return { streamUrl: m[1].trim() };
+          }
+        } catch {}
+      }
+
       if (!collectedMediaItems.length) return null;
       if (!primaryFolder) {
         primaryFolder = media.scanFolder(collectedMediaItems[0].folderPath);

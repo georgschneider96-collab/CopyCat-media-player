@@ -8,6 +8,7 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 const cp = require('child_process');
 
 console.log('====================================================');
@@ -190,6 +191,52 @@ async function runAll() {
     assert.strictEqual(formatBytes(0), '0 B', '0 bytes must be 0 B');
     assert.strictEqual(formatBytes(1024), '1.0 KB');
     assert.strictEqual(formatBytes(1048576), '1.0 MB');
+  });
+
+  runTest('URL extraction helper extracts clean HTTP/HTTPS links from dropped or pasted text', () => {
+    function extractUrl(text) {
+      if (!text || typeof text !== 'string') return null;
+      const trimmed = text.trim();
+      const clean = trimmed.replace(/^["'<(\[]+|["'>)\]]+$/g, '').trim();
+      if (/^https?:\/\//i.test(clean)) {
+        const firstLine = clean.split(/\r?\n/).map(l => l.trim()).find(l => /^https?:\/\//i.test(l));
+        return firstLine || clean;
+      }
+      const match = trimmed.match(/https?:\/\/[^\s"'<>]+/i);
+      return match ? match[0] : null;
+    }
+
+    assert.strictEqual(
+      extractUrl('https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/'),
+      'https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/'
+    );
+    assert.strictEqual(
+      extractUrl('<https://videa.hu/player?v=syCYGZsuSRZgSkIU>'),
+      'https://videa.hu/player?v=syCYGZsuSRZgSkIU'
+    );
+    assert.strictEqual(
+      extractUrl('# text/uri-list\r\nhttps://example.com/stream.m3u8\r\n'),
+      'https://example.com/stream.m3u8'
+    );
+    assert.strictEqual(
+      extractUrl('Check out this link: https://miruro.tv/watch/series at 1080p'),
+      'https://miruro.tv/watch/series'
+    );
+    assert.strictEqual(extractUrl('not a url'), null);
+  });
+
+  runTest('fs:resolvePaths extracts streamUrl from Windows .url internet shortcuts', () => {
+    const { IPC_HANDLERS } = require('../src/main/ipc');
+    const tmpUrlFile = path.join(os.tmpdir(), `test-shortcut-${Date.now()}.url`);
+    fs.writeFileSync(tmpUrlFile, '[InternetShortcut]\r\nURL=https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/\r\n', 'utf8');
+    try {
+      const dummyMedia = { MEDIA_EXTENSIONS: new Set(), SUB_EXTENSIONS: [] };
+      const resolved = IPC_HANDLERS['fs:resolvePaths'].handler({ media: dummyMedia }, {}, [tmpUrlFile]);
+      assert(resolved, 'Should resolve .url file');
+      assert.strictEqual(resolved.streamUrl, 'https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/');
+    } finally {
+      if (fs.existsSync(tmpUrlFile)) fs.unlinkSync(tmpUrlFile);
+    }
   });
 
   // Test Group 3c: Asynchronous Non-Blocking & Child Process Safety

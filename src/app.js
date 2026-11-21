@@ -8267,6 +8267,50 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       return html;
     }
 
+    let lastHandledStreamUrl = '';
+    let lastHandledStreamTime = 0;
+
+    function extractUrlFromText(text) {
+      if (!text || typeof text !== 'string') return null;
+      const trimmed = text.trim();
+      const clean = trimmed.replace(/^["'<(\[]+|["'>)\]]+$/g, '').trim();
+      if (/^https?:\/\//i.test(clean)) {
+        const firstLine = clean.split(/\r?\n/).map(l => l.trim()).find(l => /^https?:\/\//i.test(l));
+        return firstLine || clean;
+      }
+      const match = trimmed.match(/https?:\/\/[^\s"'<>]+/i);
+      return match ? match[0] : null;
+    }
+
+    function handleIncomingStreamUrl(rawUrl) {
+      const url = extractUrlFromText(rawUrl);
+      if (!url) return false;
+
+      const now = Date.now();
+      if (lastHandledStreamUrl === url && now - lastHandledStreamTime < 1000) {
+        return true;
+      }
+      lastHandledStreamUrl = url;
+      lastHandledStreamTime = now;
+
+      openSettingsTab('stream-download');
+
+      if (el.streamUrlInput) {
+        el.streamUrlInput.value = url;
+        el.streamUrlInput.focus();
+        el.streamUrlInput.select();
+      }
+
+      if (el.streamProbeResult) {
+        el.streamProbeResult.innerHTML = '<span style="color:var(--text-muted);font-size:12px;">Analyzing stream manifest & renditions...</span>';
+        el.streamProbeResult.style.display = 'block';
+      }
+
+      showToast('Stream URL detected — analyzing stream...');
+      handleStreamProbeAction();
+      return true;
+    }
+
     async function handleStreamProbeAction() {
       const rawUrl = el.streamUrlInput ? el.streamUrlInput.value.trim() : '';
       if (!rawUrl) {
@@ -8745,7 +8789,11 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     let externalDropLineEl = null;
     let externalScrollRaf = null;
 
-    const isExternalFileDrag = (ev) => Array.from(ev.dataTransfer?.types || []).includes('Files');
+    const isExternalDrag = (ev) => {
+      const types = Array.from(ev.dataTransfer?.types || []);
+      return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/plain') || types.includes('URL');
+    };
+    const isExternalFileDrag = isExternalDrag;
 
     function isOverRightQueueZone(clientX, clientY, target) {
       if (el.rightDrawer.classList.contains('collapsed')) return false;
@@ -8848,7 +8896,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         if (state.rightDrawerDirty) renderRightDrawer();
       }
 
-      el.dropOverlay.textContent = 'Drop here to play video';
+      el.dropOverlay.textContent = 'Drop media file or stream URL to play / download';
       resetFullscreenIdle();
       updateChromeSolidity();
       externalScrollRaf = requestAnimationFrame(externalAutoScrollTick);
@@ -8924,13 +8972,31 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       const targetSlot = externalDropSlot;
       endExternalFileDrag({ restoreCollapsed: !droppedOnQueue, hoveringQueue: droppedOnQueue });
 
+      let droppedText = '';
+      if (e.dataTransfer) {
+        droppedText = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('URL') || e.dataTransfer.getData('text/plain') || '';
+      }
+      const streamUrl = extractUrlFromText(droppedText);
+
       const files = Array.from(e.dataTransfer?.files || []);
       const paths = files.map((f) => api.getPathForFile(f)).filter(Boolean);
+
+      // If a URL was dropped without local files, open Stream & Download modal
+      if (!paths.length && streamUrl) {
+        handleIncomingStreamUrl(streamUrl);
+        return;
+      }
+
       if (!paths.length) return;
 
       const resolved = await api.resolvePaths(paths);
       if (!resolved) {
         showToast('Unsupported file format');
+        return;
+      }
+
+      if (resolved.streamUrl) {
+        handleIncomingStreamUrl(resolved.streamUrl);
         return;
       }
 
@@ -9157,6 +9223,21 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
     });
     window.addEventListener('beforeunload', () => savePreferencesSync());
 
+    // Global Paste Listener: Instantly open & probe stream URL pasted anywhere in player
+    window.addEventListener('paste', (e) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || document.activeElement?.isContentEditable) {
+        return;
+      }
+
+      let pastedText = e.clipboardData?.getData('text') || '';
+      const streamUrl = extractUrlFromText(pastedText);
+      if (streamUrl) {
+        e.preventDefault();
+        handleIncomingStreamUrl(streamUrl);
+      }
+    });
+
     window.addEventListener('keydown', (e) => {
       resetFullscreenIdle();
 
@@ -9209,6 +9290,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           triggerBossKey();
         }
         return;
+      }
+
+      // Global Ctrl+V / Cmd+V stream URL paste shortcut
+      if ((e.ctrlKey || e.metaKey) && (e.code === 'KeyV' || e.key === 'v' || e.key === 'V')) {
+        if (navigator.clipboard?.readText) {
+          navigator.clipboard.readText().then((clipText) => {
+            const streamUrl = extractUrlFromText(clipText);
+            if (streamUrl) {
+              handleIncomingStreamUrl(streamUrl);
+            }
+          }).catch(() => {});
+        }
       }
 
       // Escape key handles closing modals and fullscreen

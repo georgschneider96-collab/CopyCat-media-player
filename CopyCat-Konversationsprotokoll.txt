@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T07:33:08Z
-Gesamtanzahl Turns: 432 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 08:39:24
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T07:45:38Z
+Gesamtanzahl Turns: 433 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 08:51:05
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24392,7 +24392,55 @@ ANTIGRAVITY / ASSISTENT:
 BENUTZER:
 don't change anything in the backup folder, the norebook doesn't know that we already published version 1.3.1
 
-[Hintergrund-Aktionen: run_command (35), read_file (15), write_file (9), edit_file (1)]
+[Hintergrund-Aktionen: run_command (39), read_file (15), write_file (9), edit_file (1)]
+
+ANTIGRAVITY / ASSISTENT:
+Verstanden!
+
+### 1. Backup-Ordner bleibt unberührt
+Der Offline-Backup-Ordner unter `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` wurde zu keinem Zeitpunkt angetastet und bleibt als deine unveränderte Sicherungskopie geschützt.
+
+### 2. NotebookLM-Bericht & Status von Version 1.3.1
+Dass NotebookLM diesen Stand bemängelt hat, liegt daran, dass der dort hochgeladene Text noch den Stand vor der Veröffentlichung und Härtung von Version 1.3.1 widerspiegelte. Alle vier Punkte wurden im Code von **VLCopyCat-Master** bereits umgesetzt und verifiziert:
+
+1. **Updater SHA-256 Kryptographie**: In [updater.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/updater.js) werden Prüfsummen aus Release-Notes oder Begleitdateien (`.sha256`, `latest.yml`) ermittelt und vor jeder Installation im Fail-Closed-Verfahren verifiziert.
+2. **Lokale API-Sicherheit**: In [server.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/server.js) blockiert ein Host-Guard DNS-Rebinding-Angriffe, `Origin: null` wird im Cross-Site-Kontext abgewiesen, URLs werden sauber validiert (HTTP 400) und die Versionsausgabe (`GET /`) ist dynamisch mit `package.json` synchronisiert (`1.3.1`).
+3. **Zweistufiger Audio-Schutz**: In [app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js) arbeitet hinter dem 20:1 Kompressor-Limiter eine nachgeschaltete `tanh`-Soft-Clipping-Stufe (`WaveShaperNode`), die auch Mikro-Transienten abfängt.
+4. **Isolierter Stream-Sniffer**: Die modularen Sniffer laufen in ephemeren Browser-Sessions mit blockierten Popups, blockierten Geräteberechtigungen und strikter Frame-/Protokoll-Isolation.
+
+---
+
+### 3. Zu deinem Screenshot (`jobbmintatv.pro`)
+In dem Screenshot war noch die Meldung *„Website Page (HTML) Detected“* zu sehen, weil dieser Test in einer Player-Instanz stattfand, bevor der neue modulare [videa-sniffer.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/sniffers/videa-sniffer.js) aktiv war.
+
+Im aktuellen Stand funktioniert die URL **automatisch in 1,7 Sekunden**:
+```
+08:38:44 [VLCopyCat:Downloader] Webpage detected for https://jobbmintatv.pro/online/Bleach/1_evad/1_resz/...
+08:38:44 [VLCopyCat:StreamSniffer] [Router] Selected sniffer strategy "VideaSniffer"
+08:38:45 [VLCopyCat:StreamSniffer] [VideaSniffer] Sniffer captured media stream: https://video4.videa.hu/static/360p/...
+08:38:45 [VLCopyCat:Downloader] Successfully auto-extracted stream from webpage!
+=== PROBE RESULT ===
+Title: Bleach 1.évad 1.rész Online Ingyen Nézhető
+Format: MP4/Stream (72.3 MB)
+IsWebpage: false
+AutoExtracted: true
+```
+
+---
+
+### Aktueller Stand
+* **Automatisierte Testsuite**: **68 / 68 Tests bestanden (100% grün)**
+* **NotebookLM-Exporte**: [CopyCat-Gesamtprojekt.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Gesamtprojekt.txt) (962 KB) und [CopyCat-Konversationsprotokoll.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Konversationsprotokoll.txt) (432 Dialoge, 1,42 MB) sind frisch generiert.
+* **Git-Sync**: Alle Änderungen sind nach `CopyCatUpload` synchronisiert und auf GitHub `master` gepusht (`d87f451`).
+
+
+--------------------------------------------------------------------------------
+[DIALOG #433] | Schritt 24235 | Zeitstempel: 2026-11-21T07:45:38Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+I''d like to either just drop a url or paste it right into the homewindow at it automaticly open the stream/download with the url in it
+
+[Hintergrund-Aktionen: read_file (26), run_command (18), edit_file (7), write_file (1)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)
