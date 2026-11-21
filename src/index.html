@@ -1113,6 +1113,13 @@
                 </div>
                 <div class="stream-input-wrap">
                   <input type="text" id="editor-source-path" class="stream-url-field" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
+                  <button class="stream-probe-btn" id="btn-editor-probe-file" type="button" title="Probe, inspect, and preload this video file" style="background:var(--accent);color:#fff;font-weight:600;padding:8px 14px;border-left:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span>Probe File</span>
+                  </button>
                   <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" title="Browse for video file on your PC">Browse...</button>
                   <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
                 </div>

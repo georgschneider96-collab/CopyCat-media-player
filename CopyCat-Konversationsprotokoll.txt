@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T08:48:17Z
-Gesamtanzahl Turns: 438 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 09:49:18
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T10:08:04Z
+Gesamtanzahl Turns: 439 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 11:14:50
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24739,7 +24739,42 @@ ANTIGRAVITY / ASSISTENT:
 BENUTZER:
 by that meant when the file is put in the deticated  tab
 
-[Hintergrund-Aktionen: read_file (4), edit_file (2), run_command (2)]
+[Hintergrund-Aktionen: run_command (5), read_file (4), edit_file (2)]
+
+ANTIGRAVITY / ASSISTENT:
+The automatic background action has been completely removed from normal playback.
+
+### How It Works Now
+
+1. **Main Player & Home Screen (Normal Playback)**:
+   * Dragging and dropping a video onto the main player or home screen **only starts or queues playback as normal**.
+   * **No background FFprobe tasks**, **no background network requests**, and **no toasts** are fired while you are simply watching or queueing media.
+
+2. **Dedicated Tab (`File & Media Tools`) Only**:
+   * File analysis and automatic preloading are strictly isolated to when a file is explicitly provided to the **File & Media Tools** panel:
+     * **Drag & Drop into the Dedicated Tab**: When the `File & Media Tools` window is open and you drop a file into it.
+     * **Browse Button**: When you click **Browse...** and select a file.
+     * **Use Playing Button**: When you explicitly click **Use Playing** to pull the currently playing video into the editor.
+     * **Manual Path Entry**: When you type or paste a path into `Target Video File`.
+   * Only in these cases will CopyCat run the short analysis card and preload the Format Converter, Subtitle Lookup/Ripper, and Metadata Editor.
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **71 / 71 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **NotebookLM Sync**: [CopyCat-Gesamtprojekt.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Gesamtprojekt.txt) and [CopyCat-Konversationsprotokoll.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Konversationsprotokoll.txt) updated.
+* **Git Commit & Push**: Pushed to `origin/master` (commit `c7d717f`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #439] | Schritt 24629 | Zeitstempel: 2026-11-21T10:08:04Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+I believe the auto analyze function doesn't really work, maybe you include also a probe button
+
+[Hintergrund-Aktionen: run_command (30), read_file (21), edit_file (4)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

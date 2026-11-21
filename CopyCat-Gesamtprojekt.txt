@@ -1,6 +1,6 @@
 ================================================================================
 # PROJEKT-GESAMTDOKUMENTATION: VLCopyCat / CopyCat Media Player
-Aktualisiert am: 2026-11-21 09:49:17
+Aktualisiert am: 2026-11-21 11:14:50
 Enthaltene Dateien (27):
   - ./C:/Users/Schual/Desktop/VLCopyCat-Master/AI_CONTEXT.md
   - ./C:/Users/Schual/Desktop/VLCopyCat-Master/export_notebooklm.ps1
@@ -1580,6 +1580,7 @@ This project is licensed under the [MIT License](LICENSE).
 
     // Media Editor & File Processing Tools
     editorSourcePath: $('editor-source-path'),
+    btnEditorProbeFile: $('btn-editor-probe-file'),
     btnEditorBrowseFile: $('btn-editor-browse-file'),
     btnEditorUseCurrent: $('btn-editor-use-current'),
     editorFileBadge: $('editor-file-badge'),
@@ -8108,7 +8109,17 @@ This project is licensed under the [MIT License](LICENSE).
         } else if (target === 'stream-download') {
           if (el.streamUrlInput) setTimeout(() => el.streamUrlInput.focus(), 80);
         } else if (target === 'media-editor') {
-          // Dedicated tab: only inspect and preload when a file is explicitly placed in this tab
+          let targetPath = el.editorSourcePath?.value?.trim();
+          if (!targetPath) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http')) {
+              targetPath = cur;
+              if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            }
+          }
+          if (targetPath && typeof window.mediaEditorInspectTarget === 'function') {
+            window.mediaEditorInspectTarget(targetPath, { silent: true });
+          }
         }
       });
     });
@@ -10698,6 +10709,33 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         }
       }
 
+      // Explicit Probe / Analyze button
+      if (el.btnEditorProbeFile) {
+        el.btnEditorProbeFile.addEventListener('click', async () => {
+          let targetPath = el.editorSourcePath?.value?.trim();
+          if (!targetPath) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http')) {
+              targetPath = cur;
+              if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            }
+          }
+
+          if (!targetPath) {
+            showToast('Please select or paste a video file path to probe');
+            return;
+          }
+
+          const origHtml = el.btnEditorProbeFile.innerHTML;
+          el.btnEditorProbeFile.innerHTML = '<span>Probing...</span>';
+          try {
+            await inspectTargetFile(targetPath, { manual: true });
+          } finally {
+            el.btnEditorProbeFile.innerHTML = origHtml;
+          }
+        });
+      }
+
       // Browse source video
       if (el.btnEditorBrowseFile) {
         el.btnEditorBrowseFile.addEventListener('click', async () => {
@@ -10705,7 +10743,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           const filePath = await api.openVideoFileDialog();
           if (filePath && el.editorSourcePath) {
             el.editorSourcePath.value = filePath;
-            inspectTargetFile(filePath);
+            inspectTargetFile(filePath, { manual: true });
           }
         });
       }
@@ -10716,7 +10754,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
           if (cur && !cur.startsWith('http')) {
             if (el.editorSourcePath) el.editorSourcePath.value = cur;
-            inspectTargetFile(cur);
+            inspectTargetFile(cur, { manual: true });
             showToast('Loaded currently playing video into editor');
           } else {
             showToast('No local video currently playing');
@@ -10734,6 +10772,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         };
         el.editorSourcePath.addEventListener('change', triggerInspect);
         el.editorSourcePath.addEventListener('paste', () => setTimeout(triggerInspect, 60));
+        el.editorSourcePath.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = el.editorSourcePath.value.trim();
+            if (val) inspectTargetFile(val, { manual: true });
+          }
+        });
         el.editorSourcePath.addEventListener('input', () => {
           clearTimeout(inspectDebounceTimer);
           inspectDebounceTimer = setTimeout(triggerInspect, 450);
@@ -12554,6 +12599,13 @@ window.VLC_ICONS = {
                 </div>
                 <div class="stream-input-wrap">
                   <input type="text" id="editor-source-path" class="stream-url-field" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
+                  <button class="stream-probe-btn" id="btn-editor-probe-file" type="button" title="Probe, inspect, and preload this video file" style="background:var(--accent);color:#fff;font-weight:600;padding:8px 14px;border-left:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span>Probe File</span>
+                  </button>
                   <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" title="Browse for video file on your PC">Browse...</button>
                   <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
                 </div>

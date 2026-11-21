@@ -537,6 +537,7 @@
 
     // Media Editor & File Processing Tools
     editorSourcePath: $('editor-source-path'),
+    btnEditorProbeFile: $('btn-editor-probe-file'),
     btnEditorBrowseFile: $('btn-editor-browse-file'),
     btnEditorUseCurrent: $('btn-editor-use-current'),
     editorFileBadge: $('editor-file-badge'),
@@ -7065,7 +7066,17 @@
         } else if (target === 'stream-download') {
           if (el.streamUrlInput) setTimeout(() => el.streamUrlInput.focus(), 80);
         } else if (target === 'media-editor') {
-          // Dedicated tab: only inspect and preload when a file is explicitly placed in this tab
+          let targetPath = el.editorSourcePath?.value?.trim();
+          if (!targetPath) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http')) {
+              targetPath = cur;
+              if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            }
+          }
+          if (targetPath && typeof window.mediaEditorInspectTarget === 'function') {
+            window.mediaEditorInspectTarget(targetPath, { silent: true });
+          }
         }
       });
     });
@@ -9655,6 +9666,33 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         }
       }
 
+      // Explicit Probe / Analyze button
+      if (el.btnEditorProbeFile) {
+        el.btnEditorProbeFile.addEventListener('click', async () => {
+          let targetPath = el.editorSourcePath?.value?.trim();
+          if (!targetPath) {
+            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
+            if (cur && !cur.startsWith('http')) {
+              targetPath = cur;
+              if (el.editorSourcePath) el.editorSourcePath.value = cur;
+            }
+          }
+
+          if (!targetPath) {
+            showToast('Please select or paste a video file path to probe');
+            return;
+          }
+
+          const origHtml = el.btnEditorProbeFile.innerHTML;
+          el.btnEditorProbeFile.innerHTML = '<span>Probing...</span>';
+          try {
+            await inspectTargetFile(targetPath, { manual: true });
+          } finally {
+            el.btnEditorProbeFile.innerHTML = origHtml;
+          }
+        });
+      }
+
       // Browse source video
       if (el.btnEditorBrowseFile) {
         el.btnEditorBrowseFile.addEventListener('click', async () => {
@@ -9662,7 +9700,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           const filePath = await api.openVideoFileDialog();
           if (filePath && el.editorSourcePath) {
             el.editorSourcePath.value = filePath;
-            inspectTargetFile(filePath);
+            inspectTargetFile(filePath, { manual: true });
           }
         });
       }
@@ -9673,7 +9711,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
           if (cur && !cur.startsWith('http')) {
             if (el.editorSourcePath) el.editorSourcePath.value = cur;
-            inspectTargetFile(cur);
+            inspectTargetFile(cur, { manual: true });
             showToast('Loaded currently playing video into editor');
           } else {
             showToast('No local video currently playing');
@@ -9691,6 +9729,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         };
         el.editorSourcePath.addEventListener('change', triggerInspect);
         el.editorSourcePath.addEventListener('paste', () => setTimeout(triggerInspect, 60));
+        el.editorSourcePath.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const val = el.editorSourcePath.value.trim();
+            if (val) inspectTargetFile(val, { manual: true });
+          }
+        });
         el.editorSourcePath.addEventListener('input', () => {
           clearTimeout(inspectDebounceTimer);
           inspectDebounceTimer = setTimeout(triggerInspect, 450);
