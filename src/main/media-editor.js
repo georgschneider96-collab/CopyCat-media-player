@@ -400,9 +400,171 @@ class MediaEditor {
   }
 
   /**
-   * Search for companion subtitles locally and via online OpenSubtitles REST API
+   * Extract show, season, and episode tokens from a filename or search query for ranking
    */
-  async searchSubtitles({ query, lang = 'eng', filePath = null }) {
+  _parseSearchContext(queryStr = '', filePath = null, explicit = {}) {
+    const rawBase = filePath ? path.basename(filePath, path.extname(filePath)) : '';
+    const sourceText = rawBase || queryStr || '';
+    let clean = sourceText
+      .replace(/^\[[^\]]+\]\s*/, '')
+      .replace(/\s*\[[0-9a-fA-F]{8}\]$/, '')
+      .replace(/\b(?:19\d\d|20\d\d|480p|720p|1080p|2160p|4k|x264|h264|x265|hevc|av1|aac\d*(?:\.\d+)?|flac|5\.1|2\.0|10-?bit|bluray|bdrip|web-?dl|webrip|hdtv|dcp\w*|2d|2k)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    let show = explicit.show || '';
+    let season = explicit.season ? parseInt(explicit.season, 10) : null;
+    let episode = explicit.episode ? parseInt(explicit.episode, 10) : null;
+    let rawEpToken = explicit.episode ? String(explicit.episode) : null;
+
+    const se = clean.match(/^(.*?)(?:[._ -]+|\b)[sS](\d{1,2})[_.-]?[eE](\d{1,4})\b/)
+      || clean.match(/^(.*?)(?:[._ -]+|\b)(\d{1,2})x(\d{1,4})\b/i);
+    if (se) {
+      if (!show) show = se[1].replace(/[._-]+/g, ' ').trim();
+      if (!season) season = parseInt(se[2], 10);
+      if (episode === null) episode = parseInt(se[3], 10);
+      if (!rawEpToken) rawEpToken = se[3];
+    } else {
+      const epM = clean.match(/^(.*?)(?:[._ -]+|\b)(?:ep|episode|tv_|-)?\s*(0*\d{1,4})(?:\b|$)/i);
+      if (epM && epM[1].trim().length > 0) {
+        if (!show) show = epM[1].replace(/[._-]+/g, ' ').trim();
+        if (!season) season = 1;
+        if (episode === null) episode = parseInt(epM[2], 10);
+        if (!rawEpToken) rawEpToken = epM[2];
+      } else if (!show) {
+        show = clean.replace(/[._-]+/g, ' ').trim();
+      }
+    }
+
+    // Also inspect rawBase specifically for zero-padded episode tokens like "001"
+    if (rawBase && episode !== null) {
+      const rawEpM = rawBase.match(/(?:[._ -]|ep|episode)(0+\d{1,4})(?:\b|[._ -])/i);
+      if (rawEpM && parseInt(rawEpM[1], 10) === episode) {
+        rawEpToken = rawEpM[1];
+      }
+    }
+
+    return {
+      show: show.trim(),
+      season: season || 1,
+      episode: Number.isNaN(episode) ? null : episode,
+      rawEpToken,
+      rawBase: rawBase.replace(/[._-]+/g, ' ').trim()
+    };
+  }
+
+  /**
+   * Extract season and episode number from a candidate subtitle filename
+   */
+  _extractCandidateEpisode(fileName = '') {
+    let clean = String(fileName).replace(/\.[^/.]+$/, '');
+    clean = clean.replace(/\s*\[[0-9a-fA-F]{8}\]/g, ' ');
+    clean = clean.replace(/\b(?:19\d\d|20\d\d|480p|720p|1080p|2160p|4k|x264|h264|x265|hevc|av1|aac\d*(?:\.\d+)?|5\.1|2\.0|10-?bit|bluray|bdrip|web-?dl|webrip|dcp\w*|2d|2k)\b/gi, ' ');
+
+    const se = clean.match(/\bS(\d{1,2})[_.-]?E(\d{1,4})\b/i) || clean.match(/\b(\d{1,2})x(\d{1,4})\b/i);
+    if (se) {
+      return { season: parseInt(se[1], 10), ep: parseInt(se[2], 10), rawEp: se[2] };
+    }
+    const sAndEp = clean.match(/Season\s*(\d{1,2})\s*[-_ ]\s*(\d{1,4})\b/i);
+    if (sAndEp) {
+      return { season: parseInt(sAndEp[1], 10), ep: parseInt(sAndEp[2], 10), rawEp: sAndEp[2] };
+    }
+    const epM = clean.match(/(?:[-_ ]|ep|episode|tv_)\s*(0*\d{1,4})(?=\b|[._ \-[])/i);
+    if (epM) {
+      return { season: null, ep: parseInt(epM[1], 10), rawEp: epM[1] };
+    }
+    return { season: null, ep: null, rawEp: null };
+  }
+
+  /**
+   * Score an online subtitle candidate from Best to Worst against the target media context
+   */
+  _scoreSubtitleCandidate(item, ctx) {
+    let score = 50;
+    const fn = item.fileName || '';
+    const fnLower = fn.toLowerCase();
+    const movie = item.movieName || '';
+    const movieLower = movie.toLowerCase();
+    const kind = (item.movieKind || '').toLowerCase();
+    const dl = parseInt(item.downloads || '0', 10) || 0;
+    const rating = parseFloat(item.rating || '0') || 0;
+    const targetShow = (ctx.show || '').toLowerCase();
+    const targetEp = ctx.episode;
+    const targetSeason = ctx.season || 1;
+
+    const parsed = this._extractCandidateEpisode(fn);
+
+    if (targetEp !== null && targetEp !== undefined) {
+      // 1. Filename episode number match / mismatch
+      if (parsed.ep !== null) {
+        if (parsed.ep === targetEp) {
+          score += 60;
+          if (ctx.rawEpToken && parsed.rawEp === ctx.rawEpToken) {
+            score += 25; // Exact padding match e.g. "001" === "001"
+          }
+        } else {
+          score -= 80; // Explicitly a different episode (e.g. ep 227 or 101 vs ep 1)
+        }
+      }
+
+      // 2. Season match / mismatch
+      if (parsed.season !== null && parsed.season !== targetSeason) {
+        score -= 40;
+      }
+
+      // 3. OpenSubtitles structured episode & season metadata
+      const osEp = parseInt(item.seriesEpisode || '0', 10);
+      const osSeason = parseInt(item.seriesSeason || '0', 10);
+      if (osEp === targetEp) score += 25;
+      else if (osEp > 0 && osEp !== targetEp) score -= 45;
+      if (osSeason === targetSeason) score += 10;
+
+      // 4. Media Kind (Episode/TV vs Movie)
+      if (kind === 'episode' || kind === 'tv series') score += 20;
+      if (kind === 'movie' || /\bmovie\b/i.test(fn)) score -= 50;
+    }
+
+    // 5. Show title match & spin-off differentiation
+    if (targetShow) {
+      if (movieLower.startsWith(`"${targetShow}"`) || movieLower === targetShow) {
+        score += 35;
+      } else if (movieLower.includes(':') && !targetShow.includes(':')) {
+        score -= 25; // Spin-off or sequel subtitle (e.g. "Bleach: Thousand-Year Blood War" when searching "Bleach")
+      } else if (fnLower.startsWith(targetShow) || fnLower.includes(targetShow)) {
+        score += 15;
+      }
+    }
+
+    // 6. Format & quality bonuses
+    const fmt = (item.format || '').toLowerCase();
+    if (fmt === 'srt') score += 8;
+    else if (fmt === 'vtt') score += 6;
+    else if (fmt === 'ass' || fmt === 'ssa') score += 5;
+
+    if (item.subBad === '1') score -= 80;
+
+    // Popularity & rating tie-breakers
+    score += Math.min(12, Math.round(Math.log10(dl + 1) * 2.5));
+    score += Math.min(5, Math.round(rating * 0.5));
+
+    let matchTier = 'low';
+    let matchLabel = 'PARTIAL';
+    if (score >= 165) {
+      matchTier = 'best';
+      matchLabel = '★ BEST MATCH';
+    } else if (score >= 110) {
+      matchTier = 'good';
+      matchLabel = 'GOOD MATCH';
+    }
+
+    return { score, matchTier, matchLabel };
+  }
+
+  /**
+   * Search for companion subtitles locally and via online OpenSubtitles REST API, sorted Best to Worst
+   */
+  async searchSubtitles({ query, lang = 'eng', filePath = null, show = null, season = null, episode = null }) {
+    filePath = filePath ? String(filePath).trim().replace(/^["']+|["']+$/g, '').trim() : null;
     const localResults = [];
     const onlineResults = [];
 
@@ -427,7 +589,10 @@ class MediaEditor {
                 localPath: path.join(dir, f),
                 lang: this._detectSubtitleLanguage(f),
                 format: ext.replace('.', '').toUpperCase(),
-                downloadUrl: null
+                downloadUrl: null,
+                matchScore: 999,
+                matchTier: 'best',
+                matchLabel: '★ LOCAL MATCH'
               });
             }
           }
@@ -437,31 +602,59 @@ class MediaEditor {
       }
     }
 
-    // 2. Search OpenSubtitles REST API
+    // 2. Search OpenSubtitles REST API across targeted endpoints and rank Best -> Worst
     const searchQuery = query || (filePath ? path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ') : '');
     if (searchQuery && searchQuery.trim().length > 1) {
       try {
         const subLang = lang === 'hu' ? 'hun' : (lang === 'de' ? 'ger' : (lang === 'ja' ? 'jpn' : lang));
-        const qTrim = searchQuery.trim();
-        const queriesToRun = [qTrim];
+        const ctx = this._parseSearchContext(searchQuery, filePath, { show, season, episode });
+        const pathsToQuery = [];
 
-        if (filePath) {
-          const rawBase = path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ').trim();
-          if (rawBase && rawBase.toLowerCase() !== qTrim.toLowerCase()) {
-            queriesToRun.unshift(rawBase);
+        // A. Raw filename base query (e.g. "bleach 001")
+        if (ctx.rawBase && ctx.rawBase.length > 1) {
+          pathsToQuery.push(`query-${encodeURIComponent(ctx.rawBase.toLowerCase())}/sublanguageid-${subLang}`);
+        }
+
+        // B. Structured episode + show + season query
+        if (ctx.show && ctx.episode !== null) {
+          const structuredPath = `episode-${ctx.episode}/query-${encodeURIComponent(ctx.show.toLowerCase())}/season-${ctx.season || 1}/sublanguageid-${subLang}`;
+          if (!pathsToQuery.includes(structuredPath)) {
+            pathsToQuery.push(structuredPath);
           }
         }
 
+        // C. User query string
+        const qPath = `query-${encodeURIComponent(searchQuery.trim().toLowerCase())}/sublanguageid-${subLang}`;
+        if (!pathsToQuery.includes(qPath)) {
+          pathsToQuery.push(qPath);
+        }
+
+        const lists = await Promise.all(pathsToQuery.map((p) => this._queryOpenSubtitlesPath(p, subLang)));
         const seenIds = new Set();
-        for (const q of queriesToRun) {
-          const osList = await this._queryOpenSubtitles(q, subLang);
-          for (const item of osList) {
+        const candidates = [];
+
+        for (const list of lists) {
+          for (const item of list) {
             if (!seenIds.has(item.id)) {
               seenIds.add(item.id);
-              onlineResults.push(item);
+              const { score, matchTier, matchLabel } = this._scoreSubtitleCandidate(item, ctx);
+              candidates.push({
+                ...item,
+                matchScore: score,
+                matchTier,
+                matchLabel
+              });
             }
           }
         }
+
+        // Sort strictly from Best to Worst (highest matchScore first, tie-break by download count)
+        candidates.sort((a, b) => {
+          if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+          return (b.downloads || 0) - (a.downloads || 0);
+        });
+
+        onlineResults.push(...candidates.slice(0, 25));
       } catch (err) {
         logger.debug('Online subtitle search notice:', err.message);
       }
@@ -476,8 +669,13 @@ class MediaEditor {
   }
 
   _queryOpenSubtitles(query, lang = 'eng') {
+    const pathSuffix = `query-${encodeURIComponent(String(query || '').trim().toLowerCase())}/sublanguageid-${lang}`;
+    return this._queryOpenSubtitlesPath(pathSuffix, lang);
+  }
+
+  _queryOpenSubtitlesPath(pathSuffix, lang = 'eng') {
     return new Promise((resolve) => {
-      const url = `https://rest.opensubtitles.org/search/query-${encodeURIComponent(query)}/sublanguageid-${lang}`;
+      const url = `https://rest.opensubtitles.org/search/${pathSuffix}`;
       const fetchJson = (targetUrl, redirectsRemaining = 4) => {
         const req = https.get(targetUrl, {
           headers: { 'User-Agent': 'TemporaryUserAgent' },
@@ -493,11 +691,17 @@ class MediaEditor {
             try {
               const list = JSON.parse(data || '[]');
               if (Array.isArray(list)) {
-                const mapped = list.slice(0, 15).map((item, idx) => ({
+                const mapped = list.slice(0, 20).map((item, idx) => ({
                   id: item.IDSubtitleFile || `os_${idx}`,
                   source: 'opensubtitles',
                   title: item.SubFileName || item.MovieName || `Subtitle ${idx + 1}`,
                   fileName: item.SubFileName || `sub_${idx + 1}.srt`,
+                  movieName: (item.MovieName || '').replace(/\s+/g, ' ').trim(),
+                  movieKind: item.MovieKind || '',
+                  seriesSeason: item.SeriesSeason || '0',
+                  seriesEpisode: item.SeriesEpisode || '0',
+                  downloads: parseInt(item.SubDownloadsCnt || '0', 10) || 0,
+                  subBad: item.SubBad || '0',
                   lang: item.SubLanguageID || lang,
                   format: item.SubFormat ? item.SubFormat.toUpperCase() : 'SRT',
                   downloadUrl: item.SubDownloadLink || item.ZipDownloadLink,
@@ -515,6 +719,186 @@ class MediaEditor {
 
       fetchJson(url);
     });
+  }
+
+  /**
+   * Strip HTML tags and normalize entities in online metadata synopses
+   */
+  _stripHtmlSynopsis(html) {
+    if (!html) return '';
+    return String(html)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\.\.+/g, '. ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n+/g, '\n')
+      .trim();
+  }
+
+  _fetchJsonHttps(targetUrl, redirectsRemaining = 3) {
+    return new Promise((resolve) => {
+      const req = https.get(targetUrl, {
+        headers: { 'User-Agent': 'CopyCatMediaPlayer/1.3.1' },
+        timeout: 5000
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsRemaining > 0) {
+          req.destroy();
+          return resolve(this._fetchJsonHttps(res.headers.location, redirectsRemaining - 1));
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(null);
+        }
+        let data = '';
+        res.on('data', (c) => { data += c; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    });
+  }
+
+  _queryAniListMetadata(searchName) {
+    return new Promise((resolve) => {
+      if (!searchName) return resolve(null);
+      const query = 'query ($search: String) { Media(search: $search, type: ANIME) { title { romaji english } startDate { year } studios(isMain: true) { nodes { name } } description(asHtml: false) } }';
+      const body = JSON.stringify({ query, variables: { search: searchName } });
+      const req = https.request('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'CopyCatMediaPlayer/1.3.1',
+          'Content-Length': Buffer.byteLength(body)
+        },
+        timeout: 5000
+      }, (res) => {
+        let data = '';
+        res.on('data', (c) => { data += c; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data)?.data?.Media || null);
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  /**
+   * Look up rich online metadata (Episode Title, Show Name, Year, Studio/Creator, Plot Synopsis)
+   * using TVMaze, AniList GraphQL, and iTunes Movie APIs without requiring an API key.
+   */
+  async lookupOnlineMetadata({ show = '', season = '', episode = '', title = '', year = '', filePath = null } = {}) {
+    const ctx = this._parseSearchContext(show || title, filePath, { show, season, episode });
+    const searchName = (ctx.show || show || title || '').trim();
+    if (!searchName) {
+      return { success: false, found: false, error: 'No show or media title provided for online metadata lookup.' };
+    }
+
+    const epNum = ctx.episode !== null ? ctx.episode : (episode ? parseInt(episode, 10) : null);
+    const sNum = ctx.season || (season ? parseInt(season, 10) : 1);
+
+    try {
+      const queries = [
+        this._fetchJsonHttps(`https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(searchName)}&embed=episodes`),
+        this._queryAniListMetadata(searchName)
+      ];
+      if (epNum === null) {
+        queries.push(this._fetchJsonHttps(`https://itunes.apple.com/search?term=${encodeURIComponent(searchName)}&entity=movie&limit=3`));
+      }
+
+      const [tvmaze, anilist, itunes] = await Promise.all(queries);
+
+      // 1. Match specific episode from TVMaze embedded episode list
+      let matchedEp = null;
+      const episodes = tvmaze?._embedded?.episodes || [];
+      if (epNum !== null && episodes.length > 0) {
+        matchedEp = episodes.find((e) => e.season === sNum && e.number === epNum)
+          || episodes.find((e) => e.number === epNum)
+          || (epNum > 0 && epNum <= episodes.length ? episodes[epNum - 1] : null);
+      }
+
+      // 2. Build Studio / Network / Creator string
+      const studioParts = [];
+      if (anilist?.studios?.nodes?.length) {
+        for (const node of anilist.studios.nodes) {
+          if (node?.name && !studioParts.includes(node.name)) {
+            studioParts.push(node.name);
+          }
+        }
+      }
+      const networkName = tvmaze?.network?.name || tvmaze?.webChannel?.name;
+      if (networkName && !studioParts.some((s) => s.toLowerCase() === networkName.toLowerCase())) {
+        studioParts.push(networkName);
+      }
+
+      const movieTrack = itunes?.results?.[0] || null;
+      if (!studioParts.length && movieTrack?.artistName) {
+        studioParts.push(movieTrack.artistName);
+      }
+
+      // 3. Resolve fields
+      const resolvedShow = tvmaze?.name || anilist?.title?.english || anilist?.title?.romaji || (epNum !== null ? searchName : '');
+      const resolvedTitle = matchedEp?.name
+        || (epNum === null ? (movieTrack?.trackName || tvmaze?.name || anilist?.title?.english || title || searchName) : (title || `${resolvedShow} - Episode ${String(epNum).padStart(2, '0')}`));
+
+      // Note: TVMaze sometimes uses 4-digit broadcast year (e.g. 2004) as e.season for long-running anime
+      const resolvedSeason = epNum !== null
+        ? ((matchedEp?.season && matchedEp.season < 100) ? String(matchedEp.season) : String(sNum || 1))
+        : '';
+      const resolvedEpisode = epNum !== null ? String(epNum) : '';
+
+      const resolvedYear = (matchedEp?.airdate || tvmaze?.premiered || movieTrack?.releaseDate || '')?.slice(0, 4)
+        || (anilist?.startDate?.year ? String(anilist.startDate.year) : '')
+        || year
+        || '';
+
+      const resolvedArtist = studioParts.join(' / ');
+      const rawSynopsis = matchedEp?.summary
+        || (epNum === null && (movieTrack?.longDescription || movieTrack?.shortDescription))
+        || tvmaze?.summary
+        || anilist?.description
+        || '';
+      const resolvedDescription = this._stripHtmlSynopsis(rawSynopsis);
+
+      const foundAny = Boolean(matchedEp || tvmaze || anilist || movieTrack);
+
+      return {
+        success: true,
+        ok: true,
+        found: foundAny,
+        metadata: {
+          title: resolvedTitle,
+          show: resolvedShow,
+          season: resolvedSeason,
+          episode: resolvedEpisode,
+          year: resolvedYear,
+          artist: resolvedArtist,
+          description: resolvedDescription
+        }
+      };
+    } catch (err) {
+      logger.debug('Online metadata lookup notice:', err.message);
+      return { success: false, found: false, error: err.message };
+    }
   }
 
   /**

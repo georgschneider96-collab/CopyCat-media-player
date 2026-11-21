@@ -772,6 +772,15 @@ const IPC_HANDLERS = {
     }
   },
 
+  'media-editor:lookup-metadata': {
+    type: 'handle',
+    description: 'Look up online episode/series/movie metadata from TVMaze, AniList, and iTunes',
+    handler: ({ mediaEditor }, _evt, queryOpts) => {
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.lookupOnlineMetadata(queryOpts || {});
+    }
+  },
+
   'dialog:open-video-file': {
     type: 'handle',
     description: 'Open native file picker for video media files',

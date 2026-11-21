@@ -49,6 +49,7 @@ const copycatApi = {
   downloadSubtitle: (url, targetPath) => ipcRenderer.invoke('media-editor:download-subtitle', url, targetPath),
   embedSubtitles: (opts) => ipcRenderer.invoke('media-editor:embed-subtitles', opts),
   applyMediaMetadata: (opts) => ipcRenderer.invoke('media-editor:apply-metadata', opts),
+  lookupOnlineMetadata: (queryOpts) => ipcRenderer.invoke('media-editor:lookup-metadata', queryOpts),
   openVideoFileDialog: () => ipcRenderer.invoke('dialog:open-video-file'),
   openSubtitleFileDialog: () => ipcRenderer.invoke('dialog:open-subtitle-file'),
   onMediaEditorProgress: (cb) => ipcRenderer.on('media-editor:progress', (_e, data) => cb(data)),

@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T10:20:45Z
-Gesamtanzahl Turns: 440 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 11:35:51
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:00:53Z
+Gesamtanzahl Turns: 441 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 12:14:54
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24826,7 +24826,52 @@ In the previous version, when `C:\Users\Schual\Downloads\CopyCat\Bleach 001.mp4`
 BENUTZER:
 even when I press the probe button. nothing happens
 
-[Hintergrund-Aktionen: read_file (27), run_command (21), edit_file (9)]
+[Hintergrund-Aktionen: read_file (27), run_command (22), edit_file (9)]
+
+ANTIGRAVITY / ASSISTENT:
+I found the exact root cause of why pressing **`Probe File`** did nothing and why no feedback appeared.
+
+---
+
+### Root Cause Analysis
+
+1. **Missing Service Injection in the Main Process IPC Registry** ([ipc.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/ipc.js#L842-L864)):
+   * While `mediaEditor` was registered in the IoC container ([container.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/container.js)), `registerIpcRegistry()` in `src/main/ipc.js` constructed the `services` object passed to IPC handlers with only `{ window, stream, media, session, updater, downloader }` — **`mediaEditor` was omitted from `services`**.
+   * As a result, calling `media-editor:probe` received `mediaEditor === undefined`, immediately failing inside the handler.
+2. **Toast & Drop Overlay Hidden Behind Settings Modal (`z-index`)** ([styles.css](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/styles.css#L946-L985)):
+   * `.osd-toast` had `z-index: 30` and `.drop-overlay` had `z-index: 50`, whereas `#settings-backdrop` had `z-index: 100`.
+   * Any toast notification or drag-and-drop overlay triggered while the Settings modal was open rendered **underneath** the dark modal backdrop, making it invisible.
+
+---
+
+### Fixes Applied
+
+1. **Injected `mediaEditor` into `registerIpcRegistry` + Direct Fallback** ([ipc.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/ipc.js#L682-L772)):
+   * Added `mediaEditor` to the `services` dictionary in `registerIpcRegistry()`.
+   * Added a defensive fallback (`mediaEditor || require('./media-editor').mediaEditor`) across all `media-editor:*` IPC handlers (`probe`, `convert`, `cancel-job`, `search-subtitles`, `download-subtitle`, `embed-subtitles`, `apply-metadata`), plus renderer fallback to `api.probeMedia` in [app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L9471-L9508).
+2. **Elevated Toast & Drag-and-Drop Overlay Above Modals** ([styles.css](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/styles.css#L946-L985)):
+   * Changed `.osd-toast` (`z-index: 9600`) and `.drop-overlay` (`z-index: 9500`) to `position: fixed` so status toasts and drag-and-drop overlays always render visibly on top of the Settings modal.
+3. **Prioritized Exact Episode Filename Matches in OpenSubtitles** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L440-L469)):
+   * Verified against `C:\Users\Schual\Downloads\CopyCat\Bleach 001.mp4`: probing now returns `480x360 • 22:50 • 72.3 MB`, and the subtitle auto-ripper ranks `[Judas] Bleach - 001.en.srt` as the #1 match and downloads it directly into **`Selected Subtitle File`**.
+
+> **Note:** Please close and restart CopyCat once (rather than just refreshing) so the Electron Main Process loads the updated [ipc.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/ipc.js).
+
+---
+
+### Verification & Sync Status
+
+* **End-to-End IPC Verification**: Tested `IPC_HANDLERS['media-editor:probe']` and `IPC_HANDLERS['media-editor:search-subtitles']` directly against `C:\Users\Schual\Downloads\CopyCat\Bleach 001.mp4` (**72 / 72 tests passed** in [test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **Git Push**: Committed and pushed to `origin/master` (commit `0ba74c8`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #441] | Schritt 24865 | Zeitstempel: 2026-11-21T11:00:53Z (Anhänge: 2)
+--------------------------------------------------------------------------------
+BENUTZER:
+looks good now instead of just the rip can we do the same for the metadata? also could we order the sub options from best to worst
+
+[Hintergrund-Aktionen: run_command (12), read_file (11), edit_file (11), manage_task (1)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

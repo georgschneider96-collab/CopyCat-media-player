@@ -958,8 +958,9 @@ async function runAll() {
     assert(typeof editor.cancelJob === 'function', 'cancelJob must be a function');
     assert(typeof editor.searchSubtitles === 'function', 'searchSubtitles must be a function');
     assert(typeof editor.downloadSubtitle === 'function', 'downloadSubtitle must be a function');
-    assert(typeof editor.embedSubtitles === 'function', 'embedSubtitles must be a function');
-    assert(typeof editor.applyMetadata === 'function', 'applyMetadata must be a function');
+    assert( typeof editor.embedSubtitles === 'function', 'embedSubtitles must be a function');
+    assert( typeof editor.applyMetadata === 'function', 'applyMetadata must be a function');
+    assert( typeof editor.lookupOnlineMetadata === 'function', 'lookupOnlineMetadata must be a function');
   });
 
   await runAsyncTest('MediaEditor searchSubtitles discovers local companion subtitle files', async () => {
@@ -1049,6 +1050,58 @@ async function runAll() {
     const probeMissingRes = await IPC_HANDLERS['media-editor:probe'].handler(services, {}, '"C:\\nonexistent_test_video.mp4"');
     assert.strictEqual(probeMissingRes.success, false, 'Probing missing file returns structured { success: false }');
     assert(probeMissingRes.error.includes('File does not exist'), 'Error message must originate from mediaEditor.probeMetadata');
+  });
+
+  runTest('MediaEditor ranks subtitle candidates strictly from Best to Worst', () => {
+    const ctx = editor._parseSearchContext('Bleach 1', 'C:\\Videos\\Bleach 001.mp4', { show: 'Bleach', season: 1, episode: 1 });
+    assert.strictEqual(ctx.show, 'Bleach', 'Context show must be Bleach');
+    assert.strictEqual(ctx.episode, 1, 'Context episode must be 1');
+    assert.strictEqual(ctx.rawEpToken, '001', 'Context rawEpToken must preserve 001');
+
+    const exactEp = editor._scoreSubtitleCandidate({
+      fileName: '[Judas] Bleach - 001.en.srt',
+      movieName: '"Bleach" The Day I Became a Shinigami',
+      movieKind: 'episode',
+      seriesSeason: '1',
+      seriesEpisode: '1',
+      format: 'SRT',
+      downloads: 5000
+    }, ctx);
+
+    const spinOffEp = editor._scoreSubtitleCandidate({
+      fileName: 'BLEACH.Thousand-Year.Blood.War.S01E01.srt',
+      movieName: '"Bleach: Thousand-Year Blood War" The Blood Warfare',
+      movieKind: 'episode',
+      seriesSeason: '1',
+      seriesEpisode: '1',
+      format: 'SRT',
+      downloads: 5000
+    }, ctx);
+
+    const wrongEp = editor._scoreSubtitleCandidate({
+      fileName: 'Bleach Season 12 - 227.enUS.ass',
+      movieName: 'Bleach',
+      movieKind: 'movie',
+      seriesSeason: '12',
+      seriesEpisode: '227',
+      format: 'ASS',
+      downloads: 1200
+    }, ctx);
+
+    const liveMovie = editor._scoreSubtitleCandidate({
+      fileName: 'Bleach.2018.WEBRip.srt',
+      movieName: 'Bleach',
+      movieKind: 'movie',
+      seriesSeason: '0',
+      seriesEpisode: '0',
+      format: 'SRT',
+      downloads: 200000
+    }, ctx);
+
+    assert(exactEp.score > spinOffEp.score, 'Exact show episode 1 must rank higher than spin-off episode 1');
+    assert(spinOffEp.score > liveMovie.score, 'Episode 1 match must rank higher than unrelated live-action movie');
+    assert(liveMovie.score > wrongEp.score, 'Explicitly wrong episode number (227) must rank lowest');
+    assert.strictEqual(exactEp.matchTier, 'best', 'Exact episode match must receive "best" tier');
   });
 
   console.log('\n====================================================');
