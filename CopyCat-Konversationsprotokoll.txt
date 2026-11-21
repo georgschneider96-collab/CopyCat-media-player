@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:00:53Z
-Gesamtanzahl Turns: 441 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 12:14:54
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:21:53Z
+Gesamtanzahl Turns: 442 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 12:32:11
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24872,6 +24872,60 @@ BENUTZER:
 looks good now instead of just the rip can we do the same for the metadata? also could we order the sub options from best to worst
 
 [Hintergrund-Aktionen: run_command (12), read_file (11), edit_file (11), manage_task (1)]
+
+ANTIGRAVITY / ASSISTENT:
+Both features have been implemented:
+
+---
+
+### 1. Auto Web Metadata Ripper (Episode Title, Year, Studio & Plot Synopsis)
+
+Just like the Auto Web Subtitle Ripper, CopyCat now automatically queries **TVMaze**, **AniList GraphQL**, and **iTunes Movie Search** in parallel (with zero API key required) whenever a video file is probed or dropped into **File & Media Tools**:
+
+* **Automatic Full Tag Preloading** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L698-L784)):
+  * For `Bleach 001.mp4`, instead of only filling `Bleach - Episode 01` from the filename and leaving the rest blank, it now automatically populates:
+    * **Title / Episode Title**: `The Day I Became a Shinigami`
+    * **Series / Show Name**: `Bleach`
+    * **Season Number**: `1`
+    * **Episode Number**: `1`
+    * **Release Year / Date**: `2004`
+    * **Artist / Author / Studio**: `Studio Pierrot / TV Tokyo`
+    * **Description / Synopsis**: *"Ichigo Kurosaki is a teenage boy given the ability to see ghosts. While trying to help a young girl ghost being terrorized by a giant monster called a Hollow, he's saved by the intervention of Rukia Kuchiki, a tough female soul reaper. Later when a Hollow appears and terrorizes Ichigo's family, an injured Rukia makes a fateful decision and transfers her remaining powers to Ichigo."*
+* **Dedicated `Rip Online Metadata` Button** ([index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html#L1395-L1400)):
+  * Added a **`Rip Online Metadata`** button at the top-right of the **Metadata & Tags** tab so you can also manually trigger an online metadata pull anytime after editing the Show, Season, Episode, or Title fields.
+
+---
+
+### 2. Subtitle Options Ordered Strictly from Best to Worst
+
+Upgraded `MediaEditor.searchSubtitles()` ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L482-L619)) with a multi-endpoint query and a relevance scoring engine (`_scoreSubtitleCandidate`):
+
+* **How Candidates Are Scored & Ranked**:
+  1. **Exact Episode & Zero-Padded Filename Match (`+60` to `+85 pts`)**: Prioritizes subtitles matching the exact episode number (`S01E01`, `01`, `001`) and penalizes mismatched episodes (`-80 pts`, pushing wrong episodes like `Season 12 - 227` to the bottom).
+  2. **Structured Episode Metadata (`+35 pts`)**: Queries OpenSubtitles' structured `/episode-1/query-bleach/season-1` endpoint in addition to filename queries so verified episode releases (`Bleach.S01E01`, `[HorribleSubs] Bleach - S01E01`, `[Judas] Bleach - 001`) are always included.
+  3. **Exact Show vs. Spin-Off / Movie Filtering (`+35` / `-50 pts`)**: Ranks the exact series (`"Bleach" The Day I Became a Shinigami`) above sequel spin-offs (`Thousand-Year Blood War`) and penalizes unrelated feature films (`Bleach.2018.WEBRip.srt`, `Memories.Of.Nobody.2006`) when probing an episode.
+  4. **Format & Community Trust Tie-Breakers**: Factors in `.srt`/`.vtt`/`.ass` compatibility, download counts, and user ratings.
+* **Visual Rank & Match Quality Badges** ([app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10122-L10165)):
+  * Each result row now shows its rank (`#1`, `#2`, `#3`...), a match badge (`★ BEST MATCH`, `GOOD MATCH`, or `LOW MATCH`), the matched episode/movie title, format, and download count.
+
+> **Note:** Please restart CopyCat once so the Electron Main Process loads the new `media-editor:lookup-metadata` IPC handler in [preload.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/preload.js) and [ipc.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/ipc.js).
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **73 / 73 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **Git Push**: Committed and pushed to `origin/master` (commit `38865fe`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #442] | Schritt 24938 | Zeitstempel: 2026-11-21T11:21:53Z (Anhänge: 2)
+--------------------------------------------------------------------------------
+BENUTZER:
+do you see the problem with the window fit. also lets leave audio stream langueage empty even after metadata rip
+
+[Hintergrund-Aktionen: read_file (9), edit_file (9), run_command (3)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

@@ -225,7 +225,11 @@ class MediaEditor {
       if (tags.episode) args.push('-metadata', `episode_sort=${tags.episode}`);
       if (tags.artist) args.push('-metadata', `artist=${tags.artist}`);
       if (tags.year) args.push('-metadata', `date=${tags.year}`);
-      if (tags.description) args.push('-metadata', `description=${tags.description}`, '-metadata', `comment=${tags.description}`);
+      const desc = tags.description || tags.comment;
+      if (desc) args.push('-metadata', `description=${desc}`, '-metadata', `comment=${desc}`);
+      if (tags.audioLang && String(tags.audioLang).trim()) {
+        args.push('-metadata:s:a:0', `language=${String(tags.audioLang).trim()}`);
+      }
     }
 
     if (Array.isArray(audioTracks)) {

@@ -1096,10 +1096,10 @@
             </div>
 
             <!-- Panel: File & Media Tools (Converter, Subtitle Embedder, Metadata Editor) -->
-            <div class="settings-panel" data-settings-panel="media-editor" style="display:none;flex-direction:column;gap:16px;">
+            <div class="settings-panel" data-settings-panel="media-editor" style="display:none;flex-direction:column;gap:10px;min-width:0;max-width:100%;">
               <!-- 1. Source Video Selection Card -->
-              <div class="stream-card editor-card">
-                <div class="settings-section-title" style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">
+              <div class="stream-card editor-card" style="padding:12px 14px;min-width:0;max-width:100%;">
+                <div class="settings-section-title" style="margin-bottom:2px;display:flex;align-items:center;gap:8px;">
                   <span style="color:var(--accent);display:inline-flex;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <polygon points="23 7 16 12 23 17 23 7"></polygon>
@@ -1108,27 +1108,27 @@
                   </span>
                   <span>Target Video File</span>
                 </div>
-                <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">
                   Select a local video file to convert formats, look up &amp; embed subtitles, or inspect and update metadata tags.
                 </div>
-                <div class="stream-input-wrap">
-                  <input type="text" id="editor-source-path" class="stream-url-field" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
-                  <button class="stream-probe-btn" id="btn-editor-probe-file" type="button" title="Probe, inspect, and preload this video file" style="background:var(--accent);color:#fff;font-weight:600;padding:8px 14px;border-left:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <div class="stream-input-wrap" style="min-width:0;max-width:100%;">
+                  <input type="text" id="editor-source-path" class="stream-url-field" style="min-width:0;" placeholder="Select or paste a video file path (e.g. C:\Videos\movie.mkv)" spellcheck="false" autocomplete="off" />
+                  <button class="stream-probe-btn" id="btn-editor-probe-file" type="button" title="Probe, inspect, and preload this video file" style="background:var(--accent);color:#fff;font-weight:600;padding:8px 14px;border-left:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;gap:6px;cursor:pointer;flex-shrink:0;">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="11" cy="11" r="8"></circle>
                       <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                     <span>Probe File</span>
                   </button>
-                  <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" title="Browse for video file on your PC">Browse...</button>
-                  <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
+                  <button class="stream-probe-btn" id="btn-editor-browse-file" type="button" style="flex-shrink:0;" title="Browse for video file on your PC">Browse...</button>
+                  <button class="stream-probe-btn" id="btn-editor-use-current" type="button" style="flex-shrink:0;" title="Load currently playing video in CopyCat">Use Playing</button>
                 </div>
 
                 <!-- Probed File Details & Auto-Preload Analysis Card -->
-                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:10px;padding:10px 14px;border:1px solid rgba(var(--accent-rgb),0.3);background:rgba(var(--accent-rgb),0.03);border-radius:8px;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
-                    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text-primary);">
-                      <span style="color:var(--accent);display:inline-flex;">
+                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:8px;padding:8px 12px;border:1px solid rgba(var(--accent-rgb),0.3);background:rgba(var(--accent-rgb),0.03);border-radius:8px;min-width:0;max-width:100%;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text-primary);min-width:0;">
+                      <span style="color:var(--accent);display:inline-flex;flex-shrink:0;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <circle cx="12" cy="12" r="10"></circle>
                           <line x1="12" y1="16" x2="12" y2="12"></line>
@@ -1136,9 +1136,9 @@
                         </svg>
                       </span>
                       <span id="editor-badge-filename" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">video.mp4</span>
-                      <span id="editor-badge-size" class="update-status-pill" style="font-size:10px;padding:2px 6px;">0 MB</span>
+                      <span id="editor-badge-size" class="update-status-pill" style="font-size:10px;padding:2px 6px;flex-shrink:0;">0 MB</span>
                     </div>
-                    <span id="editor-badge-preload-status" class="update-status-pill" style="font-size:10px;background:rgba(46,196,182,0.15);color:#2EC4B6;border:1px solid rgba(46,196,182,0.3);padding:2px 8px;">
+                    <span id="editor-badge-preload-status" class="update-status-pill" style="font-size:10px;background:rgba(46,196,182,0.15);color:#2EC4B6;border:1px solid rgba(46,196,182,0.3);padding:2px 8px;flex-shrink:0;">
                       ✓ Auto-Preloaded
                     </span>
                   </div>
@@ -1270,16 +1270,16 @@
               </div>
 
               <!-- 4. Sub-panel: Subtitle Embedder & Lookup -->
-              <div id="subpanel-subtitles" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
+              <div id="subpanel-subtitles" class="editor-subpanel" style="display:none;flex-direction:column;gap:10px;min-width:0;max-width:100%;">
                 <!-- Online OpenSubtitles & Local Search Card -->
-                <div class="stream-card">
+                <div class="stream-card" style="padding:12px 14px;min-width:0;max-width:100%;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Online Subtitle Lookup (OpenSubtitles)</div>
-                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:12px;">
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">
                     Search and find matching subtitle tracks for your media without needing an API key.
                   </div>
-                  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:180px;padding:8px 12px;font-size:12.5px;" placeholder="Movie or series name" spellcheck="false" autocomplete="off" />
-                    <select id="sub-search-lang" class="stream-url-field" style="width:130px;padding:8px 10px;font-size:12px;cursor:pointer;">
+                  <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;min-width:0;">
+                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:160px;padding:7px 11px;font-size:12.5px;" placeholder="Movie or series name" spellcheck="false" autocomplete="off" />
+                    <select id="sub-search-lang" class="stream-url-field" style="width:130px;padding:7px 10px;font-size:12px;cursor:pointer;flex-shrink:0;">
                       <option value="eng" selected>English (eng)</option>
                       <option value="hun">Hungarian (hun)</option>
                       <option value="ger">German (ger)</option>
@@ -1289,56 +1289,55 @@
                       <option value="ita">Italian (ita)</option>
                       <option value="all">All Languages</option>
                     </select>
-                    <button class="stream-probe-btn" id="btn-sub-search-online" type="button" style="padding:0 14px;border-radius:6px;background:rgba(var(--accent-rgb),0.15);color:var(--accent);font-weight:600;">
+                    <button class="stream-probe-btn" id="btn-sub-search-online" type="button" style="padding:0 14px;border-radius:6px;background:rgba(var(--accent-rgb),0.15);color:var(--accent);font-weight:600;flex-shrink:0;">
                       Search
                     </button>
-                    <button class="ghost-pill-btn" id="btn-sub-detect-local" type="button" style="padding:0 12px;font-size:11.5px;">
+                    <button class="ghost-pill-btn" id="btn-sub-detect-local" type="button" style="padding:0 12px;font-size:11.5px;flex-shrink:0;">
                       Local Files
                     </button>
                   </div>
 
                   <!-- Subtitle Search Results Box -->
-                  <div id="sub-results-container" style="display:none;max-height:220px;overflow-y:auto;border:1px solid var(--border-panel);border-radius:8px;background:rgba(0,0,0,0.2);padding:6px;">
+                  <div id="sub-results-container" style="display:none;max-height:175px;overflow-y:auto;overflow-x:hidden;border:1px solid var(--border-panel);border-radius:8px;background:rgba(0,0,0,0.2);padding:6px;min-width:0;max-width:100%;box-sizing:border-box;">
                     <!-- Injected subtitle rows -->
                   </div>
                 </div>
 
                 <!-- Embed Subtitle into Video Card -->
-                <div class="stream-card">
+                <div class="stream-card" style="padding:12px 14px;min-width:0;max-width:100%;">
                   <div class="settings-section-title" style="margin-bottom:2px;">Embed Subtitle into Video Container</div>
-                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;">
+                  <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:10px;">
                     Soft-mux subtitle tracks losslessly into MP4/MKV in ~2 seconds, or burn hardcoded subtitles directly into video frames.
                   </div>
 
-                  <div style="margin-bottom:12px;">
-                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Selected Subtitle File (.srt, .vtt, .ass):</label>
-                    <div class="stream-input-wrap">
-                      <input type="text" id="sub-embed-file" class="stream-url-field" placeholder="Pick a local subtitle file or click 'Use' from search above" spellcheck="false" autocomplete="off" />
-                      <button class="stream-probe-btn" id="btn-sub-browse-local" type="button" title="Browse for local subtitle file">Browse...</button>
+                  <div style="margin-bottom:10px;">
+                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Selected Subtitle File (.srt, .vtt, .ass):</label>
+                    <div class="stream-input-wrap" style="min-width:0;max-width:100%;">
+                      <input type="text" id="sub-embed-file" class="stream-url-field" style="min-width:0;" placeholder="Pick a local subtitle file or click 'Use' from search above" spellcheck="false" autocomplete="off" />
+                      <button class="stream-probe-btn" id="btn-sub-browse-local" type="button" style="flex-shrink:0;" title="Browse for local subtitle file">Browse...</button>
                     </div>
                   </div>
 
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Embedding Mode:</label>
-                      <select id="sub-embed-mode" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;cursor:pointer;">
-                        <option value="soft" selected>Soft Subtitles (Lossless remux, instant, togglable)</option>
-                        <option value="hard">Hardsub Burn-in (Permanently burned into video frames)</option>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Embedding Mode:</label>
+                      <select id="sub-embed-mode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12px;cursor:pointer;">
+                        <option value="soft" selected>Soft Subtitles (Lossless remux)</option>
+                        <option value="hard">Hardsub Burn-in (Video frames)</option>
                       </select>
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Track Language Code:</label>
-                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="eng" placeholder="eng, jpn, de..." />
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Track Language Code:</label>
+                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12px;" value="eng" placeholder="eng, jpn, de..." />
+                    </div>
+                    <div>
+                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Subtitle Track Title:</label>
+                      <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12px;" value="English Subtitles" placeholder="e.g. English Subtitles" />
                     </div>
                   </div>
 
-                  <div style="margin-bottom:14px;">
-                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Subtitle Track Title (Display Name in Player):</label>
-                    <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="English Subtitles" placeholder="e.g. English (Default), Full Subtitles" />
-                  </div>
-
                   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                    <button class="stream-action-btn stream-dl-btn" id="btn-start-sub-embed" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
+                    <button class="stream-action-btn stream-dl-btn" id="btn-start-sub-embed" type="button" style="padding:8px 16px;font-size:12.5px;font-weight:600;">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
@@ -1346,13 +1345,13 @@
                       </svg>
                       <span>Embed Subtitles</span>
                     </button>
-                    <div style="font-size:11.5px;color:var(--text-muted);">
+                    <div style="font-size:11px;color:var(--text-muted);">
                       Soft subtitles are embedded into container tracks without loss of video quality.
                     </div>
                   </div>
 
                   <!-- Subtitle Embed Progress Box -->
-                  <div id="sub-embed-progress-box" style="display:none;margin-top:14px;padding:12px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
+                  <div id="sub-embed-progress-box" style="display:none;margin-top:10px;padding:10px;background:rgba(0,0,0,0.3);border:1px solid var(--border-panel);border-radius:8px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                       <span id="sub-embed-status-label" style="font-size:12px;font-weight:600;color:var(--text-primary);">Embedding subtitles...</span>
                       <span id="sub-embed-percent-label" style="font-size:12px;font-weight:700;color:var(--accent);">0%</span>
@@ -1367,7 +1366,7 @@
                   </div>
 
                   <!-- Subtitle Embed Complete Banner -->
-                  <div id="sub-embed-complete-banner" style="display:none;margin-top:14px;padding:12px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
+                  <div id="sub-embed-complete-banner" style="display:none;margin-top:10px;padding:10px;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:8px;">
                     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                       <div style="display:flex;align-items:center;gap:8px;color:#2ecc71;font-size:12.5px;font-weight:600;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
@@ -1383,70 +1382,71 @@
               </div>
 
               <!-- 5. Sub-panel: Metadata & Tags Editor -->
-              <div id="subpanel-metadata" class="editor-subpanel" style="display:none;flex-direction:column;gap:14px;">
-                <div class="stream-card">
-                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+              <div id="subpanel-metadata" class="editor-subpanel" style="display:none;flex-direction:column;gap:10px;min-width:0;max-width:100%;">
+                <div class="stream-card" style="padding:12px 14px;min-width:0;max-width:100%;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
                     <div>
-                      <div class="settings-section-title" style="margin-bottom:2px;">Container Metadata &amp; Tag Editor</div>
-                      <div style="font-size:11.5px;color:var(--text-muted);">
+                      <div class="settings-section-title" style="margin-bottom:1px;">Container Metadata &amp; Tag Editor</div>
+                      <div style="font-size:11px;color:var(--text-muted);">
                         Read, customize, and write metadata tags directly into video files in seconds.
                       </div>
                     </div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                      <button class="ghost-pill-btn" id="btn-meta-lookup-online" type="button" style="padding:5px 12px;font-size:11.5px;border-color:rgba(var(--accent-rgb),0.45);color:var(--accent);font-weight:600;" title="Look up official episode title, release year, studio, and plot synopsis online">Rip Online Metadata</button>
-                      <button class="ghost-pill-btn" id="btn-meta-pull" type="button" style="padding:5px 12px;font-size:11.5px;">Pull from File</button>
-                      <button class="ghost-pill-btn" id="btn-meta-detect-fn" type="button" style="padding:5px 12px;font-size:11.5px;">Auto-Detect from Filename</button>
+                      <button class="ghost-pill-btn" id="btn-meta-lookup-online" type="button" style="padding:4px 10px;font-size:11px;border-color:rgba(var(--accent-rgb),0.45);color:var(--accent);font-weight:600;" title="Look up official episode title, release year, studio, and plot synopsis online">Rip Online Metadata</button>
+                      <button class="ghost-pill-btn" id="btn-meta-pull" type="button" style="padding:4px 10px;font-size:11px;">Pull from File</button>
+                      <button class="ghost-pill-btn" id="btn-meta-detect-fn" type="button" style="padding:4px 10px;font-size:11px;">Auto-Detect from Filename</button>
                     </div>
                   </div>
 
                   <!-- Form Fields Grid -->
-                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-bottom:8px;">
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Title / Episode Title:</label>
-                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Episode or media title" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Title / Episode Title:</label>
+                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Episode or media title" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Series / Show Name:</label>
-                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Series or show name" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Series / Show Name:</label>
+                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Series or show name" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Season Number:</label>
-                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Season number (e.g. 1)" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Season Number:</label>
+                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Season number (e.g. 1)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Episode Number:</label>
-                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Episode number (e.g. 1)" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Episode Number:</label>
+                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Episode number (e.g. 1)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Release Year / Date:</label>
-                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Release year (YYYY)" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Release Year / Date:</label>
+                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Release year (YYYY)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
-                      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Artist / Author / Studio:</label>
-                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Studio, creator, or artist" spellcheck="false" autocomplete="off" />
+                      <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Artist / Author / Studio:</label>
+                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:6px 10px;font-size:12px;" placeholder="Studio, creator, or artist" spellcheck="false" autocomplete="off" />
                     </div>
                   </div>
 
-                  <div style="margin-bottom:12px;">
-                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Description / Synopsis:</label>
-                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:68px;padding:8px 10px;font-size:12px;resize:vertical;" placeholder="Episode or movie synopsis..."></textarea>
+                  <div style="margin-bottom:8px;">
+                    <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Description / Synopsis:</label>
+                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:52px;padding:6px 10px;font-size:11.5px;resize:vertical;" placeholder="Episode or movie synopsis..."></textarea>
                   </div>
 
-                  <div style="margin-bottom:14px;">
-                    <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Audio Stream 1 Language Tag:</label>
-                    <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:160px;padding:7px 10px;font-size:12px;" placeholder="eng, jpn, ger..." />
-                  </div>
-
-                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                    <button class="stream-action-btn stream-dl-btn" id="btn-save-metadata" type="button" style="padding:9px 18px;font-size:13px;font-weight:600;">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-                        <polyline points="17 21 17 13 7 13 7 21"></polyline>
-                        <polyline points="7 3 7 8 15 8"></polyline>
-                      </svg>
-                      <span>Save &amp; Integrate Metadata</span>
-                    </button>
-                    <div id="meta-save-feedback" style="font-size:11.5px;color:var(--text-muted);">
+                  <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                      <div>
+                        <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Audio Stream 1 Language Tag (Optional):</label>
+                        <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:170px;padding:6px 10px;font-size:12px;" placeholder="eng, jpn, ger..." />
+                      </div>
+                      <button class="stream-action-btn stream-dl-btn" id="btn-save-metadata" type="button" style="padding:8px 16px;font-size:12.5px;font-weight:600;margin-top:16px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                          <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                          <polyline points="7 3 7 8 15 8"></polyline>
+                        </svg>
+                        <span>Save &amp; Integrate Metadata</span>
+                      </button>
+                    </div>
+                    <div id="meta-save-feedback" style="font-size:11px;color:var(--text-muted);padding-bottom:6px;">
                       Writes container tags losslessly in ~1s without re-encoding video or audio.
                     </div>
                   </div>

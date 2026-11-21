@@ -9669,8 +9669,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || parsed.year || '';
         if (el.metaFieldArtist) el.metaFieldArtist.value = tags.artist || tags.ARTIST || tags.composer || tags.creator || '';
         if (el.metaFieldComment) el.metaFieldComment.value = tags.comment || tags.description || tags.synopsis || '';
-        const detectedAudioLang = meta.audioTracks?.[0]?.language || meta.audioStreams?.[0]?.language || meta.audioStreams?.[0]?.lang || '';
-        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = (detectedAudioLang && detectedAudioLang !== 'und') ? detectedAudioLang : 'eng';
+        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = '';
       }
 
       async function triggerAutoWebSubtitleRipper(filePath, extractedMeta) {
@@ -10074,12 +10073,12 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             const row = document.createElement('div');
             row.className = 'sub-result-row';
             row.innerHTML = `
-              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
-                <span class="sub-pill">${escapeHtml(sub.lang || 'LOCAL')}</span>
-                <span class="update-status-pill" style="font-size:9.5px;padding:1px 6px;background:rgba(46,196,182,0.18);color:#2EC4B6;border:1px solid rgba(46,196,182,0.35);">★ LOCAL MATCH</span>
-                <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(sub.filePath)}">${escapeHtml(sub.fileName)}</span>
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0;">
+                <span class="sub-pill" style="flex-shrink:0;">${escapeHtml(sub.lang || 'LOCAL')}</span>
+                <span class="update-status-pill" style="font-size:9.5px;padding:1px 6px;background:rgba(46,196,182,0.18);color:#2EC4B6;border:1px solid rgba(46,196,182,0.35);flex-shrink:0;">★ LOCAL MATCH</span>
+                <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;" title="${escapeHtml(sub.filePath)}">${escapeHtml(sub.fileName)}</span>
               </div>
-              <button class="ghost-pill-btn" style="padding:3px 10px;font-size:11px;font-weight:600;margin-left:8px;" type="button">Use Subtitle</button>
+              <button class="ghost-pill-btn" style="padding:3px 10px;font-size:11px;font-weight:600;margin-left:8px;flex-shrink:0;" type="button">Use Subtitle</button>
             `;
             row.querySelector('button').addEventListener('click', () => {
               if (el.subEmbedFile) el.subEmbedFile.value = sub.filePath;
@@ -10117,15 +10116,15 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             ].filter(Boolean).join(' • ');
 
             row.innerHTML = `
-              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;">
-                <span style="font-size:10.5px;font-weight:700;color:var(--text-muted);min-width:18px;">#${idx + 1}</span>
-                <span class="sub-pill">${escapeHtml(sub.lang || 'SUB')}</span>
-                <div style="display:flex;flex-direction:column;overflow:hidden;flex:1;">
-                  <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">
-                    <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${tier === 'best' ? '600' : '400'};" title="${escapeHtml(sub.fileName)}">${escapeHtml(sub.fileName)}</span>
-                    ${badgeHtml}
+              <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0;">
+                <span style="font-size:10.5px;font-weight:700;color:var(--text-muted);min-width:18px;flex-shrink:0;">#${idx + 1}</span>
+                <span class="sub-pill" style="flex-shrink:0;">${escapeHtml(sub.lang || 'SUB')}</span>
+                <div style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;overflow:hidden;min-width:0;">
+                    <span style="font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-weight:${tier === 'best' ? '600' : '400'};" title="${escapeHtml(sub.fileName)}">${escapeHtml(sub.fileName)}</span>
+                    <span style="flex-shrink:0;display:inline-flex;">${badgeHtml}</span>
                   </div>
-                  <span style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(metaDetails)}</span>
+                  <span style="font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${escapeHtml(metaDetails)}</span>
                 </div>
               </div>
               <div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0;">
