@@ -1122,6 +1122,46 @@ async function runAll() {
     assert(!editor.stagedTempFiles.has(tmpFile), 'stagedTempFiles set must remove cleaned file');
   });
 
+  runTest('MediaEditor computes 64-bit OpenSubtitles hash and scans subtitle subfolders', () => {
+    const tmpDir = path.join(projectRoot, 'tests', 'fixtures_hash_tmp');
+    const subsSubDir = path.join(tmpDir, 'Subs');
+    fs.mkdirSync(subsSubDir, { recursive: true });
+
+    const dummyVideo = path.join(tmpDir, 'TestShow_S01E01.mp4');
+    // Create a 140KB file (> 128KB threshold for 64-bit OpenSubtitles hash)
+    const buf = Buffer.alloc(140 * 1024, 0x42);
+    fs.writeFileSync(dummyVideo, buf);
+
+    const subInSubfolder = path.join(subsSubDir, 'TestShow_S01E01.jpn.ass');
+    fs.writeFileSync(subInSubfolder, '[Script Info]\nTitle: Test\n');
+
+    try {
+      const hashInfo = editor._computeOpenSubtitlesHash(dummyVideo);
+      assert(hashInfo && typeof hashInfo.moviehash === 'string', 'Must compute 16-char hex moviehash');
+      assert.strictEqual(hashInfo.moviehash.length, 16, 'moviehash must be 16 hex characters');
+      assert.strictEqual(hashInfo.moviebytesize, 140 * 1024, 'moviebytesize must match file size');
+
+      const ctx = editor._parseSearchContext('TestShow S01E01', dummyVideo);
+      const localSubs = editor._scanLocalSubtitles(dummyVideo, ctx);
+      assert(localSubs.some((s) => s.fileName === 'TestShow_S01E01.jpn.ass' && s.lang === 'jpn'), 'Must discover subtitle inside Subs/ subfolder');
+
+      const hashScored = editor._scoreSubtitleCandidate({
+        fileName: 'Release.srt',
+        matchedBy: 'moviehash',
+        format: 'SRT'
+      }, ctx);
+      assert.strictEqual(hashScored.matchTier, 'best', 'moviehash match must receive best tier');
+      assert.strictEqual(hashScored.matchLabel, '★ EXACT FILE HASH', 'moviehash match must receive ★ EXACT FILE HASH label');
+    } finally {
+      try {
+        fs.unlinkSync(subInSubfolder);
+        fs.rmdirSync(subsSubDir);
+        fs.unlinkSync(dummyVideo);
+        fs.rmdirSync(tmpDir);
+      } catch {}
+    }
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');

@@ -10096,13 +10096,14 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           secHeader.textContent = `OpenSubtitles Results (${onlineSubs.length})`;
           el.subResultsContainer.appendChild(secHeader);
 
-          onlineSubs.slice(0, 20).forEach((sub, idx) => {
+          onlineSubs.slice(0, 45).forEach((sub, idx) => {
             const row = document.createElement('div');
             row.className = 'sub-result-row';
             const tier = sub.matchTier || (idx === 0 ? 'best' : 'good');
+            const bestLabel = sub.matchLabel === '★ EXACT FILE HASH' ? '★ EXACT FILE HASH' : '★ BEST MATCH';
             let badgeHtml = '';
             if (tier === 'best') {
-              badgeHtml = '<span class="update-status-pill" style="font-size:9.5px;padding:1px 6px;background:rgba(46,196,182,0.18);color:#2EC4B6;border:1px solid rgba(46,196,182,0.35);white-space:nowrap;">★ BEST MATCH</span>';
+              badgeHtml = `<span class="update-status-pill" style="font-size:9.5px;padding:1px 6px;background:rgba(46,196,182,0.18);color:#2EC4B6;border:1px solid rgba(46,196,182,0.35);white-space:nowrap;">${bestLabel}</span>`;
             } else if (tier === 'good') {
               badgeHtml = '<span class="update-status-pill" style="font-size:9.5px;padding:1px 6px;background:rgba(var(--accent-rgb),0.15);color:var(--accent);border:1px solid rgba(var(--accent-rgb),0.3);white-space:nowrap;">GOOD MATCH</span>';
             } else {

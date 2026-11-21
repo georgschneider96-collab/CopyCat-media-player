@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T13:13:27Z
-Gesamtanzahl Turns: 446 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 14:16:21
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T13:26:36Z
+Gesamtanzahl Turns: 448 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 14:40:57
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -25095,6 +25095,58 @@ BENUTZER:
 let's add to the language tag a dropdown menu
 
 [Hintergrund-Aktionen: edit_file (3), read_file (2), run_command (1)]
+
+ANTIGRAVITY / ASSISTENT:
+The language tag inputs have been upgraded to dropdown menus:
+
+* **Audio Stream 1 Language Tag Dropdown** ([index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html#L1453-L1473)):
+  * Replaced the text field in **Metadata & Tags** with a dark-themed dropdown menu.
+  * Defaults to **`None / Keep Original`** (`value=""`) so the existing audio stream language remains untouched unless you select a specific language (`English (eng)`, `Japanese (jpn)`, `German (ger)`, `Hungarian (hun)`, `Spanish (spa)`, `French (fre)`, `Italian (ita)`, `Portuguese (por)`, `Russian (rus)`, `Korean (kor)`, `Chinese (chi)`, `Arabic (ara)`, `Polish (pol)`, `Turkish (tur)`, `Hindi (hin)`).
+* **Subtitle Track Language Code Dropdown** ([index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html#L1330-L1349), [app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10204-L10212)):
+  * Also converted `Track Language Code` in the **Subtitle Embedder** into a matching dropdown menu (defaulting to `English (eng)`) that automatically updates `Subtitle Track Title` when changed.
+
+All **74 / 74 tests** passed ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)) and the commit (`ccd4b75`) is being pushed to `origin/master`.
+
+The push to `origin/master` (`ccd4b75`) is complete and all **74 / 74** automated tests passed.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #447] | Schritt 25065 | Zeitstempel: 2026-11-21T13:24:18Z
+--------------------------------------------------------------------------------
+BENUTZER:
+form where does copycat rip the subtitles?
+
+ANTIGRAVITY / ASSISTENT:
+CopyCat looks up and rips subtitles from **two sources** inside the **File & Media Tools** tab (plus live stream manifests when streaming):
+
+---
+
+### 1. Local Folder Companion Scan (First Priority)
+* Before going online, CopyCat scans the **same local folder as your video file** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L616-L651)) for any matching `.srt`, `.vtt`, `.ass`, `.ssa`, or `.sub` files that share the video's base name.
+* If a local companion subtitle already exists next to your video, it is prioritized at the top (`★ LOCAL MATCH`).
+
+---
+
+### 2. OpenSubtitles.org Public REST API (Online Web Ripper)
+* For online lookup and auto-ripping, CopyCat queries the **OpenSubtitles REST API** (`https://rest.opensubtitles.org/search/...`) without needing an account or API key ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L653-L756)).
+* When you probe a file (like `Bleach 001.mp4`), it runs up to **three queries in parallel** to make sure it finds the exact release:
+  1. **Raw Filename Query**: `/search/query-bleach%20001/sublanguageid-eng` (finds release-group matches like `[Judas] Bleach - 001.en.srt`).
+  2. **Structured Series/Season/Episode Query**: `/search/episode-1/query-bleach/season-1/sublanguageid-eng` (finds verified episode releases like `Bleach.S01E01.WEBRip.Netflix.en[cc].srt` and `[HorribleSubs] Bleach - S01E01 [480p].ass`).
+  3. **Keyword Query**: `/search/query-bleach%201/sublanguageid-eng`.
+* **How the File Is Ripped**:
+  * All results are deduplicated and scored from **Best to Worst**.
+  * CopyCat then downloads the gzipped subtitle stream from `https://dl.opensubtitles.org/...` (`SubDownloadLink`) and decompresses it in memory via Node.js `zlib.gunzip` into a ready-to-use `.srt` or `.ass` file ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L1007-L1074)).
+
+*(Note: For the **Metadata & Tags** auto-ripper, CopyCat pulls episode titles, release years, studios, and plot synopses from **TVMaze** (`api.tvmaze.com`), **AniList GraphQL** (`graphql.anilist.co`), and **iTunes Movie Search** (`itunes.apple.com`).)*
+
+
+--------------------------------------------------------------------------------
+[DIALOG #448] | Schritt 25067 | Zeitstempel: 2026-11-21T13:26:36Z
+--------------------------------------------------------------------------------
+BENUTZER:
+could we broughten the search for subtitles?
+
+[Hintergrund-Aktionen: run_command (16), read_file (15), edit_file (6)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

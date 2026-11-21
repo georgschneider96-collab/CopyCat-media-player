@@ -469,12 +469,225 @@ class MediaEditor {
     const f = String(filename || '').toLowerCase();
     if (/(?:^|[._ -])(hu|hun|magyar)(?:[._ -]|$)/i.test(f)) return 'hun';
     if (/(?:^|[._ -])(ja|jp|jpn|japanese)(?:[._ -]|$)/i.test(f)) return 'jpn';
-    if (/(?:^|[._ -])(de|ger|deutsch|german)(?:[._ -]|$)/i.test(f)) return 'ger';
+    if (/(?:^|[._ -])(de|ger|deu|deutsch|german)(?:[._ -]|$)/i.test(f)) return 'ger';
     if (/(?:^|[._ -])(en|eng|english)(?:[._ -]|$)/i.test(f)) return 'eng';
     if (/(?:^|[._ -])(es|spa|spanish|espanol)(?:[._ -]|$)/i.test(f)) return 'spa';
     if (/(?:^|[._ -])(fr|fre|fra|french|francais)(?:[._ -]|$)/i.test(f)) return 'fre';
     if (/(?:^|[._ -])(it|ita|italian|italiano)(?:[._ -]|$)/i.test(f)) return 'ita';
+    if (/(?:^|[._ -])(pt|por|pob|portuguese|pt-br)(?:[._ -]|$)/i.test(f)) return 'por';
+    if (/(?:^|[._ -])(ru|rus|russian)(?:[._ -]|$)/i.test(f)) return 'rus';
+    if (/(?:^|[._ -])(ko|kor|korean)(?:[._ -]|$)/i.test(f)) return 'kor';
+    if (/(?:^|[._ -])(zh|chi|zho|chs|cht|chinese)(?:[._ -]|$)/i.test(f)) return 'chi';
+    if (/(?:^|[._ -])(ar|ara|arabic)(?:[._ -]|$)/i.test(f)) return 'ara';
+    if (/(?:^|[._ -])(pl|pol|polish)(?:[._ -]|$)/i.test(f)) return 'pol';
+    if (/(?:^|[._ -])(tr|tur|turkish)(?:[._ -]|$)/i.test(f)) return 'tur';
+    if (/(?:^|[._ -])(hi|hin|hindi)(?:[._ -]|$)/i.test(f)) return 'hin';
+    if (/(?:^|[._ -])(nl|dut|nld|dutch)(?:[._ -]|$)/i.test(f)) return 'nld';
     return 'eng';
+  }
+
+  _normalizeSubtitleLangCode(lang = 'eng') {
+    const map = {
+      en: 'eng',
+      hu: 'hun',
+      de: 'ger',
+      deu: 'ger',
+      ja: 'jpn',
+      es: 'spa',
+      fr: 'fre',
+      fra: 'fre',
+      it: 'ita',
+      pt: 'por',
+      pob: 'por',
+      ru: 'rus',
+      ko: 'kor',
+      zh: 'chi',
+      zho: 'chi',
+      ar: 'ara',
+      pl: 'pol',
+      tr: 'tur',
+      hi: 'hin',
+      nl: 'nld',
+      dut: 'nld'
+    };
+    const c = String(lang || 'eng').trim().toLowerCase();
+    return map[c] || c || 'eng';
+  }
+
+  /**
+   * Compute the 64-bit OpenSubtitles binary hash (moviehash + moviebytesize) for frame-accurate matching
+   */
+  _computeOpenSubtitlesHash(filePath) {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) return null;
+      const stat = fs.statSync(filePath);
+      const size = stat.size;
+      const chunkSize = 65536;
+      if (size < chunkSize * 2) return null;
+
+      const fd = fs.openSync(filePath, 'r');
+      const head = Buffer.alloc(chunkSize);
+      const tail = Buffer.alloc(chunkSize);
+      try {
+        fs.readSync(fd, head, 0, chunkSize, 0);
+        fs.readSync(fd, tail, 0, chunkSize, size - chunkSize);
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      const mask = 0xFFFFFFFFFFFFFFFFn;
+      let hash = BigInt(size) & mask;
+      for (let i = 0; i < chunkSize; i += 8) {
+        hash = (hash + head.readBigUInt64LE(i)) & mask;
+        hash = (hash + tail.readBigUInt64LE(i)) & mask;
+      }
+
+      return {
+        moviehash: hash.toString(16).padStart(16, '0'),
+        moviebytesize: size
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolve a show or movie name to its official IMDb ID (ttXXXXXXX) via IMDb's public keyless suggestion API
+   */
+  _resolveImdbId(searchName, isEpisode = false) {
+    return new Promise((resolve) => {
+      const clean = String(searchName || '')
+        .replace(/[^\w\s'-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+      if (!clean || clean.length < 2) return resolve(null);
+
+      const firstCharMatch = clean.match(/[a-z0-9]/);
+      const firstChar = firstCharMatch ? firstCharMatch[0] : 'a';
+      const url = `https://v3.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(clean)}.json`;
+
+      const req = https.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 4500
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data || '{}');
+            const items = Array.isArray(json.d) ? json.d.filter((x) => x && /^tt\d+$/.test(x.id)) : [];
+            if (items.length === 0) return resolve(null);
+
+            let best = null;
+            let bestScore = -999;
+            for (const item of items) {
+              let s = 0;
+              const label = String(item.l || '').toLowerCase().trim();
+              const qType = String(item.q || item.qid || '').toLowerCase();
+
+              if (label === clean) s += 60;
+              else if (label.startsWith(clean)) s += 30;
+              else if (label.includes(clean)) s += 15;
+
+              if (isEpisode) {
+                if (qType.includes('tv') || qType.includes('series')) s += 35;
+                else if (qType.includes('feature') || qType.includes('movie')) s -= 20;
+              } else {
+                if (qType.includes('feature') || qType.includes('movie')) s += 25;
+              }
+
+              if (s > bestScore) {
+                bestScore = s;
+                best = item;
+              }
+            }
+
+            if (!best) return resolve(null);
+            return resolve({
+              imdbId: best.id,
+              imdbDigits: best.id.replace(/^tt/i, ''),
+              title: best.l || searchName,
+              year: best.y || null
+            });
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    });
+  }
+
+  /**
+   * Query the OpenSubtitles v3 Community Index (opensubtitles-v3.strem.io) by IMDb ID with zero API key required
+   */
+  _queryStremioOpenSubtitlesV3(imdbInfo, season, episode, subLang = 'eng') {
+    return new Promise((resolve) => {
+      if (!imdbInfo || !imdbInfo.imdbId) return resolve([]);
+      const isEp = episode !== null && episode !== undefined;
+      const sNum = season || 1;
+      const endpoint = isEp
+        ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbInfo.imdbId}:${sNum}:${episode}.json`
+        : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbInfo.imdbId}.json`;
+
+      const req = https.get(endpoint, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 5500
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data || '{}');
+            const list = Array.isArray(json.subtitles) ? json.subtitles : [];
+            const filtered = list.filter((item) => {
+              if (!item || !item.url) return false;
+              if (!subLang || subLang === 'all') return true;
+              const itemLang = this._normalizeSubtitleLangCode(item.lang || '');
+              return itemLang === subLang;
+            });
+
+            const safeShow = String(imdbInfo.title || 'Media').replace(/\s+/g, '.');
+            const epTag = isEp
+              ? `.S${String(sNum).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+              : (imdbInfo.year ? `.${imdbInfo.year}` : '');
+
+            const mapped = filtered.slice(0, 25).map((item, idx) => {
+              const langCode = this._normalizeSubtitleLangCode(item.lang || subLang);
+              const subId = item.id || `v3_${idx + 1}`;
+              const urlFileMatch = String(item.url || '').match(/\/file\/(\d+)/);
+              const canonicalId = urlFileMatch ? urlFileMatch[1] : `osv3_${subId}`;
+              const constructedName = item.subtitleFileName || item.filename
+                || `${safeShow}${epTag}.OpenSubtitlesV3-${subId}.${langCode}.srt`;
+              return {
+                id: canonicalId,
+                source: 'opensubtitles-v3',
+                matchedBy: 'imdbid',
+                title: constructedName,
+                fileName: constructedName,
+                movieName: imdbInfo.title || '',
+                movieKind: isEp ? 'episode' : 'movie',
+                seriesSeason: isEp ? String(sNum) : '0',
+                seriesEpisode: isEp ? String(episode) : '0',
+                downloads: 500 - idx * 10,
+                subBad: '0',
+                lang: langCode,
+                format: 'SRT',
+                downloadUrl: item.url,
+                rating: '0'
+              };
+            });
+            return resolve(mapped);
+          } catch {
+            resolve([]);
+          }
+        });
+      });
+      req.on('error', () => resolve([]));
+      req.on('timeout', () => { req.destroy(); resolve([]); });
+    });
   }
 
   /**
@@ -536,6 +749,7 @@ class MediaEditor {
    */
   _extractCandidateEpisode(fileName = '') {
     let clean = String(fileName).replace(/\.[^/.]+$/, '');
+    clean = clean.replace(/OpenSubtitlesV3-\d+/gi, ' ');
     clean = clean.replace(/\s*\[[0-9a-fA-F]{8}\]/g, ' ');
     clean = clean.replace(/\b(?:19\d\d|20\d\d|480p|720p|1080p|2160p|4k|x264|h264|x265|hevc|av1|aac\d*(?:\.\d+)?|5\.1|2\.0|10-?bit|bluray|bdrip|web-?dl|webrip|dcp\w*|2d|2k)\b/gi, ' ');
 
@@ -564,11 +778,19 @@ class MediaEditor {
     const movie = item.movieName || '';
     const movieLower = movie.toLowerCase();
     const kind = (item.movieKind || '').toLowerCase();
+    const matchedBy = (item.matchedBy || '').toLowerCase();
     const dl = parseInt(item.downloads || '0', 10) || 0;
     const rating = parseFloat(item.rating || '0') || 0;
     const targetShow = (ctx.show || '').toLowerCase();
     const targetEp = ctx.episode;
     const targetSeason = ctx.season || 1;
+
+    // 0. Exact binary video hash or IMDb ID match bonus
+    if (matchedBy === 'moviehash') {
+      score += 90;
+    } else if (matchedBy === 'imdbid') {
+      score += 20;
+    }
 
     const parsed = this._extractCandidateEpisode(fn);
 
@@ -600,6 +822,10 @@ class MediaEditor {
       // 4. Media Kind (Episode/TV vs Movie)
       if (kind === 'episode' || kind === 'tv series') score += 20;
       if (kind === 'movie' || /\bmovie\b/i.test(fn)) score -= 50;
+    } else {
+      // Movie search bonuses
+      if (kind === 'movie') score += 25;
+      else if (kind === 'episode') score -= 35;
     }
 
     // 5. Show title match & spin-off differentiation
@@ -625,12 +851,19 @@ class MediaEditor {
     score += Math.min(12, Math.round(Math.log10(dl + 1) * 2.5));
     score += Math.min(5, Math.round(rating * 0.5));
 
+    const hasEpisodeTarget = targetEp !== null && targetEp !== undefined;
+    const bestThreshold = hasEpisodeTarget ? 165 : 135;
+    const goodThreshold = hasEpisodeTarget ? 110 : 95;
+
     let matchTier = 'low';
     let matchLabel = 'PARTIAL';
-    if (score >= 165) {
+    if (matchedBy === 'moviehash') {
+      matchTier = 'best';
+      matchLabel = '★ EXACT FILE HASH';
+    } else if (score >= bestThreshold) {
       matchTier = 'best';
       matchLabel = '★ BEST MATCH';
-    } else if (score >= 110) {
+    } else if (score >= goodThreshold) {
       matchTier = 'good';
       matchLabel = 'GOOD MATCH';
     }
@@ -639,79 +872,186 @@ class MediaEditor {
   }
 
   /**
-   * Search for companion subtitles locally and via online OpenSubtitles REST API, sorted Best to Worst
+   * Scan the video folder, common subtitle subfolders (Subs, Subtitles), and CopyCat's Subtitles folder
+   */
+  _scanLocalSubtitles(filePath, ctx) {
+    const localResults = [];
+    const seenPaths = new Set();
+    const supportedExts = ['.srt', '.vtt', '.ass', '.ssa', '.sub'];
+
+    const addCandidate = (fullPath, isDedicatedSubfolder = false) => {
+      const norm = path.resolve(fullPath).toLowerCase();
+      if (seenPaths.has(norm)) return;
+      const f = path.basename(fullPath);
+      const ext = path.extname(f).toLowerCase();
+      if (!supportedExts.includes(ext)) return;
+
+      const fLower = f.toLowerCase();
+      const subBase = path.basename(f, ext).toLowerCase();
+      const videoBase = filePath ? path.basename(filePath, path.extname(filePath)).toLowerCase() : '';
+
+      let isMatch = isDedicatedSubfolder;
+      if (!isMatch && videoBase) {
+        if (fLower.includes(videoBase) || videoBase.includes(subBase)) {
+          isMatch = true;
+        }
+      }
+      if (!isMatch && ctx && ctx.show) {
+        const showLower = ctx.show.toLowerCase();
+        if (fLower.includes(showLower)) {
+          if (ctx.episode !== null && ctx.episode !== undefined) {
+            const parsed = this._extractCandidateEpisode(f);
+            if (parsed.ep === ctx.episode) isMatch = true;
+          } else {
+            isMatch = true;
+          }
+        }
+      }
+
+      if (isMatch) {
+        seenPaths.add(norm);
+        localResults.push({
+          id: `local_${localResults.length}`,
+          source: 'local',
+          title: f,
+          fileName: f,
+          filePath: fullPath,
+          localPath: fullPath,
+          lang: this._detectSubtitleLanguage(f),
+          format: ext.replace('.', '').toUpperCase(),
+          downloadUrl: null,
+          matchScore: 999,
+          matchTier: 'best',
+          matchLabel: '★ LOCAL MATCH'
+        });
+      }
+    };
+
+    try {
+      const foldersToScan = [];
+      if (filePath && fs.existsSync(filePath)) {
+        const dir = path.dirname(filePath);
+        const videoRawBase = path.basename(filePath, path.extname(filePath));
+        foldersToScan.push({ dir, dedicated: false });
+        for (const subDirName of ['Subs', 'Subtitles', 'Sub', 'subs', 'subtitles']) {
+          foldersToScan.push({ dir: path.join(dir, subDirName), dedicated: false });
+          foldersToScan.push({ dir: path.join(dir, subDirName, videoRawBase), dedicated: true });
+        }
+      }
+
+      const officialSubsDir = this.getSubtitlesDownloadFolder();
+      if (officialSubsDir && fs.existsSync(officialSubsDir)) {
+        foldersToScan.push({ dir: officialSubsDir, dedicated: false });
+      }
+
+      const visitedDirs = new Set();
+      for (const entry of foldersToScan) {
+        if (!entry.dir || !fs.existsSync(entry.dir)) continue;
+        const normDir = path.resolve(entry.dir).toLowerCase();
+        if (visitedDirs.has(normDir)) continue;
+        visitedDirs.add(normDir);
+
+        const files = fs.readdirSync(entry.dir);
+        for (const f of files) {
+          const full = path.join(entry.dir, f);
+          try {
+            if (fs.statSync(full).isFile()) {
+              addCandidate(full, entry.dedicated);
+            }
+          } catch {}
+        }
+      }
+    } catch (err) {
+      logger.debug('Local subtitle search notice:', err.message);
+    }
+
+    return localResults;
+  }
+
+  /**
+   * Search for companion subtitles locally and across broadened online sources, sorted Best to Worst
    */
   async searchSubtitles({ query, lang = 'eng', filePath = null, show = null, season = null, episode = null }) {
     filePath = filePath ? String(filePath).trim().replace(/^["']+|["']+$/g, '').trim() : null;
-    const localResults = [];
+    const searchQuery = query || (filePath ? path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ') : '');
+    const subLang = this._normalizeSubtitleLangCode(lang);
+    const ctx = this._parseSearchContext(searchQuery, filePath, { show, season, episode });
+
+    // 1. Broadened local subtitle discovery (video directory, Subs/Subtitles subfolders, and Downloads\CopyCat\Subtitles)
+    const localResults = this._scanLocalSubtitles(filePath, ctx);
     const onlineResults = [];
 
-    // 1. Search local folder companion files if filePath is provided
-    if (filePath && fs.existsSync(filePath)) {
+    // 2. Broadened multi-source online search (64-bit File Hash + IMDb ID + OpenSubtitles REST + OpenSubtitles v3 Index)
+    if ((searchQuery && searchQuery.trim().length > 1) || (filePath && fs.existsSync(filePath))) {
       try {
-        const dir = path.dirname(filePath);
-        const baseName = path.basename(filePath, path.extname(filePath)).toLowerCase();
-        const files = fs.readdirSync(dir);
+        const langSuffix = (subLang && subLang !== 'all') ? `/sublanguageid-${subLang}` : '';
+        const restQueries = [];
+        const addRestQuery = (pathStr, matchedByHint = '') => {
+          if (pathStr && !restQueries.some((q) => q.path === pathStr)) {
+            restQueries.push({ path: pathStr, matchedBy: matchedByHint });
+          }
+        };
 
-        for (const f of files) {
-          const ext = path.extname(f).toLowerCase();
-          if (['.srt', '.vtt', '.ass', '.sub'].includes(ext)) {
-            const fLower = f.toLowerCase();
-            if (fLower.includes(baseName) || baseName.includes(path.basename(f, ext).toLowerCase())) {
-              localResults.push({
-                id: `local_${localResults.length}`,
-                source: 'local',
-                title: f,
-                fileName: f,
-                filePath: path.join(dir, f),
-                localPath: path.join(dir, f),
-                lang: this._detectSubtitleLanguage(f),
-                format: ext.replace('.', '').toUpperCase(),
-                downloadUrl: null,
-                matchScore: 999,
-                matchTier: 'best',
-                matchLabel: '★ LOCAL MATCH'
-              });
-            }
+        // A. 64-bit OpenSubtitles Binary Video File Hash query
+        const hashInfo = filePath ? this._computeOpenSubtitlesHash(filePath) : null;
+        if (hashInfo) {
+          addRestQuery(
+            `moviebytesize-${hashInfo.moviebytesize}/moviehash-${hashInfo.moviehash}${langSuffix}`,
+            'moviehash'
+          );
+        }
+
+        // B. Resolve IMDb ID in parallel for authoritative episode/movie queries + OpenSubtitles v3
+        const imdbLookupTarget = ctx.show || searchQuery;
+        const imdbInfo = await this._resolveImdbId(imdbLookupTarget, ctx.episode !== null);
+        if (imdbInfo && imdbInfo.imdbDigits) {
+          if (ctx.episode !== null) {
+            addRestQuery(
+              `episode-${ctx.episode}/imdbid-${imdbInfo.imdbDigits}/season-${ctx.season || 1}${langSuffix}`,
+              'imdbid'
+            );
+          } else {
+            addRestQuery(
+              `imdbid-${imdbInfo.imdbDigits}${langSuffix}`,
+              'imdbid'
+            );
           }
         }
-      } catch (err) {
-        logger.debug('Local subtitle search notice:', err.message);
-      }
-    }
 
-    // 2. Search OpenSubtitles REST API across targeted endpoints and rank Best -> Worst
-    const searchQuery = query || (filePath ? path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ') : '');
-    if (searchQuery && searchQuery.trim().length > 1) {
-      try {
-        const subLang = lang === 'hu' ? 'hun' : (lang === 'de' ? 'ger' : (lang === 'ja' ? 'jpn' : lang));
-        const ctx = this._parseSearchContext(searchQuery, filePath, { show, season, episode });
-        const pathsToQuery = [];
-
-        // A. Raw filename base query (e.g. "bleach 001")
+        // C. Raw filename base query (e.g. "bleach 001")
         if (ctx.rawBase && ctx.rawBase.length > 1) {
-          pathsToQuery.push(`query-${encodeURIComponent(ctx.rawBase.toLowerCase())}/sublanguageid-${subLang}`);
+          addRestQuery(`query-${encodeURIComponent(ctx.rawBase.toLowerCase())}${langSuffix}`);
         }
 
-        // B. Structured episode + show + season query
+        // D. Structured episode + show + season query & common episode notation variants
         if (ctx.show && ctx.episode !== null) {
-          const structuredPath = `episode-${ctx.episode}/query-${encodeURIComponent(ctx.show.toLowerCase())}/season-${ctx.season || 1}/sublanguageid-${subLang}`;
-          if (!pathsToQuery.includes(structuredPath)) {
-            pathsToQuery.push(structuredPath);
-          }
+          const sNum = ctx.season || 1;
+          const showClean = ctx.show.toLowerCase();
+          addRestQuery(
+            `episode-${ctx.episode}/query-${encodeURIComponent(showClean)}/season-${sNum}${langSuffix}`
+          );
+          const sxxexx = `${showClean} s${String(sNum).padStart(2, '0')}e${String(ctx.episode).padStart(2, '0')}`;
+          addRestQuery(`query-${encodeURIComponent(sxxexx)}${langSuffix}`);
+          const padded2 = `${showClean} ${String(ctx.episode).padStart(2, '0')}`;
+          addRestQuery(`query-${encodeURIComponent(padded2)}${langSuffix}`);
         }
 
-        // C. User query string
-        const qPath = `query-${encodeURIComponent(searchQuery.trim().toLowerCase())}/sublanguageid-${subLang}`;
-        if (!pathsToQuery.includes(qPath)) {
-          pathsToQuery.push(qPath);
+        // E. User query string
+        if (searchQuery && searchQuery.trim().length > 1) {
+          addRestQuery(`query-${encodeURIComponent(searchQuery.trim().toLowerCase())}${langSuffix}`);
         }
 
-        const lists = await Promise.all(pathsToQuery.map((p) => this._queryOpenSubtitlesPath(p, subLang)));
+        // Execute all OpenSubtitles REST queries + OpenSubtitles v3 Community Index query in parallel
+        const [restLists, v3List] = await Promise.all([
+          Promise.all(restQueries.map((q) => this._queryOpenSubtitlesPath(q.path, subLang, { matchedBy: q.matchedBy }))),
+          imdbInfo ? this._queryStremioOpenSubtitlesV3(imdbInfo, ctx.season || 1, ctx.episode, subLang) : Promise.resolve([])
+        ]);
+
+        const allLists = [...restLists, v3List];
         const seenIds = new Set();
         const candidates = [];
 
-        for (const list of lists) {
+        for (const list of allLists) {
           for (const item of list) {
             if (!seenIds.has(item.id)) {
               seenIds.add(item.id);
@@ -732,7 +1072,7 @@ class MediaEditor {
           return (b.downloads || 0) - (a.downloads || 0);
         });
 
-        onlineResults.push(...candidates.slice(0, 25));
+        onlineResults.push(...candidates.slice(0, 45));
       } catch (err) {
         logger.debug('Online subtitle search notice:', err.message);
       }
@@ -747,11 +1087,13 @@ class MediaEditor {
   }
 
   _queryOpenSubtitles(query, lang = 'eng') {
-    const pathSuffix = `query-${encodeURIComponent(String(query || '').trim().toLowerCase())}/sublanguageid-${lang}`;
-    return this._queryOpenSubtitlesPath(pathSuffix, lang);
+    const subLang = this._normalizeSubtitleLangCode(lang);
+    const langSuffix = (subLang && subLang !== 'all') ? `/sublanguageid-${subLang}` : '';
+    const pathSuffix = `query-${encodeURIComponent(String(query || '').trim().toLowerCase())}${langSuffix}`;
+    return this._queryOpenSubtitlesPath(pathSuffix, subLang);
   }
 
-  _queryOpenSubtitlesPath(pathSuffix, lang = 'eng') {
+  _queryOpenSubtitlesPath(pathSuffix, lang = 'eng', meta = {}) {
     return new Promise((resolve) => {
       const url = `https://rest.opensubtitles.org/search/${pathSuffix}`;
       const fetchJson = (targetUrl, redirectsRemaining = 4) => {
@@ -769,9 +1111,10 @@ class MediaEditor {
             try {
               const list = JSON.parse(data || '[]');
               if (Array.isArray(list)) {
-                const mapped = list.slice(0, 20).map((item, idx) => ({
+                const mapped = list.slice(0, 35).map((item, idx) => ({
                   id: item.IDSubtitleFile || `os_${idx}`,
                   source: 'opensubtitles',
+                  matchedBy: (item.MatchedBy || meta.matchedBy || '').toLowerCase(),
                   title: item.SubFileName || item.MovieName || `Subtitle ${idx + 1}`,
                   fileName: item.SubFileName || `sub_${idx + 1}.srt`,
                   movieName: (item.MovieName || '').replace(/\s+/g, ' ').trim(),
