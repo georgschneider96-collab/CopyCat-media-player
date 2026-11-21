@@ -7065,13 +7065,7 @@
         } else if (target === 'stream-download') {
           if (el.streamUrlInput) setTimeout(() => el.streamUrlInput.focus(), 80);
         } else if (target === 'media-editor') {
-          if (el.editorSourcePath && !el.editorSourcePath.value) {
-            const cur = state.currentItem?.filePath || state.currentItem?.path || getCurrentItem()?.filePath;
-            if (cur && !cur.startsWith('http') && typeof window.mediaEditorInspectTarget === 'function') {
-              el.editorSourcePath.value = cur;
-              window.mediaEditorInspectTarget(cur);
-            }
-          }
+          // Dedicated tab: only inspect and preload when a file is explicitly placed in this tab
         }
       });
     });
@@ -9042,19 +9036,6 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         });
       } else {
         ingestOpenedBundle(resolved, true);
-      }
-
-      // Automatically analyze dropped media file and preload all File & Media Tools in background
-      if (paths.length > 0) {
-        const firstPath = paths[0];
-        const ext = (firstPath.split('.').pop() || '').toLowerCase();
-        const isVideo = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'flv', 'wmv'].includes(ext);
-        if (isVideo) {
-          if (el.editorSourcePath) el.editorSourcePath.value = firstPath;
-          if (typeof window.mediaEditorInspectTarget === 'function') {
-            window.mediaEditorInspectTarget(firstPath, { silent: false });
-          }
-        }
       }
     });
 
