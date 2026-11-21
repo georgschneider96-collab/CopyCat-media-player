@@ -9447,9 +9447,65 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
       // Probe selected target media file and auto-preload all tabs
       async function inspectTargetFile(filePath, opts = {}) {
-        if (!filePath || !api.probeMediaMetadata) return;
+        const cleanPath = String(filePath || '').trim().replace(/^["']+|["']+$/g, '').trim();
+        if (!cleanPath) return;
+        if (el.editorSourcePath && el.editorSourcePath.value !== cleanPath) {
+          el.editorSourcePath.value = cleanPath;
+        }
+
+        const fallbackFileName = cleanPath.split(/[/\\]/).pop() || 'media';
+        if (el.editorFileBadge) el.editorFileBadge.style.display = 'block';
+        if (el.editorBadgeFilename) el.editorBadgeFilename.textContent = fallbackFileName;
+
         try {
-          const raw = await api.probeMediaMetadata(filePath);
+          let raw = null;
+          if (api.probeMediaMetadata) {
+            try {
+              raw = await api.probeMediaMetadata(cleanPath);
+            } catch {}
+          }
+
+          // Fallback to legacy media:probe if mediaEditor service in main process was not yet reloaded
+          if ((!raw || (raw.success === false && !raw.fileName && !raw.filename)) && api.probeMedia) {
+            try {
+              const fb = await api.probeMedia(cleanPath);
+              if (fb && fb.ok) {
+                raw = {
+                  success: true,
+                  ok: true,
+                  filePath: cleanPath,
+                  fileName: fallbackFileName,
+                  filename: fallbackFileName,
+                  formatName: fb.formatName ? fb.formatName.split(',')[0] : cleanPath.split('.').pop(),
+                  durationSec: fb.duration || 0,
+                  sizeBytes: 0,
+                  video: {
+                    codec: fb.videoCodec || 'h264',
+                    width: fb.width || 0,
+                    height: fb.height || 0,
+                    resolution: fb.width ? `${fb.width}x${fb.height}` : 'Video',
+                    fps: 0
+                  },
+                  audioTracks: (fb.audioTracks || []).map((a, i) => ({
+                    index: a.index,
+                    trackNumber: i + 1,
+                    codec: a.codec || 'aac',
+                    language: a.lang || 'und',
+                    title: a.name || `Audio Track ${i + 1}`
+                  })),
+                  subtitleTracks: (fb.subtitleTracks || []).map((s, i) => ({
+                    index: s.index,
+                    trackNumber: i + 1,
+                    codec: s.codec || 'sub',
+                    language: s.lang || 'und',
+                    title: s.name || `Subtitle ${i + 1}`
+                  })),
+                  tags: {}
+                };
+              }
+            } catch {}
+          }
+
           if (!raw || (raw.success === false && !raw.fileName && !raw.filename)) {
             if (!opts.silent) showToast(raw?.error || 'Failed to inspect media file');
             return;
@@ -9457,9 +9513,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           const meta = raw;
           currentProbedMeta = meta;
 
-          const fileName = meta.fileName || meta.filename || filePath.split(/[/\\]/).pop();
-          const fileSize = meta.sizeFormatted || formatBytes(meta.sizeBytes || meta.size);
-          const format = (meta.formatName || meta.format || 'video').toUpperCase();
+          const fileName = meta.fileName || meta.filename || fallbackFileName;
+          const fileSize = meta.sizeFormatted || ((meta.sizeBytes || meta.size) ? formatBytes(meta.sizeBytes || meta.size) : 'Local File');
+          const format = ((meta.formatName || meta.format || 'video').split(',')[0]).toUpperCase();
           const primaryVid = meta.video || meta.videoStream || {};
           const res = primaryVid.resolution || (primaryVid.width ? `${primaryVid.width}x${primaryVid.height}` : 'Audio');
           const fps = primaryVid.fps ? ` (${primaryVid.fps} fps)` : '';
@@ -9468,7 +9524,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
           const aTracks = meta.audioTracks || meta.audioStreams || [];
           const aCount = aTracks.length;
-          const aLang = aTracks[0]?.language || aTracks[0]?.tags?.language || '';
+          const aLang = aTracks[0]?.language || aTracks[0]?.lang || aTracks[0]?.tags?.language || '';
           const audioLabel = aCount > 0 ? `${aCount} Audio (${aLang && aLang !== 'und' ? aLang.toUpperCase() : 'Track 1'})` : 'No Audio';
 
           const sTracks = meta.subtitleTracks || meta.subtitleStreams || [];
@@ -9504,9 +9560,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             }
           }
 
-          // 4. Trigger Auto Web Subtitle Ripper if series & episode are verified
-          if (extractedMeta.show && extractedMeta.episode) {
-            triggerAutoWebSubtitleRipper(filePath, extractedMeta);
+          // 4. Trigger Auto Web Subtitle Ripper if series & episode or title are verified
+          if ((extractedMeta.show && extractedMeta.episode) || extractedMeta.title) {
+            triggerAutoWebSubtitleRipper(cleanPath, extractedMeta);
           }
 
           if (!opts.silent) {
@@ -9514,6 +9570,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           }
         } catch (err) {
           console.error('inspectTargetFile error:', err);
+          if (!opts.silent) showToast(`Analysis failed: ${err.message || err}`);
         }
       }
 
@@ -9601,7 +9658,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       function populateMetadataFields(meta, customParsed = null) {
         if (!meta) return;
         const tags = meta.tags || {};
-        const parsed = customParsed || extractMetadataFromFilename(meta.filename, tags);
+        const parsed = customParsed || extractMetadataFromFilename(meta.filename || meta.fileName, tags);
 
         if (el.metaFieldTitle) el.metaFieldTitle.value = tags.title || tags.TITLE || parsed.title || '';
         if (el.metaFieldShow) el.metaFieldShow.value = tags.show || tags.SHOW || tags.series || parsed.show || '';
@@ -9610,30 +9667,45 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || parsed.year || '';
         if (el.metaFieldArtist) el.metaFieldArtist.value = tags.artist || tags.ARTIST || tags.composer || tags.creator || '';
         if (el.metaFieldComment) el.metaFieldComment.value = tags.comment || tags.description || tags.synopsis || '';
-        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = meta.audioStreams?.[0]?.lang || 'eng';
+        const detectedAudioLang = meta.audioTracks?.[0]?.language || meta.audioStreams?.[0]?.language || meta.audioStreams?.[0]?.lang || '';
+        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = (detectedAudioLang && detectedAudioLang !== 'und') ? detectedAudioLang : 'eng';
       }
 
       async function triggerAutoWebSubtitleRipper(filePath, extractedMeta) {
-        if (!api.searchSubtitles || !api.downloadSubtitle) return;
+        if (!api.searchSubtitles) return;
         const targetLang = el.subSearchLang?.value || 'eng';
-        const epPadded = extractedMeta.episode.padStart(2, '0');
-        const query = extractedMeta.season && extractedMeta.season !== '1'
-          ? `${extractedMeta.show} S${extractedMeta.season.padStart(2, '0')}E${epPadded}`
-          : `${extractedMeta.show} ${extractedMeta.episode}`;
+        let query = '';
+        let displayLabel = '';
+        if (extractedMeta.show && extractedMeta.episode) {
+          const epPadded = String(extractedMeta.episode).padStart(2, '0');
+          query = extractedMeta.season && extractedMeta.season !== '1'
+            ? `${extractedMeta.show} S${String(extractedMeta.season).padStart(2, '0')}E${epPadded}`
+            : `${extractedMeta.show} ${extractedMeta.episode}`;
+          displayLabel = `${extractedMeta.show} Ep ${extractedMeta.episode}`;
+        } else if (extractedMeta.title) {
+          query = extractedMeta.title;
+          displayLabel = extractedMeta.title;
+        }
+        if (!query) return;
 
         if (el.subResultsContainer) {
           el.subResultsContainer.style.display = 'block';
           el.subResultsContainer.innerHTML = `
             <div style="padding:10px;font-size:11.5px;color:var(--accent);display:flex;align-items:center;gap:6px;">
               <span class="sub-pill">AUTO-RIPPER</span>
-              <span>Looking up web subtitles for <strong>${escapeHtml(extractedMeta.show)} Ep ${escapeHtml(extractedMeta.episode)}</strong> (${targetLang.toUpperCase()})...</span>
+              <span>Looking up web subtitles for <strong>${escapeHtml(displayLabel)}</strong> (${targetLang.toUpperCase()})...</span>
             </div>
           `;
         }
 
         try {
-          const res = await api.searchSubtitles({ query, lang: targetLang, filePath });
-          if (!res || !res.success) return;
+          let res = await api.searchSubtitles({ query, lang: targetLang, filePath });
+          if (!res || !res.success || (!res.localResults?.length && !res.onlineResults?.length)) {
+            if (el.subResultsContainer) {
+              el.subResultsContainer.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text-muted);text-align:center;">No subtitles found automatically. Try refining the search keywords above.</div>';
+            }
+            return;
+          }
 
           renderSubtitleResults(res.localResults || [], res.onlineResults || []);
 
@@ -9648,7 +9720,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           }
 
           // 2. If online OpenSubtitles exist, auto-download top result into embedder
-          if (res.onlineResults && res.onlineResults.length > 0) {
+          if (res.onlineResults && res.onlineResults.length > 0 && api.downloadSubtitle) {
             const topSub = res.onlineResults[0];
             if (topSub.downloadUrl) {
               const dlRes = await api.downloadSubtitle(topSub.downloadUrl);
@@ -9657,7 +9729,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
                 if (el.subEmbedFile) el.subEmbedFile.value = targetPath;
                 if (el.subEmbedLang) el.subEmbedLang.value = topSub.lang || targetLang;
                 if (el.subEmbedTitle) el.subEmbedTitle.value = `${(topSub.lang || targetLang).toUpperCase()} Subtitles`;
-                showToast(`⚡ Auto-ripped web subtitle for ${extractedMeta.show} Ep ${extractedMeta.episode}!`);
+                showToast(`⚡ Auto-ripped web subtitle for ${displayLabel}!`);
               }
             }
           }

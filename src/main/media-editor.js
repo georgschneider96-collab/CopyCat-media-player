@@ -77,6 +77,7 @@ class MediaEditor {
    * Read container metadata, stream details and tags using ffprobe
    */
   async probeMetadata(filePath) {
+    filePath = String(filePath || '').trim().replace(/^["']+|["']+$/g, '').trim();
     if (!filePath || !fs.existsSync(filePath)) {
       throw new Error(`File does not exist: ${filePath}`);
     }
@@ -145,7 +146,12 @@ class MediaEditor {
               width: primaryVideo.width || 0,
               height: primaryVideo.height || 0,
               resolution: primaryVideo.width ? `${primaryVideo.width}x${primaryVideo.height}` : 'Unknown',
-              fps: primaryVideo.r_frame_rate ? Math.round(eval(primaryVideo.r_frame_rate) || 0) : 0
+              fps: (() => {
+                if (!primaryVideo.r_frame_rate) return 0;
+                const parts = String(primaryVideo.r_frame_rate).split('/').map(Number);
+                if (parts.length === 2 && parts[1] > 0) return Math.round(parts[0] / parts[1]);
+                return Math.round(parts[0] || 0);
+              })()
             },
             videoStream: primaryVideo,
             audioTracks: audioStreams.map((a, i) => ({
@@ -436,8 +442,26 @@ class MediaEditor {
     if (searchQuery && searchQuery.trim().length > 1) {
       try {
         const subLang = lang === 'hu' ? 'hun' : (lang === 'de' ? 'ger' : (lang === 'ja' ? 'jpn' : lang));
-        const osList = await this._queryOpenSubtitles(searchQuery.trim(), subLang);
-        onlineResults.push(...osList);
+        const qTrim = searchQuery.trim();
+        const queriesToRun = [qTrim];
+
+        if (filePath) {
+          const rawBase = path.basename(filePath, path.extname(filePath)).replace(/[-_.]+/g, ' ').trim();
+          if (rawBase && rawBase.toLowerCase() !== qTrim.toLowerCase()) {
+            queriesToRun.unshift(rawBase);
+          }
+        }
+
+        const seenIds = new Set();
+        for (const q of queriesToRun) {
+          const osList = await this._queryOpenSubtitles(q, subLang);
+          for (const item of osList) {
+            if (!seenIds.has(item.id)) {
+              seenIds.add(item.id);
+              onlineResults.push(item);
+            }
+          }
+        }
       } catch (err) {
         logger.debug('Online subtitle search notice:', err.message);
       }

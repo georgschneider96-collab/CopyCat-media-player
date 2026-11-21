@@ -1036,6 +1036,21 @@ async function runAll() {
     assert.strictEqual(res3.episode, '28', 'Extracts episode 28');
   });
 
+  await runAsyncTest('IPC Registry injects mediaEditor service and executes media-editor handlers cleanly', async () => {
+    const { IPC_HANDLERS } = require(path.join(projectRoot, 'src/main/ipc'));
+    const { createAppContainer } = require(path.join(projectRoot, 'src/main/container'));
+    const container = createAppContainer();
+    const services = container.getAll();
+    assert(services.mediaEditor, 'container.getAll() must include mediaEditor service');
+
+    const cancelRes = await IPC_HANDLERS['media-editor:cancel-job'].handler(services, {}, 'test_job_999');
+    assert.strictEqual(cancelRes, false, 'IPC media-editor:cancel-job handler must execute with injected mediaEditor');
+
+    const probeMissingRes = await IPC_HANDLERS['media-editor:probe'].handler(services, {}, '"C:\\nonexistent_test_video.mp4"');
+    assert.strictEqual(probeMissingRes.success, false, 'Probing missing file returns structured { success: false }');
+    assert(probeMissingRes.error.includes('File does not exist'), 'Error message must originate from mediaEditor.probeMetadata');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');

@@ -944,14 +944,15 @@ html, body {
 
 /* On-Screen HUD Toast (Volume, Speed, Snapshot, AI Command) */
 .osd-toast {
-  position: absolute;
+  position: fixed;
   top: calc(var(--header-h) + 14px);
   right: 22px;
   padding: 8px 14px;
   border-radius: 8px;
-  background: rgba(18, 18, 18, 0.88);
+  background: rgba(18, 18, 18, 0.94);
   backdrop-filter: blur(16px);
-  border: 1px solid #2C2C2C;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
   color: var(--text-primary);
   font-size: 12.5px;
   font-weight: 500;
@@ -959,7 +960,7 @@ html, body {
   opacity: 0;
   transform: translateY(-6px);
   transition: opacity 0.18s ease, transform 0.18s ease;
-  z-index: 30;
+  z-index: 9600;
 }
 .osd-toast.show {
   opacity: 1;
@@ -968,11 +969,11 @@ html, body {
 
 /* Drag & Drop Overlay */
 .drop-overlay {
-  position: absolute;
+  position: fixed;
   inset: calc(var(--header-h) + 12px) 12px calc(var(--bottom-h) + 12px) 12px;
   border: 2px dashed var(--accent);
   border-radius: 14px;
-  background: rgba(var(--accent-rgb), 0.1);
+  background: rgba(var(--accent-rgb), 0.12);
   backdrop-filter: blur(6px);
   display: none;
   align-items: center;
@@ -980,7 +981,7 @@ html, body {
   font-size: 16px;
   font-weight: 600;
   color: var(--accent);
-  z-index: 50;
+  z-index: 9500;
   pointer-events: none;
 }
 .drop-overlay.active {

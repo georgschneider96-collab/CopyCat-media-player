@@ -685,10 +685,12 @@ const IPC_HANDLERS = {
     validate: (filePath) => typeof filePath === 'string' && filePath.trim().length > 0,
     handler: async ({ mediaEditor }, _evt, filePath) => {
       try {
-        const res = await mediaEditor.probeMetadata(filePath);
+        const cleanPath = String(filePath || '').trim().replace(/^["']+|["']+$/g, '').trim();
+        const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+        const res = await editorSvc.probeMetadata(cleanPath);
         return { success: true, ok: true, ...res };
       } catch (err) {
-        return { success: false, error: err.message };
+        return { success: false, ok: false, error: err.message };
       }
     }
   },
@@ -699,7 +701,8 @@ const IPC_HANDLERS = {
     validate: (opts) => opts && typeof opts.inputPath === 'string',
     handler: ({ mediaEditor, window }, _evt, opts) => {
       const win = window.getWindow();
-      return mediaEditor.convertMedia(opts, (progress) => {
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.convertMedia(opts, (progress) => {
         if (win && !win.isDestroyed()) {
           win.webContents.send('media-editor:progress', progress);
         }
@@ -712,7 +715,8 @@ const IPC_HANDLERS = {
     description: 'Cancel an active media conversion or embedding job',
     validate: (jobId) => typeof jobId === 'string' && jobId.trim().length > 0,
     handler: ({ mediaEditor }, _evt, jobId) => {
-      return mediaEditor.cancelJob(jobId);
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.cancelJob(jobId);
     }
   },
 
@@ -720,7 +724,8 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Search local companion subtitles and online OpenSubtitles repository',
     handler: ({ mediaEditor }, _evt, queryOpts) => {
-      return mediaEditor.searchSubtitles(queryOpts || {});
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.searchSubtitles(queryOpts || {});
     }
   },
 
@@ -730,13 +735,14 @@ const IPC_HANDLERS = {
     validate: (url) => typeof url === 'string' && url.startsWith('http'),
     handler: async ({ mediaEditor }, _evt, url, targetPath) => {
       try {
-        const res = await mediaEditor.downloadSubtitle(url, targetPath);
+        const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+        const res = await editorSvc.downloadSubtitle(url, targetPath);
         if (typeof res === 'string') {
           return { success: true, ok: true, targetPath: res, outPath: res };
         }
         return { success: true, ok: true, ...res };
       } catch (err) {
-        return { success: false, error: err.message };
+        return { success: false, ok: false, error: err.message };
       }
     }
   },
@@ -747,7 +753,8 @@ const IPC_HANDLERS = {
     validate: (opts) => opts && typeof opts.inputPath === 'string' && typeof opts.subPath === 'string',
     handler: ({ mediaEditor, window }, _evt, opts) => {
       const win = window.getWindow();
-      return mediaEditor.embedSubtitles(opts, (progress) => {
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.embedSubtitles(opts, (progress) => {
         if (win && !win.isDestroyed()) {
           win.webContents.send('media-editor:progress', progress);
         }
@@ -760,7 +767,8 @@ const IPC_HANDLERS = {
     description: 'Write container and stream metadata tags into video file via FFmpeg',
     validate: (opts) => opts && typeof opts.inputPath === 'string',
     handler: ({ mediaEditor }, _evt, opts) => {
-      return mediaEditor.applyMetadata(opts);
+      const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
+      return editorSvc.applyMetadata(opts);
     }
   },
 
@@ -841,7 +849,10 @@ function registerIpcRegistry(containerOrServices) {
       : containerOrServices.updater,
     downloader: containerOrServices.has && containerOrServices.has('downloader')
       ? containerOrServices.get('downloader')
-      : containerOrServices.downloader
+      : containerOrServices.downloader,
+    mediaEditor: containerOrServices.has && containerOrServices.has('mediaEditor')
+      ? containerOrServices.get('mediaEditor')
+      : (containerOrServices.mediaEditor || require('./media-editor').mediaEditor)
   };
 
   logger.info(`Registering ${Object.keys(IPC_HANDLERS).length} declarative IPC channels with injected services...`);

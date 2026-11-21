@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T10:08:04Z
-Gesamtanzahl Turns: 439 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 11:14:50
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T10:20:45Z
+Gesamtanzahl Turns: 440 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 11:35:51
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24774,7 +24774,59 @@ The automatic background action has been completely removed from normal playback
 BENUTZER:
 I believe the auto analyze function doesn't really work, maybe you include also a probe button
 
-[Hintergrund-Aktionen: run_command (30), read_file (21), edit_file (4)]
+[Hintergrund-Aktionen: run_command (33), read_file (21), edit_file (4)]
+
+ANTIGRAVITY / ASSISTENT:
+A dedicated **`Probe File`** button has been added, and the tab trigger logic has been updated:
+
+---
+
+### Why It Didn't Trigger in the Screenshot
+
+In the previous version, when `C:\Users\Schual\Downloads\CopyCat\Bleach 001.mp4` was already sitting in the `Target Video File` field:
+1. There was **no button** available to manually trigger a probe on that path.
+2. Browsers only fire HTML `change` events when you manually type and click away; an existing path in the box did not trigger anything.
+3. Clicking **Search** in that state sent a blank query because the search input hadn't been populated yet, resulting in *"No subtitles found"*.
+
+---
+
+### What Has Been Added & Fixed
+
+1. **Dedicated `Probe File` Button** ([index.html](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/index.html#L1115-L1124)):
+   * A prominent, accent-colored **`Probe File`** button is now positioned directly in the `Target Video File` row:
+     ```
+     [ Select or paste a video file path... ]  [ 🔍 Probe File ]  [ Browse... ]  [ Use Playing ]
+     ```
+   * Clicking **`Probe File`**:
+     * Temporarily shows `Probing...` on the button while FFprobe inspects the container.
+     * Displays the **Short Media Analysis Card** with resolution, codec, runtime, audio tracks, and subtitle tracks.
+     * Preloads **Format Converter** (suggested target path and lossless remux mode).
+     * Preloads **Subtitle Embedder** (populates `Bleach 01`, queries OpenSubtitles in English, and auto-downloads the top `.srt` file into `Selected Subtitle File`).
+     * Preloads **Metadata & Tags** (fills Title, Series, Season, Episode, Year, Audio Language).
+
+2. **Auto-Inspection Upon Tab Navigation** ([app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L7067-L7078)):
+   * Whenever you click on the **File & Media Tools** settings tab, CopyCat checks if a path is already sitting in `Target Video File` (or if media is currently playing) and **automatically triggers the inspection**.
+
+3. **Keyboard Shortcut (Enter Key)**:
+   * You can now paste or edit any path in `Target Video File` and press **Enter** to instantly probe and preload.
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **71 / 71 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **NotebookLM Sync**: [CopyCat-Gesamtprojekt.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Gesamtprojekt.txt) and [CopyCat-Konversationsprotokoll.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Konversationsprotokoll.txt) updated.
+* **Git Push**: Changes pushed to `origin/master` (commit `3268b17`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #440] | Schritt 24747 | Zeitstempel: 2026-11-21T10:20:45Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+even when I press the probe button. nothing happens
+
+[Hintergrund-Aktionen: read_file (27), run_command (21), edit_file (9)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)
