@@ -1261,10 +1261,10 @@
                     Search and find matching subtitle tracks for your media without needing an API key.
                   </div>
                   <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:180px;padding:8px 12px;font-size:12.5px;" placeholder="Movie or series name (e.g. Bleach, Interstellar)" spellcheck="false" autocomplete="off" />
+                    <input type="text" id="sub-search-query" class="stream-url-field" style="flex:1;min-width:180px;padding:8px 12px;font-size:12.5px;" placeholder="Movie or series name" spellcheck="false" autocomplete="off" />
                     <select id="sub-search-lang" class="stream-url-field" style="width:130px;padding:8px 10px;font-size:12px;cursor:pointer;">
-                      <option value="hun" selected>Hungarian (hun)</option>
-                      <option value="eng">English (eng)</option>
+                      <option value="eng" selected>English (eng)</option>
+                      <option value="hun">Hungarian (hun)</option>
                       <option value="ger">German (ger)</option>
                       <option value="jpn">Japanese (jpn)</option>
                       <option value="spa">Spanish (spa)</option>
@@ -1311,13 +1311,13 @@
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Track Language Code:</label>
-                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="hun" placeholder="e.g. hun, eng, jpn" />
+                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="eng" placeholder="eng, jpn, de..." />
                     </div>
                   </div>
 
                   <div style="margin-bottom:14px;">
                     <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Subtitle Track Title (Display Name in Player):</label>
-                    <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="Hungarian Subtitles" placeholder="e.g. Hungarian (Default), English Full" />
+                    <input type="text" id="sub-embed-title" class="stream-url-field" style="width:100%;padding:8px 10px;font-size:12.5px;" value="English Subtitles" placeholder="e.g. English (Default), Full Subtitles" />
                   </div>
 
                   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
@@ -1385,38 +1385,38 @@
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Title / Episode Title:</label>
-                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. The Day I Became a Shinigami" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-title" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Episode or media title" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Series / Show Name:</label>
-                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Bleach" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-show" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Series or show name" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Season Number:</label>
-                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-season" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Season number (e.g. 1)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Episode Number:</label>
-                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 1" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-episode" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Episode number (e.g. 1)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Release Year / Date:</label>
-                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. 2004" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-year" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Release year (YYYY)" spellcheck="false" autocomplete="off" />
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Artist / Author / Studio:</label>
-                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="e.g. Studio Pierrot / Tite Kubo" spellcheck="false" autocomplete="off" />
+                      <input type="text" id="meta-field-artist" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12.5px;" placeholder="Studio, creator, or artist" spellcheck="false" autocomplete="off" />
                     </div>
                   </div>
 
                   <div style="margin-bottom:12px;">
                     <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Description / Synopsis:</label>
-                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:68px;padding:8px 10px;font-size:12px;resize:vertical;" placeholder="Enter episode or movie plot synopsis..."></textarea>
+                    <textarea id="meta-field-comment" class="stream-url-field" style="width:100%;height:68px;padding:8px 10px;font-size:12px;resize:vertical;" placeholder="Episode or movie synopsis..."></textarea>
                   </div>
 
                   <div style="margin-bottom:14px;">
                     <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Audio Stream 1 Language Tag:</label>
-                    <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:160px;padding:7px 10px;font-size:12px;" placeholder="e.g. hun, jpn, eng" />
+                    <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:160px;padding:7px 10px;font-size:12px;" placeholder="eng, jpn, ger..." />
                   </div>
 
                   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">

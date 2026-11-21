@@ -8896,7 +8896,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         if (state.rightDrawerDirty) renderRightDrawer();
       }
 
-      el.dropOverlay.textContent = 'Drop media file or stream URL to play / download';
+      const isEditorOpen = el.settingsBackdrop?.classList.contains('open') &&
+        document.querySelector('.settings-panel[data-settings-panel="media-editor"]')?.style.display === 'flex';
+      if (isEditorOpen) {
+        el.dropOverlay.textContent = 'Drop file here to load into File & Media Tools';
+      } else {
+        el.dropOverlay.textContent = 'Drop media file or stream URL to play / download';
+      }
       resetFullscreenIdle();
       updateChromeSolidity();
       externalScrollRaf = requestAnimationFrame(externalAutoScrollTick);
@@ -8988,6 +8994,31 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
 
       if (!paths.length) return;
+
+      // When "File & Media Tools" modal is active, load dropped file into editor instead of playing it
+      const isEditorOpen = el.settingsBackdrop?.classList.contains('open') &&
+        document.querySelector('.settings-panel[data-settings-panel="media-editor"]')?.style.display === 'flex';
+
+      if (isEditorOpen && paths.length > 0) {
+        const firstPath = paths[0];
+        const ext = (firstPath.split('.').pop() || '').toLowerCase();
+        const isSub = ['srt', 'vtt', 'ass', 'ssa', 'sub'].includes(ext);
+
+        if (isSub) {
+          if (el.subEmbedFile) el.subEmbedFile.value = firstPath;
+          const subBtn = document.querySelector('.editor-subnav-btn[data-editor-subtab="subtitles"]');
+          if (subBtn) subBtn.click();
+          showToast(`Subtitle loaded into Embedder: ${firstPath.split(/[/\\]/).pop()}`);
+          return;
+        } else {
+          if (el.editorSourcePath) el.editorSourcePath.value = firstPath;
+          if (typeof window.mediaEditorInspectTarget === 'function') {
+            window.mediaEditorInspectTarget(firstPath);
+          }
+          showToast(`Video loaded into Media Tools: ${firstPath.split(/[/\\]/).pop()}`);
+          return;
+        }
+      }
 
       const resolved = await api.resolvePaths(paths);
       if (!resolved) {
@@ -9442,14 +9473,26 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           // Auto-update suggested output path for converter
           updateSuggestedOutputPath();
 
-          // Auto-populate subtitle query if empty or default
-          if (el.subSearchQuery && (!el.subSearchQuery.value || el.subSearchQuery.value.trim() === '')) {
-            const cleanName = (meta.filename || '').replace(/\.[^/.]+$/, '').replace(/[._-]/g, ' ').trim();
-            el.subSearchQuery.value = cleanName;
+          // Extract metadata & verified series/episode
+          const extractedMeta = extractMetadataFromFilename(meta.filename, meta.tags || {});
+          populateMetadataFields(meta, extractedMeta);
+
+          // Auto-populate subtitle query with clean Show + Episode or clean title
+          if (el.subSearchQuery) {
+            if (extractedMeta.show && extractedMeta.episode) {
+              const epPadded = extractedMeta.episode.padStart(2, '0');
+              el.subSearchQuery.value = extractedMeta.season && extractedMeta.season !== '1'
+                ? `${extractedMeta.show} S${extractedMeta.season.padStart(2, '0')}E${epPadded}`
+                : `${extractedMeta.show} E${epPadded}`;
+            } else if (extractedMeta.title) {
+              el.subSearchQuery.value = extractedMeta.title;
+            }
           }
 
-          // Auto-fill metadata form fields
-          populateMetadataFields(meta);
+          // Trigger Auto Web Subtitle Ripper if series & episode are verified
+          if (extractedMeta.show && extractedMeta.episode) {
+            triggerAutoWebSubtitleRipper(filePath, extractedMeta);
+          }
         } catch (err) {
           console.error('inspectTargetFile error:', err);
         }
@@ -9467,37 +9510,139 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         }
       }
 
-      function populateMetadataFields(meta) {
-        if (!meta) return;
-        const tags = meta.tags || {};
-        const filename = meta.filename || '';
-        const baseName = filename.replace(/\.[^/.]+$/, '');
+      function extractMetadataFromFilename(filename, existingTags = {}) {
+        if (!filename) return {};
+        let base = filename.replace(/\.[^/.]+$/, '');
 
-        let parsedSeason = '';
-        let parsedEpisode = '';
-        let parsedShow = baseName;
+        // 1. Strip release group prefixes like [SubsPlease], [Erai-raws], [HorribleSubs], [Judas]
+        base = base.replace(/^\[[^\]]+\]\s*/, '').trim();
 
-        const seMatch = baseName.match(/[sS](\d+)[eE](\d+)/i) || baseName.match(/(\d+)x(\d+)/i);
+        // 2. Strip CRC32 checksums and bracket tags like [98A53B3C] or [720p]
+        base = base.replace(/\s*\[[0-9a-fA-F]{8}\]$/, '').trim();
+        base = base.replace(/\s*\([^)]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^)]*?\)/gi, '').trim();
+        base = base.replace(/\s*\[[^\]]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^\]]*?\]/gi, '').trim();
+
+        // 3. Extract 4-digit release year if present
+        let year = existingTags.date || existingTags.year || existingTags.creation_time?.substring(0, 4) || '';
+        const yearMatch = base.match(/(?:[._ -]|\b)(19\d\d|20\d\d)(?:[._ -]|\b)/);
+        if (!year && yearMatch) {
+          year = yearMatch[1];
+          base = base.replace(yearMatch[0], ' ');
+        }
+
+        // 4. Strip common technical tags
+        const techRegex = /\b(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|bdrip|web-?dl|webrip|hdtv|dvdrip|aac|flac|dual-?audio|multi-?audio|10-?bit)\b/gi;
+        base = base.replace(techRegex, '').replace(/\s+/g, ' ').trim();
+
+        let show = existingTags.show || existingTags.SHOW || existingTags.series || '';
+        let season = existingTags.season_number || existingTags.season || '';
+        let episode = existingTags.episode_sort || existingTags.episode_id || existingTags.track || '';
+        let title = existingTags.title || existingTags.TITLE || '';
+
+        const cleanToken = (tok) => {
+          if (!tok) return '';
+          return tok.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^[-–—]+|[-–—]+$/g, '').trim();
+        };
+
+        // Pattern A: S01E02 or 1x02
+        const seMatch = base.match(/(.*?)(?:[._ -]+|\b)[sS](\d{1,2})[eE](\d{1,4})(?:[._ -]+|\b)(.*)/i)
+          || base.match(/(.*?)(?:[._ -]+|\b)(\d{1,2})x(\d{1,4})(?:[._ -]+|\b)(.*)/i);
+
         if (seMatch) {
-          parsedSeason = parseInt(seMatch[1], 10).toString();
-          parsedEpisode = parseInt(seMatch[2], 10).toString();
-          parsedShow = baseName.substring(0, seMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+          if (!show) show = cleanToken(seMatch[1]);
+          if (!season) season = parseInt(seMatch[2], 10).toString();
+          if (!episode) episode = parseInt(seMatch[3], 10).toString();
+          const epTitlePart = cleanToken(seMatch[4]);
+          if (!title) {
+            title = epTitlePart || (show ? `${show} - Episode ${episode.padStart(2, '0')}` : `Episode ${episode}`);
+          }
         } else {
-          const epMatch = baseName.match(/(?:ep|episode|[._ -])(\d{1,4})(?:[._ -]|$)/i);
+          // Pattern B: Series - 01 - Episode Title or Series Episode 01
+          const epMatch = base.match(/(.*?)(?:[._ -]+|\b)(?:ep|episode|[._ -])\s*(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+            || base.match(/(.*?)(?:[._ -]+|\b)-[._ -]+(\d{1,4})(?:[._ -]+|\b)(.*)/i);
+
           if (epMatch) {
-            parsedEpisode = parseInt(epMatch[1], 10).toString();
-            parsedShow = baseName.substring(0, epMatch.index).replace(/[._ -]+$/, '').replace(/[._]/g, ' ').trim();
+            if (!show) show = cleanToken(epMatch[1]);
+            if (!season) season = '1';
+            if (!episode) episode = parseInt(epMatch[2], 10).toString();
+            const epTitlePart = cleanToken(epMatch[3]);
+            if (!title) {
+              title = epTitlePart || (show ? `${show} - Episode ${episode.padStart(2, '0')}` : `Episode ${episode}`);
+            }
+          } else {
+            if (!title) title = cleanToken(base);
+            if (!show && year) show = cleanToken(base);
           }
         }
 
-        if (el.metaFieldTitle) el.metaFieldTitle.value = tags.title || tags.TITLE || baseName.replace(/[._]/g, ' ');
-        if (el.metaFieldShow) el.metaFieldShow.value = tags.show || tags.SHOW || tags.series || parsedShow || '';
-        if (el.metaFieldSeason) el.metaFieldSeason.value = tags.season_number || tags.season || parsedSeason || '';
-        if (el.metaFieldEpisode) el.metaFieldEpisode.value = tags.episode_sort || tags.episode_id || tags.track || parsedEpisode || '';
-        if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || tags.creation_time?.substring(0, 4) || '';
+        return { show: show || '', season: season || '', episode: episode || '', title: title || '', year: year || '' };
+      }
+
+      function populateMetadataFields(meta, customParsed = null) {
+        if (!meta) return;
+        const tags = meta.tags || {};
+        const parsed = customParsed || extractMetadataFromFilename(meta.filename, tags);
+
+        if (el.metaFieldTitle) el.metaFieldTitle.value = tags.title || tags.TITLE || parsed.title || '';
+        if (el.metaFieldShow) el.metaFieldShow.value = tags.show || tags.SHOW || tags.series || parsed.show || '';
+        if (el.metaFieldSeason) el.metaFieldSeason.value = tags.season_number || tags.season || parsed.season || '';
+        if (el.metaFieldEpisode) el.metaFieldEpisode.value = tags.episode_sort || tags.episode_id || tags.track || parsed.episode || '';
+        if (el.metaFieldYear) el.metaFieldYear.value = tags.date || tags.year || parsed.year || '';
         if (el.metaFieldArtist) el.metaFieldArtist.value = tags.artist || tags.ARTIST || tags.composer || tags.creator || '';
         if (el.metaFieldComment) el.metaFieldComment.value = tags.comment || tags.description || tags.synopsis || '';
-        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = meta.audioStreams?.[0]?.lang || 'hun';
+        if (el.metaFieldAudioLang) el.metaFieldAudioLang.value = meta.audioStreams?.[0]?.lang || 'eng';
+      }
+
+      async function triggerAutoWebSubtitleRipper(filePath, extractedMeta) {
+        if (!api.searchSubtitles || !api.downloadSubtitle) return;
+        const targetLang = el.subSearchLang?.value || 'eng';
+        const epPadded = extractedMeta.episode.padStart(2, '0');
+        const query = extractedMeta.season && extractedMeta.season !== '1'
+          ? `${extractedMeta.show} S${extractedMeta.season.padStart(2, '0')}E${epPadded}`
+          : `${extractedMeta.show} ${extractedMeta.episode}`;
+
+        if (el.subResultsContainer) {
+          el.subResultsContainer.style.display = 'block';
+          el.subResultsContainer.innerHTML = `
+            <div style="padding:10px;font-size:11.5px;color:var(--accent);display:flex;align-items:center;gap:6px;">
+              <span class="sub-pill">AUTO-RIPPER</span>
+              <span>Looking up web subtitles for <strong>${escapeHtml(extractedMeta.show)} Ep ${escapeHtml(extractedMeta.episode)}</strong> (${targetLang.toUpperCase()})...</span>
+            </div>
+          `;
+        }
+
+        try {
+          const res = await api.searchSubtitles({ query, lang: targetLang, filePath });
+          if (!res || !res.success) return;
+
+          renderSubtitleResults(res.localResults || [], res.onlineResults || []);
+
+          // 1. If local companion subtitle file exists in folder, select it
+          if (res.localResults && res.localResults.length > 0) {
+            const bestLocal = res.localResults[0];
+            if (el.subEmbedFile) el.subEmbedFile.value = bestLocal.filePath;
+            if (el.subEmbedLang) el.subEmbedLang.value = bestLocal.lang || targetLang;
+            if (el.subEmbedTitle) el.subEmbedTitle.value = `${(bestLocal.lang || targetLang).toUpperCase()} Subtitles`;
+            showToast(`Local subtitle auto-selected: ${bestLocal.fileName}`);
+            return;
+          }
+
+          // 2. If online OpenSubtitles exist, auto-download top result into embedder
+          if (res.onlineResults && res.onlineResults.length > 0) {
+            const topSub = res.onlineResults[0];
+            if (topSub.downloadUrl) {
+              const dlRes = await api.downloadSubtitle(topSub.downloadUrl);
+              if (dlRes && dlRes.success) {
+                if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
+                if (el.subEmbedLang) el.subEmbedLang.value = topSub.lang || targetLang;
+                if (el.subEmbedTitle) el.subEmbedTitle.value = `${(topSub.lang || targetLang).toUpperCase()} Subtitles`;
+                showToast(`⚡ Auto-ripped web subtitle for ${extractedMeta.show} Ep ${extractedMeta.episode}!`);
+              }
+            }
+          }
+        } catch (err) {
+          console.debug('Auto subtitle ripper notice:', err.message);
+        }
       }
 
       // Browse source video
@@ -9706,7 +9851,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             `;
             row.querySelector('button').addEventListener('click', () => {
               if (el.subEmbedFile) el.subEmbedFile.value = sub.filePath;
-              if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+              if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'eng';
               if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Local'} Subtitles`;
               showToast(`Selected: ${sub.fileName}`);
             });
@@ -9757,7 +9902,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
               const dlRes = await api.downloadSubtitle(sub.downloadUrl);
               if (dlRes && dlRes.success) {
                 if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
-                if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'hun';
+                if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'eng';
                 if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Online'} Subtitles`;
                 showToast('Subtitle ready for embedding!');
               } else {
@@ -9773,7 +9918,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       if (el.btnSubSearchOnline) {
         el.btnSubSearchOnline.addEventListener('click', () => {
           const query = el.subSearchQuery?.value?.trim() || '';
-          const lang = el.subSearchLang?.value || 'hun';
+          const lang = el.subSearchLang?.value || 'eng';
           if (!query) {
             showToast('Please enter movie or series name');
             return;
@@ -9819,8 +9964,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           }
 
           const mode = el.subEmbedMode?.value || 'soft';
-          const lang = el.subEmbedLang?.value?.trim() || 'hun';
-          const title = el.subEmbedTitle?.value?.trim() || 'Subtitles';
+          const lang = el.subEmbedLang?.value?.trim() || 'eng';
+          const title = el.subEmbedTitle?.value?.trim() || 'English Subtitles';
 
           activeSubJobId = 'sub_' + Date.now();
 
@@ -9905,7 +10050,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             return;
           }
           const fn = inputPath.split(/[/\\]/).pop();
-          populateMetadataFields({ filename: fn, tags: {} });
+          const parsed = extractMetadataFromFilename(fn, {});
+          populateMetadataFields({ filename: fn, tags: {} }, parsed);
           showToast('Parsed show, season & episode from filename');
         });
       }

@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T07:45:38Z
-Gesamtanzahl Turns: 433 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 08:51:05
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T08:05:21Z
+Gesamtanzahl Turns: 434 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 09:11:05
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24440,7 +24440,42 @@ AutoExtracted: true
 BENUTZER:
 I''d like to either just drop a url or paste it right into the homewindow at it automaticly open the stream/download with the url in it
 
-[Hintergrund-Aktionen: read_file (26), run_command (18), edit_file (7), write_file (1)]
+[Hintergrund-Aktionen: read_file (26), run_command (21), edit_file (7), write_file (1)]
+
+ANTIGRAVITY / ASSISTENT:
+Die direkte Einbindung von Stream-URLs per **Drag & Drop** sowie per **Zwischenablage (Ctrl+V)** direkt auf den Startbildschirm / das Hauptfenster ist ab sofort implementiert und einsatzbereit!
+
+### Was wurde umgesetzt?
+
+1. **URL Drag & Drop direkt ins Hauptfenster**:
+   * Du kannst jetzt jeden Weblink (z. B. aus Chrome, Firefox, Edge, Discord oder einem Textdokument) direkt per Maus in das CopyCat-Hauptfenster ziehen und fallen lassen.
+   * Das Drop-Overlay zeigt: `Drop media file or stream URL to play / download`.
+   * Liegt eine Stream- oder Webseiten-URL vor, öffnet sich automatisch der Tab **„Stream & Download“**, die URL wird in das Eingabefeld eingefügt und die Stream-Analyse (**Probe**) startet sofort im Hintergrund.
+   * Auch Windows-Internetverknüpfungen (`.url`-Dateien) vom Desktop werden beim Hineinziehen sofort aufgelöst.
+
+2. **Direktes Einfügen (Ctrl+V) auf den Startbildschirm**:
+   * Befindest du dich auf dem Startbildschirm (oder irgendwo im Player außerhalb eines Texteingabefeldes) und drückst **`Ctrl+V`**, erkennt CopyCat automatisch den Link in deiner Zwischenablage.
+   * Der Stream-Dialog öffnet sich unverzüglich mit der eingefügten URL und analysiert den Stream direkt.
+
+3. **Verhalten nach der Analyse**:
+   * Bei Video-Websites (wie `jobbmintatv.pro`, `videa.hu`, `miruro.tv` etc.) wird der direkte MP4-/HLS-Stream automatisch über die modulare Sniffer-Architektur extrahiert.
+   * Du siehst sofort den Titel, die Auflösung und die Buttons **„Play in CopyCat“** und **„Download to PC“** startklar vor dir.
+
+---
+
+### Verifikation & Status
+* **Automatisierte Tests**: **70 / 70 Tests bestanden (100% grün)**
+* **NotebookLM-Snapshots**: [CopyCat-Gesamtprojekt.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Gesamtprojekt.txt) und [CopyCat-Konversationsprotokoll.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Konversationsprotokoll.txt) aktualisiert.
+* **Git**: Commit `249d78a` ist auf GitHub `origin/master` gepusht.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #434] | Schritt 24347 | Zeitstempel: 2026-11-21T08:05:21Z (Anhänge: 3)
+--------------------------------------------------------------------------------
+BENUTZER:
+fir the first screenshot, please explain what everything is. for the second screenshot, I'd also like to implement a dragn drop feature, when I'm on this window and dragn drop a file in it, it uses that file instead of start playin it, also please change the preset from hun to english also implement an auto web subtitle ripper when the serie and episode is verified. for the metadata please don't use examples and maybe optimize the metadata autofillin
+
+[Hintergrund-Aktionen: run_command (14), read_file (14), edit_file (8)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)
