@@ -272,9 +272,19 @@ if (!isSingleInstance) {
 
 app.on('before-quit', () => {
   streamManager.killAll();
+  try {
+    if (container.has('mediaEditor')) {
+      container.get('mediaEditor').cleanupTempFiles();
+    }
+  } catch {}
 });
 
 app.on('window-all-closed', () => {
   streamManager.killAll();
+  try {
+    if (container.has('mediaEditor')) {
+      container.get('mediaEditor').cleanupTempFiles();
+    }
+  } catch {}
   if (process.platform !== 'darwin') app.quit();
 });

@@ -3,6 +3,7 @@
 // Uses bundled FFmpeg & FFprobe executables for fast, local, offline-first media processing.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const https = require('https');
 const http = require('http');
@@ -51,6 +52,79 @@ function formatDuration(sec) {
 class MediaEditor {
   constructor() {
     this.activeJobs = new Map(); // jobId -> childProcess
+    this.stagedTempFiles = new Set(); // Track staged temp subtitle files for automatic cleanup
+    this.cleanupTempFiles();
+  }
+
+  _getTempDir() {
+    return process.env.TEMP || process.env.TMP || os.tmpdir() || 'C:\\Windows\\Temp';
+  }
+
+  _isTempSubFile(filePath) {
+    if (!filePath || typeof filePath !== 'string') return false;
+    if (this.stagedTempFiles.has(filePath)) return true;
+    const base = path.basename(filePath).toLowerCase();
+    return base.startsWith('copycat_sub_');
+  }
+
+  /**
+   * Sweep and delete temporary staged subtitle files (and leftover builder .tmp.ico artifacts)
+   */
+  cleanupTempFiles(specificPath = null) {
+    if (specificPath) {
+      if (this._isTempSubFile(specificPath)) {
+        try {
+          if (fs.existsSync(specificPath)) fs.unlinkSync(specificPath);
+        } catch {}
+        this.stagedTempFiles.delete(specificPath);
+      }
+      return;
+    }
+
+    for (const f of this.stagedTempFiles) {
+      try {
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      } catch {}
+    }
+    this.stagedTempFiles.clear();
+
+    try {
+      const tmpDir = this._getTempDir();
+      if (tmpDir && fs.existsSync(tmpDir)) {
+        const entries = fs.readdirSync(tmpDir);
+        for (const name of entries) {
+          const lower = name.toLowerCase();
+          if (lower.startsWith('copycat_sub_') || lower.endsWith('.tmp.ico')) {
+            try {
+              fs.unlinkSync(path.join(tmpDir, name));
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+  }
+
+  /**
+   * Resolve the official CopyCat Subtitles download subfolder (Downloads\CopyCat\Subtitles)
+   */
+  getSubtitlesDownloadFolder(customBaseDir = null) {
+    let baseCopyCatDir = customBaseDir;
+    if (!baseCopyCatDir) {
+      try {
+        const { app } = require('electron');
+        const dlRoot = (app && typeof app.getPath === 'function')
+          ? app.getPath('downloads')
+          : path.join(os.homedir(), 'Downloads');
+        baseCopyCatDir = path.join(dlRoot, 'CopyCat');
+      } catch {
+        baseCopyCatDir = path.join(os.homedir(), 'Downloads', 'CopyCat');
+      }
+    }
+    const subDir = path.join(baseCopyCatDir, 'Subtitles');
+    if (!fs.existsSync(subDir)) {
+      fs.mkdirSync(subDir, { recursive: true });
+    }
+    return subDir;
   }
 
   /**
@@ -906,14 +980,59 @@ class MediaEditor {
   }
 
   /**
-   * Download online subtitle file and gunzip if needed
+   * Sanitize a subtitle filename for saving into Downloads\CopyCat\Subtitles
    */
-  async downloadSubtitle(downloadUrl, targetPath) {
+  _sanitizeSubFileName(rawName, fallbackExt = '.srt') {
+    if (!rawName || typeof rawName !== 'string') {
+      return `subtitle_${Date.now()}${fallbackExt}`;
+    }
+    let clean = rawName
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[.\s]+$/, '');
+    const ext = path.extname(clean).toLowerCase();
+    if (!['.srt', '.ass', '.ssa', '.vtt', '.sub'].includes(ext)) {
+      clean += fallbackExt;
+    }
+    return clean || `subtitle_${Date.now()}${fallbackExt}`;
+  }
+
+  /**
+   * Download online subtitle file and gunzip if needed.
+   * - When opts.saveToDownloads is true: saves to Downloads\CopyCat\Subtitles\<fileName>
+   * - When opts.temporary is true (default for staging): cleans previous staged temp files,
+   *   stages in Temp, and tracks for automatic cleanup after embedding or app exit.
+   */
+  async downloadSubtitle(downloadUrl, targetOrOpts = null) {
     if (!downloadUrl) throw new Error('Download URL required.');
-    const outPath = targetPath || path.join(
-      process.env.TEMP || process.env.TMP || 'C:\\Windows\\Temp',
-      `copycat_sub_${Date.now()}.srt`
-    );
+
+    let outPath = null;
+    let isTemp = false;
+
+    if (typeof targetOrOpts === 'string' && targetOrOpts.trim()) {
+      outPath = targetOrOpts.trim();
+      isTemp = this._isTempSubFile(outPath);
+    } else {
+      const opts = (targetOrOpts && typeof targetOrOpts === 'object') ? targetOrOpts : {};
+      const extMatch = String(opts.fileName || '').match(/\.(srt|ass|ssa|vtt|sub)$/i);
+      const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : '.srt';
+
+      if (opts.targetPath) {
+        outPath = opts.targetPath;
+        isTemp = this._isTempSubFile(outPath);
+      } else if (opts.saveToDownloads) {
+        const subFolder = this.getSubtitlesDownloadFolder(opts.baseDownloadFolder || null);
+        const safeName = this._sanitizeSubFileName(opts.fileName, ext);
+        outPath = path.join(subFolder, safeName);
+        isTemp = false;
+      } else {
+        // Temporary staging for auto-ripper / embedder: clear any previous temp subtitle first
+        this.cleanupTempFiles();
+        outPath = path.join(this._getTempDir(), `copycat_sub_${Date.now()}${ext}`);
+        isTemp = true;
+      }
+    }
 
     return new Promise((resolve, reject) => {
       const req = https.get(downloadUrl, { headers: { 'User-Agent': 'TemporaryUserAgent' }, timeout: 10000 }, (res) => {
@@ -926,16 +1045,28 @@ class MediaEditor {
         res.on('data', c => chunks.push(c));
         res.on('end', () => {
           const buf = Buffer.concat(chunks);
+          const finalizeWrite = (contentBuf) => {
+            try {
+              const dir = path.dirname(outPath);
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(outPath, contentBuf);
+              if (isTemp) {
+                this.stagedTempFiles.add(outPath);
+              }
+              resolve({ success: true, ok: true, targetPath: outPath, outPath, isTemp });
+            } catch (writeErr) {
+              reject(writeErr);
+            }
+          };
+
           // Check if gzip compressed (magic bytes 0x1F, 0x8B)
           if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
             zlib.gunzip(buf, (err, unzipped) => {
               if (err) return reject(err);
-              fs.writeFileSync(outPath, unzipped);
-              resolve({ success: true, ok: true, targetPath: outPath, outPath });
+              finalizeWrite(unzipped);
             });
           } else {
-            fs.writeFileSync(outPath, buf);
-            resolve({ success: true, ok: true, targetPath: outPath, outPath });
+            finalizeWrite(buf);
           }
         });
       });
@@ -947,15 +1078,18 @@ class MediaEditor {
    * Embed subtitle file into video container (Soft subremux or Hardsub burn-in)
    */
   async embedSubtitles(options, onProgress = null) {
-    const {
+    let {
       inputPath,
       outputPath,
       subPath,
       lang = 'eng',
       title = 'Subtitles',
       isDefault = true,
-      mode = 'soft' // 'soft' (lossless container stream) or 'burn' (hardsub)
+      mode = 'soft' // 'soft' (lossless container stream) or 'burn' / 'hard' (hardsub)
     } = options;
+
+    inputPath = String(inputPath || '').trim().replace(/^["']+|["']+$/g, '').trim();
+    subPath = String(subPath || '').trim().replace(/^["']+|["']+$/g, '').trim();
 
     if (!inputPath || !fs.existsSync(inputPath)) {
       throw new Error(`Input video does not exist: ${inputPath}`);
@@ -978,15 +1112,20 @@ class MediaEditor {
 
     const args = ['-y', '-i', inputPath];
 
-    if (mode === 'burn') {
+    if (mode === 'burn' || mode === 'hard') {
       // Hardsub filter
-      const escapedSub = subPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+      const escapedSub = subPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
       args.push('-vf', `subtitles='${escapedSub}'`, '-c:a', 'copy', finalOut);
     } else {
       // Soft subtitle remux
-      args.push('-i', subPath, '-map', '0', '-map', '1:0', '-c', 'copy');
-      if (ext === '.mp4' || ext === '.m4v') {
+      args.push('-i', subPath, '-map', '0:v?', '-map', '0:a?', '-map', '1:0', '-c:v', 'copy', '-c:a', 'copy');
+      const subExt = path.extname(subPath).toLowerCase();
+      if (ext === '.mp4' || ext === '.m4v' || ext === '.mov') {
         args.push('-c:s', 'mov_text');
+      } else if (ext === '.webm') {
+        args.push('-c:s', 'webvtt');
+      } else if (subExt === '.ass' || subExt === '.ssa') {
+        args.push('-c:s', 'ass');
       } else {
         args.push('-c:s', 'subrip');
       }
@@ -995,15 +1134,15 @@ class MediaEditor {
         '-metadata:s:s:0', `title=${title}`
       );
       if (isDefault) {
-        args.push('-disposition:s:s:0', 'default');
+        args.push('-disposition:s:0', 'default');
       }
-      if (ext === '.mp4') {
+      if (ext === '.mp4' || ext === '.m4v') {
         args.push('-movflags', '+faststart');
       }
       args.push(finalOut);
     }
 
-    const jobId = `embed_${Date.now()}`;
+    const jobId = options.jobId || `embed_${Date.now()}`;
     logger.info(`Embedding subtitles [${jobId}]: ${subPath} into ${inputPath} -> ${finalOut} (${mode})`);
 
     return new Promise((resolve, reject) => {
@@ -1020,7 +1159,12 @@ class MediaEditor {
       child.on('close', (code) => {
         this.activeJobs.delete(jobId);
         if (code === 0 && fs.existsSync(finalOut)) {
-          resolve({ success: true, ok: true, jobId, outputPath: finalOut });
+          // Automatically remove temporary staged subtitle file once embedding succeeds
+          const cleanedTemp = this._isTempSubFile(subPath);
+          if (cleanedTemp) {
+            this.cleanupTempFiles(subPath);
+          }
+          resolve({ success: true, ok: true, jobId, outputPath: finalOut, cleanedTemp });
         } else {
           reject(new Error(lastStderr.trim() || `FFmpeg subtitle embed failed with code ${code}`));
         }

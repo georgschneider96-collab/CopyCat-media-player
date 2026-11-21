@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:43:21Z
-Gesamtanzahl Turns: 443 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 12:45:31
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:55:47Z
+Gesamtanzahl Turns: 445 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 13:06:07
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24964,6 +24964,90 @@ BENUTZER:
 let's get rid of the text ordered best to worst and also with the #number
 
 [Hintergrund-Aktionen: edit_file (2), read_file (1), run_command (1)]
+
+ANTIGRAVITY / ASSISTENT:
+Done! Both have been removed while keeping the underlying Best-to-Worst sorting order active:
+
+* **Removed `"Ordered Best to Worst"` header label** ([app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10093-L10097)).
+* **Removed `#1`, `#2`, `#3`... rank numbers** from each subtitle row ([app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10118-L10134)).
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **73 / 73 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **Git Push**: Committed and pushed to `origin/master` (commit `ee0c032`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #444] | Schritt 24992 | Zeitstempel: 2026-11-21T11:52:24Z (Anhänge: 2)
+--------------------------------------------------------------------------------
+BENUTZER:
+what is happaning here? the embeding doesn't seem to work, for the sub downloads there should in the official Download folder form Copycat be a subfolder for Subtitles. ... also what is happenening with theese temp files, shouldn't they be cleared when not necessary. don't do anything yet explain first
+
+[Hintergrund-Aktionen: read_file (2)]
+
+ANTIGRAVITY / ASSISTENT:
+Here is what is happening in each case (no files have been changed yet):
+
+---
+
+### 1. Why Subtitle Embedding Failed (`Stream type specified multiple times`)
+
+In your first screenshot, the FFmpeg error at the bottom of the toast reads:
+> `Stream type specified multiple times`
+> `Error parsing options for output file C:\Users\Schual\Downloads\CopyCat\Bleach 001_subbed.mp4. Error opening output files: Invalid argument`
+
+* **The Cause**: In [media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L994-L999), the FFmpeg command was passing:
+  ```text
+  -metadata:s:s:0 language=eng
+  -disposition:s:s:0 default
+  ```
+  * For `-metadata`, the first `:s` means *"per-stream metadata"* and the second `:s:0` selects *"subtitle stream 0"*, which is valid.
+  * For **`-disposition`**, however, the option is *already* per-stream, so the syntax in FFmpeg is **`-disposition:s:0 default`** (with only **one** `:s`). Passing `:s:s:0` tells FFmpeg the stream type `s` (subtitle) twice, causing FFmpeg to reject the command immediately with `Invalid argument`.
+  * *(Additionally, if you select "Hardsub Burn-in", the dropdown sends `mode = "hard"`, while [media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L981) was checking `mode === "burn"`, so both need to be aligned.)*
+
+---
+
+### 2. Why "Download" Opened `AppData\Local\Temp` Instead of `Downloads\CopyCat\Subtitles`
+
+* **The Cause**: In [media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L911-L916), `downloadSubtitle()` was hardcoded to save every downloaded file to:
+  ```text
+  C:\Users\Schual\AppData\Local\Temp\copycat_sub_<timestamp>.srt
+  ```
+* Because both the **"Download"** button and the **Auto-Ripper / "Use & Embed"** button called that same function without specifying a destination folder:
+  * Clicking **"Download"** saved the subtitle with a random timestamp name into Windows' `Temp` folder and opened Explorer there, instead of saving it with its real filename (e.g. `Bleach.S01E01.WEBRip.Netflix.en[cc].srt`) inside CopyCat's official download folder under **`C:\Users\Schual\Downloads\CopyCat\Subtitles\`**.
+
+---
+
+### 3. Why Temp Files Accumulated & Were Not Cleared
+
+In your second screenshot of `AppData\Local\Temp`, there are two kinds of leftover temp files:
+
+1. **`copycat_sub_<timestamp>.srt` files**:
+   * Every time you probed a file (or clicked **Use & Embed**), the Auto-Ripper downloaded a new `copycat_sub_<timestamp>.srt` file into `Temp` so FFmpeg could read it for embedding, **but there was no cleanup logic** to delete those staged `.srt` files after embedding finished, when a new subtitle was staged, or when CopyCat closed.
+   * Furthermore, ifdownloaded subtitles are saved directly to **`C:\Users\Schual\Downloads\CopyCat\Subtitles\`** (or if staged temp subtitles reuse/clean up a single temp slot and are deleted automatically after embedding and on app exit), `AppData\Local\Temp` will stay completely clean.
+2. **`*.tmp.ico` (Orange Cat Icon files)**:
+   * Those `.tmp.ico` files in `Temp` were generated by `electron-builder` during earlier installer/portable `.exe` packaging builds and were never cleaned up by the build tool.
+
+---
+
+### Proposed Fix (Waiting for Your Go-Ahead)
+
+Once you give the word, I can:
+1. **Fix FFmpeg Embedding**: Change `-disposition:s:s:0` to `-disposition:s:0` (and align `hard`/`burn` mode) so soft-muxing and hardsub burning both succeed.
+2. **Save Subtitles to `Downloads\CopyCat\Subtitles`**: Route subtitle downloads to a dedicated **`Subtitles`** subfolder inside CopyCat's official download directory with their clean real filenames.
+3. **Auto-Clean Temp Files**: Automatically delete staged `copycat_sub_*.srt` temp files after embedding / on exit, and sweep the existing leftover `copycat_sub_*.srt` and `*.tmp.ico` files from your `Temp` folder.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #445] | Schritt 24998 | Zeitstempel: 2026-11-21T11:55:47Z
+--------------------------------------------------------------------------------
+BENUTZER:
+yeah pls do thst
+
+[Hintergrund-Aktionen: read_file (12), edit_file (9), run_command (3)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

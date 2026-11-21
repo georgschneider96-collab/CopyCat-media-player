@@ -1104,6 +1104,24 @@ async function runAll() {
     assert.strictEqual(exactEp.matchTier, 'best', 'Exact episode match must receive "best" tier');
   });
 
+  runTest('MediaEditor manages official Subtitles folder and cleans temporary staged subtitle files', () => {
+    const subDir = editor.getSubtitlesDownloadFolder();
+    assert(subDir.endsWith(path.join('CopyCat', 'Subtitles')), 'Official subtitles folder must be Downloads\\CopyCat\\Subtitles');
+    assert(fs.existsSync(subDir), 'Official subtitles folder must exist on disk');
+
+    const safeName = editor._sanitizeSubFileName('[Judas] Bleach: 001?.en.srt');
+    assert.strictEqual(safeName, '[Judas] Bleach_ 001_.en.srt', 'Sanitizes invalid Windows filename characters');
+
+    const tmpFile = path.join(editor._getTempDir(), `copycat_sub_unit_test_${Date.now()}.srt`);
+    fs.writeFileSync(tmpFile, '1\n00:00:01,000 --> 00:00:02,000\nTest\n', 'utf8');
+    editor.stagedTempFiles.add(tmpFile);
+    assert(fs.existsSync(tmpFile), 'Staged temp file must exist before cleanup');
+
+    editor.cleanupTempFiles(tmpFile);
+    assert(!fs.existsSync(tmpFile), 'cleanupTempFiles must remove staged temp subtitle file');
+    assert(!editor.stagedTempFiles.has(tmpFile), 'stagedTempFiles set must remove cleaned file');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');

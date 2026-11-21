@@ -9731,7 +9731,7 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           if (res.onlineResults && res.onlineResults.length > 0 && api.downloadSubtitle) {
             const topSub = res.onlineResults[0];
             if (topSub.downloadUrl) {
-              const dlRes = await api.downloadSubtitle(topSub.downloadUrl);
+              const dlRes = await api.downloadSubtitle(topSub.downloadUrl, { fileName: topSub.fileName, temporary: true });
               const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
               if (targetPath) {
                 if (el.subEmbedFile) el.subEmbedFile.value = targetPath;
@@ -10132,11 +10132,11 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
               </div>
             `;
 
-            // Download handler
+            // Download handler (Saves permanently into Downloads\CopyCat\Subtitles)
             row.querySelector('.btn-dl-sub').addEventListener('click', async () => {
               if (!sub.downloadUrl || !api.downloadSubtitle) return;
-              showToast('Downloading subtitle...');
-              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              showToast('Downloading subtitle to CopyCat\\Subtitles...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl, { fileName: sub.fileName, saveToDownloads: true });
               const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
               if (targetPath) {
                 showToast('Subtitle saved: ' + targetPath);
@@ -10149,8 +10149,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             // Use & Embed handler
             row.querySelector('.btn-use-sub').addEventListener('click', async () => {
               if (!sub.downloadUrl || !api.downloadSubtitle) return;
-              showToast('Downloading subtitle for embedder...');
-              const dlRes = await api.downloadSubtitle(sub.downloadUrl);
+              showToast('Staging subtitle for embedder...');
+              const dlRes = await api.downloadSubtitle(sub.downloadUrl, { fileName: sub.fileName, temporary: true });
               const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
               if (targetPath) {
                 if (el.subEmbedFile) el.subEmbedFile.value = targetPath;
@@ -10239,6 +10239,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
 
             if (res && res.success) {
               lastEmbeddedPath = res.outputPath;
+              if (res.cleanedTemp && el.subEmbedFile) {
+                el.subEmbedFile.value = '';
+              }
               if (el.subEmbedProgressBox) el.subEmbedProgressBox.style.display = 'none';
               if (el.subEmbedCompleteBanner) el.subEmbedCompleteBanner.style.display = 'block';
               showToast('Subtitles embedded successfully!');

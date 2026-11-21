@@ -731,12 +731,16 @@ const IPC_HANDLERS = {
 
   'media-editor:download-subtitle': {
     type: 'handle',
-    description: 'Download online subtitle file to local temp path',
+    description: 'Download online subtitle file to official CopyCat Subtitles folder or staged temp path',
     validate: (url) => typeof url === 'string' && url.startsWith('http'),
-    handler: async ({ mediaEditor }, _evt, url, targetPath) => {
+    handler: async ({ mediaEditor, downloader }, _evt, url, targetOrOpts) => {
       try {
         const editorSvc = mediaEditor || require('./media-editor').mediaEditor;
-        const res = await editorSvc.downloadSubtitle(url, targetPath);
+        let resolvedOpts = targetOrOpts;
+        if (targetOrOpts && typeof targetOrOpts === 'object' && !targetOrOpts.baseDownloadFolder && downloader?.downloadFolder) {
+          resolvedOpts = { ...targetOrOpts, baseDownloadFolder: downloader.downloadFolder };
+        }
+        const res = await editorSvc.downloadSubtitle(url, resolvedOpts);
         if (typeof res === 'string') {
           return { success: true, ok: true, targetPath: res, outPath: res };
         }
