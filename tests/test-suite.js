@@ -97,7 +97,7 @@ async function runAll() {
 
   // Test Group 3: Updater Semver & Version Comparison
   console.log('\n--- 3. Updater Version Comparison Logic & Checksum Extraction ---');
-  const { isNewerVersion, extractExpectedSha256 } = require(path.join(projectRoot, 'src/main/updater'));
+  const { isNewerVersion, extractExpectedSha256, downloadUpdateAsset } = require(path.join(projectRoot, 'src/main/updater'));
   runTest('Semver comparison edge cases', () => {
     assert.strictEqual(isNewerVersion('1.0.0', '1.0.1'), true, '1.0.1 > 1.0.0');
     assert.strictEqual(isNewerVersion('v1.2.0', 'v1.3.0'), true, 'v1.3.0 > v1.2.0');
@@ -125,6 +125,17 @@ async function runAll() {
     const fakeRelease3 = { body: 'Just a regular release without checksums.' };
     const hash3 = extractExpectedSha256(fakeRelease3, { name: 'Setup.exe' });
     assert.strictEqual(hash3, null);
+  });
+
+  await runAsyncTest('downloadUpdateAsset rejects insecure HTTP protocols and fails closed', async () => {
+    let errorCaught = null;
+    try {
+      await downloadUpdateAsset('http://insecure-server.com/malicious.exe', 'test.exe');
+    } catch (err) {
+      errorCaught = err;
+    }
+    assert(errorCaught !== null, 'Must reject insecure HTTP update download');
+    assert(errorCaught.message.includes('Only HTTPS allowed'), 'Error must specify HTTPS requirement');
   });
 
   // Test Group 3b: Media Resolver & Byte-Range Handling (RFC 7233)
@@ -333,6 +344,19 @@ async function runAll() {
     const json = await res.json();
     const expectedVer = require(path.join(projectRoot, 'package.json')).version;
     assert.strictEqual(json.version, expectedVer);
+  });
+
+  await runAsyncTest('Handle malformed request URLs cleanly with HTTP 400', async () => {
+    const res = await rawHttpRequest({
+      hostname: '127.0.0.1',
+      port: testPort,
+      path: '/api/test%99%invalid',
+      headers: { Host: `127.0.0.1:${testPort}` }
+    });
+    assert.strictEqual(res.status, 400);
+    const json = JSON.parse(res.body);
+    assert.strictEqual(json.ok, false);
+    assert(json.error.includes('Malformed request URL'));
   });
 
   await runAsyncTest('Allow Sec-Fetch-Site: cross-site for internal media stream routes from Electron renderer', async () => {
@@ -697,6 +721,27 @@ async function runAll() {
     assert.strictEqual(targetUrlSingle, 'https://cdn.example.com/dub/index.m3u8', 'Single dub routes targetUrl directly to dub stream');
     assert.strictEqual(targetUrlDual, 'https://cdn.example.com/sub/index.m3u8', 'Dual-audio preserves master stream for targetUrl');
     assert.strictEqual(taskSingleDub.dubStreamUrl, 'https://cdn.example.com/dub/index.m3u8', 'Task dubStreamUrl routes to English dub stream');
+  });
+
+  await runAsyncTest('DownloadManager enforces strict URL validation and rejects invalid payloads', async () => {
+    const dummyMgr = new DownloadManager();
+    let errEmpty = null;
+    try {
+      await dummyMgr.startDownload({ url: '' });
+    } catch (e) {
+      errEmpty = e;
+    }
+    assert(errEmpty !== null, 'Empty URL must throw an error');
+    assert(errEmpty.message.includes('URL is required'));
+
+    let errNull = null;
+    try {
+      await dummyMgr.startDownload({ url: null });
+    } catch (e) {
+      errNull = e;
+    }
+    assert(errNull !== null, 'Null URL must throw an error');
+    assert(errNull.message.includes('URL is required'));
   });
 
   console.log('\n--- 8. Subtitle Autoplay Preferences ---');

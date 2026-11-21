@@ -401,9 +401,18 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
   const commandRegistry = customRegistry || createDefaultCommandRegistry();
 
   const server = http.createServer((req, res) => {
-    const currentPort = (window && typeof window.getPort === 'function') ? window.getPort() : 4500;
-    const urlObj = new URL(req.url || '/', `http://127.0.0.1:${currentPort}`);
-    const pathname = urlObj.pathname;
+    try {
+      const currentPort = (window && typeof window.getPort === 'function') ? window.getPort() : 4500;
+      let urlObj;
+      try {
+        urlObj = new URL(req.url || '/', `http://127.0.0.1:${currentPort}`);
+        decodeURI(urlObj.pathname);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Malformed request URL' }));
+        return;
+      }
+      const pathname = urlObj.pathname;
 
     // 0. Anti-DNS Rebinding Host Guard:
     // Ensure the Host header strictly targets local loopback. Rejects external domain rebinding to 127.0.0.1.
@@ -556,6 +565,13 @@ function startAiControlServer(port = 4500, containerOrServices, customRegistry =
       ok: false,
       error: `Endpoint "${pathname}" not found. Visit GET / for full API documentation.`
     });
+    } catch (unexpectedErr) {
+      logger.error('Unexpected server error handling request:', unexpectedErr.message);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Internal Server Error' }));
+      }
+    }
   });
 
   server.on('error', (err) => {

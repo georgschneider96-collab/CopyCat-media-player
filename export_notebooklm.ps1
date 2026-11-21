@@ -4,7 +4,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$ProjectRoot = Resolve-Path './'
+$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Resolve-Path './' }
 $OutputFile  = Join-Path $ProjectRoot 'CopyCat-Gesamtprojekt.txt'
 
 $AllowedExtensions = @('.json', '.js', '.html', '.css', '.md', '.ps1')

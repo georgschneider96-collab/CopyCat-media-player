@@ -267,13 +267,19 @@ function downloadUpdateAsset(downloadUrl, assetName, onProgress, expectedSha256 
                 return reject(new Error(`Incomplete download: transferred ${transferred}/${total} bytes`));
               }
 
-              // 2. Computed SHA-256 hash
+              // 2. Computed SHA-256 hash & verification
               const computedSha256 = hash.digest('hex');
               logger.info(`Downloaded asset SHA-256: ${computedSha256}`);
 
-              if (expectedSha256 && computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
-                cleanup();
-                return reject(new Error(`Checksum mismatch! Expected: ${expectedSha256}, Got: ${computedSha256}`));
+              if (expectedSha256) {
+                if (computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
+                  cleanup();
+                  logger.error(`Cryptographic verification failure! Expected SHA-256: ${expectedSha256}, Got: ${computedSha256}`);
+                  return reject(new Error(`Checksum mismatch! Expected: ${expectedSha256}, Got: ${computedSha256}`));
+                }
+                logger.info(`Cryptographic SHA-256 verification successful: ${computedSha256}`);
+              } else {
+                logger.warn('No published expected SHA-256 checksum found for this release; proceeding with Windows PE binary header verification.');
               }
 
               // 3. Binary header validation (Windows PE MZ signature: 0x4D, 0x5A)
