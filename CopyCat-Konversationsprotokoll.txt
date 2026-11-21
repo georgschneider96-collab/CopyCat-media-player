@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T11:55:47Z
-Gesamtanzahl Turns: 445 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 13:06:07
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T13:13:27Z
+Gesamtanzahl Turns: 446 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 14:16:21
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -25048,6 +25048,53 @@ BENUTZER:
 yeah pls do thst
 
 [Hintergrund-Aktionen: read_file (12), edit_file (9), run_command (3)]
+
+ANTIGRAVITY / ASSISTENT:
+All three changes have been implemented and verified:
+
+---
+
+### 1. Fixed FFmpeg Subtitle Embedding (`-disposition:s:0 default`)
+* **Fixed FFmpeg Stream Specifier** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L1079-L1135)):
+  * Changed `-disposition:s:s:0 default` to **`-disposition:s:0 default`** and mapped video/audio streams cleanly (`-map 0:v? -map 0:a? -map 1:0`).
+  * Aligned the Hardsub mode check (`mode === 'burn' || mode === 'hard'`) so both Soft Subtitles and Hardsub Burn-in work seamlessly.
+  * Tested directly against `C:\Users\Schual\Downloads\CopyCat\Bleach 001.mp4`: soft-muxing completes in ~1 second and writes a valid `mov_text` English default subtitle track.
+
+---
+
+### 2. Dedicated `Downloads\CopyCat\Subtitles` Folder for Subtitle Downloads
+* **Official Subtitles Subfolder** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L107-L125), [app.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/app.js#L10135-L10147)):
+  * Created **`C:\Users\Schual\Downloads\CopyCat\Subtitles`**.
+  * Clicking **"Download"** on any subtitle row now saves the subtitle permanently into `C:\Users\Schual\Downloads\CopyCat\Subtitles\` using its real, sanitized filename (e.g. `Bleach.S01E01.WEBRip.Netflix.en[cc].srt`) and reveals it there in Windows Explorer.
+
+---
+
+### 3. Automatic Temp File Cleanup
+* **Swept Existing Leftovers & Added Lifecycle Cleanup** ([media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js#L69-L105), [main.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/main.js#L273-L289)):
+  * All existing leftover `copycat_sub_*.srt` and `*.tmp.ico` files in `C:\Users\Schual\AppData\Local\Temp` have been cleared (**0 remaining**).
+  * Temporary staged subtitles (used by the Auto-Ripper and **Use & Embed**) now:
+    1. Automatically delete any previous staged temp subtitle before staging a new one.
+    2. Automatically delete themselves from `Temp` (and clear the input field) immediately after **Embed Subtitles** completes.
+    3. Automatically clean up on app startup and when CopyCat closes (`before-quit` / `window-all-closed`).
+
+> **Note:** Please restart CopyCat once so the Electron Main Process loads the updated [media-editor.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/src/main/media-editor.js) and [main.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/main.js).
+
+---
+
+### Verification & Sync Status
+
+* **Automated Regression Suite**: **74 / 74 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **Git Push**: Committed and pushed to `origin/master` (commit `a1a775a`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #446] | Schritt 25048 | Zeitstempel: 2026-11-21T13:13:27Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+let's add to the language tag a dropdown menu
+
+[Hintergrund-Aktionen: edit_file (3), read_file (2), run_command (1)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

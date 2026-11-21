@@ -10201,6 +10201,16 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         });
       }
 
+      if (el.subEmbedLang) {
+        el.subEmbedLang.addEventListener('change', () => {
+          if (el.subEmbedTitle) {
+            const selectedOpt = el.subEmbedLang.options?.[el.subEmbedLang.selectedIndex];
+            const cleanLangName = selectedOpt ? selectedOpt.text.replace(/\s*\([^)]*\)/, '').trim() : el.subEmbedLang.value.toUpperCase();
+            el.subEmbedTitle.value = `${cleanLangName} Subtitles`;
+          }
+        });
+      }
+
       // Embed subtitle into video
       if (el.btnStartSubEmbed) {
         el.btnStartSubEmbed.addEventListener('click', async () => {

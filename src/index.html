@@ -1328,7 +1328,23 @@
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Track Language Code:</label>
-                      <input type="text" id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12px;" value="eng" placeholder="eng, jpn, de..." />
+                      <select id="sub-embed-lang" class="stream-url-field" style="width:100%;padding:7px 10px;font-size:12px;cursor:pointer;">
+                        <option value="eng" selected>English (eng)</option>
+                        <option value="jpn">Japanese (jpn)</option>
+                        <option value="ger">German (ger)</option>
+                        <option value="hun">Hungarian (hun)</option>
+                        <option value="spa">Spanish (spa)</option>
+                        <option value="fre">French (fre)</option>
+                        <option value="ita">Italian (ita)</option>
+                        <option value="por">Portuguese (por)</option>
+                        <option value="rus">Russian (rus)</option>
+                        <option value="kor">Korean (kor)</option>
+                        <option value="chi">Chinese (chi)</option>
+                        <option value="ara">Arabic (ara)</option>
+                        <option value="pol">Polish (pol)</option>
+                        <option value="tur">Turkish (tur)</option>
+                        <option value="hin">Hindi (hin)</option>
+                      </select>
                     </div>
                     <div>
                       <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Subtitle Track Title:</label>
@@ -1435,7 +1451,24 @@
                     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                       <div>
                         <label style="display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:3px;">Audio Stream 1 Language Tag (Optional):</label>
-                        <input type="text" id="meta-field-audio-lang" class="stream-url-field" style="width:170px;padding:6px 10px;font-size:12px;" placeholder="eng, jpn, ger..." />
+                        <select id="meta-field-audio-lang" class="stream-url-field" style="width:190px;padding:6px 10px;font-size:12px;cursor:pointer;">
+                          <option value="" selected>None / Keep Original</option>
+                          <option value="eng">English (eng)</option>
+                          <option value="jpn">Japanese (jpn)</option>
+                          <option value="ger">German (ger)</option>
+                          <option value="hun">Hungarian (hun)</option>
+                          <option value="spa">Spanish (spa)</option>
+                          <option value="fre">French (fre)</option>
+                          <option value="ita">Italian (ita)</option>
+                          <option value="por">Portuguese (por)</option>
+                          <option value="rus">Russian (rus)</option>
+                          <option value="kor">Korean (kor)</option>
+                          <option value="chi">Chinese (chi)</option>
+                          <option value="ara">Arabic (ara)</option>
+                          <option value="pol">Polish (pol)</option>
+                          <option value="tur">Turkish (tur)</option>
+                          <option value="hin">Hindi (hin)</option>
+                        </select>
                       </div>
                       <button class="stream-action-btn stream-dl-btn" id="btn-save-metadata" type="button" style="padding:8px 16px;font-size:12.5px;font-weight:600;margin-top:16px;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;">
