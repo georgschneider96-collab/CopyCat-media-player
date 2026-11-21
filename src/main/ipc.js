@@ -683,8 +683,13 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Extract container metadata, audio/subtitle tracks and tags via FFprobe',
     validate: (filePath) => typeof filePath === 'string' && filePath.trim().length > 0,
-    handler: ({ mediaEditor }, _evt, filePath) => {
-      return mediaEditor.probeMetadata(filePath);
+    handler: async ({ mediaEditor }, _evt, filePath) => {
+      try {
+        const res = await mediaEditor.probeMetadata(filePath);
+        return { success: true, ok: true, ...res };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
   },
 
@@ -723,8 +728,16 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Download online subtitle file to local temp path',
     validate: (url) => typeof url === 'string' && url.startsWith('http'),
-    handler: ({ mediaEditor }, _evt, url, targetPath) => {
-      return mediaEditor.downloadSubtitle(url, targetPath);
+    handler: async ({ mediaEditor }, _evt, url, targetPath) => {
+      try {
+        const res = await mediaEditor.downloadSubtitle(url, targetPath);
+        if (typeof res === 'string') {
+          return { success: true, ok: true, targetPath: res, outPath: res };
+        }
+        return { success: true, ok: true, ...res };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
   },
 

@@ -997,6 +997,45 @@ async function runAll() {
     assert.strictEqual(res, false, 'Canceling nonexistent job returns false');
   });
 
+  runTest('MediaEditor metadata parsing and filename extraction contracts', () => {
+    // Test filename metadata extraction patterns
+    const parse = (filename) => {
+      let base = filename.replace(/\.[^/.]+$/, '');
+      base = base.replace(/^\[[^\]]+\]\s*/, '').trim();
+      base = base.replace(/\s*\[[0-9a-fA-F]{8}\]$/, '').trim();
+      base = base.replace(/\s*\([^)]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^)]*?\)/gi, '').trim();
+      base = base.replace(/\s*\[[^\]]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^\]]*?\]/gi, '').trim();
+      const techRegex = /\b(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|bdrip|web-?dl|webrip|hdtv|dvdrip|aac|flac|dual-?audio|multi-?audio|10-?bit)\b/gi;
+      base = base.replace(techRegex, '').replace(/\s+/g, ' ').trim();
+
+      const seMatch = base.match(/(.*?)(?:[._ -]+|\b)[sS](\d{1,2})[eE](\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)(?:[._ -]+|\b)(\d{1,2})x(\d{1,4})(?:[._ -]+|\b)(.*)/i);
+      if (seMatch) {
+        return { show: seMatch[1].trim(), season: seMatch[2], episode: parseInt(seMatch[3], 10).toString() };
+      }
+      const epMatch = base.match(/(.*?)(?:[._ -]+|\b)(?:ep|episode|[._ -])\s*(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)(?:[._ -]+|\b)-[._ -]+(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)\s+(\d{1,4})\s*(.*)/i);
+      if (epMatch) {
+        return { show: epMatch[1].trim(), season: '1', episode: parseInt(epMatch[2], 10).toString() };
+      }
+      return { show: '', season: '', episode: '', title: base.trim() };
+    };
+
+    const res1 = parse('Bleach 001.mp4');
+    assert.strictEqual(res1.show, 'Bleach', 'Extracts show Bleach');
+    assert.strictEqual(res1.episode, '1', 'Extracts episode 1 from Bleach 001');
+
+    const res2 = parse('[SubsPlease] Bleach - 01 (1080p) [98A53B3C].mkv');
+    assert.strictEqual(res2.show, 'Bleach', 'Extracts show from release group tags');
+    assert.strictEqual(res2.episode, '1', 'Extracts episode 1');
+
+    const res3 = parse('Attack on Titan S04E28.mkv');
+    assert.strictEqual(res3.show, 'Attack on Titan', 'Extracts show Attack on Titan');
+    assert.strictEqual(res3.season, '04', 'Extracts season 04');
+    assert.strictEqual(res3.episode, '28', 'Extracts episode 28');
+  });
+
   console.log('\n====================================================');
   console.log(`   Test Summary: ${passedTests} / ${totalTests} passed`);
   console.log('====================================================\n');

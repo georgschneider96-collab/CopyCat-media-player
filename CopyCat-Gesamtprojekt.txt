@@ -1,6 +1,6 @@
 ================================================================================
 # PROJEKT-GESAMTDOKUMENTATION: VLCopyCat / CopyCat Media Player
-Aktualisiert am: 2026-11-21 09:11:05
+Aktualisiert am: 2026-11-21 09:42:30
 Enthaltene Dateien (27):
   - ./C:/Users/Schual/Desktop/VLCopyCat-Master/AI_CONTEXT.md
   - ./C:/Users/Schual/Desktop/VLCopyCat-Master/export_notebooklm.ps1
@@ -10058,7 +10058,6 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
           if (typeof window.mediaEditorInspectTarget === 'function') {
             window.mediaEditorInspectTarget(firstPath);
           }
-          showToast(`Video loaded into Media Tools: ${firstPath.split(/[/\\]/).pop()}`);
           return;
         }
       }
@@ -10086,6 +10085,19 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         });
       } else {
         ingestOpenedBundle(resolved, true);
+      }
+
+      // Automatically analyze dropped media file and preload all File & Media Tools in background
+      if (paths.length > 0) {
+        const firstPath = paths[0];
+        const ext = (firstPath.split('.').pop() || '').toLowerCase();
+        const isVideo = ['mp4', 'mkv', 'webm', 'avi', 'mov', 'ts', 'm4v', 'flv', 'wmv'].includes(ext);
+        if (isVideo) {
+          if (el.editorSourcePath) el.editorSourcePath.value = firstPath;
+          if (typeof window.mediaEditorInspectTarget === 'function') {
+            window.mediaEditorInspectTarget(firstPath, { silent: false });
+          }
+        }
       }
     });
 
@@ -10484,57 +10496,72 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
         });
       });
 
-      // Probe selected target media file
-      async function inspectTargetFile(filePath) {
+      // Probe selected target media file and auto-preload all tabs
+      async function inspectTargetFile(filePath, opts = {}) {
         if (!filePath || !api.probeMediaMetadata) return;
         try {
-          const meta = await api.probeMediaMetadata(filePath);
-          if (!meta || !meta.success) {
-            showToast(meta?.error || 'Failed to inspect media file');
+          const raw = await api.probeMediaMetadata(filePath);
+          if (!raw || (raw.success === false && !raw.fileName && !raw.filename)) {
+            if (!opts.silent) showToast(raw?.error || 'Failed to inspect media file');
             return;
           }
+          const meta = raw;
           currentProbedMeta = meta;
 
-          // Update badge
-          if (el.editorFileBadge) el.editorFileBadge.style.display = 'block';
-          if (el.editorBadgeFilename) el.editorBadgeFilename.textContent = meta.filename || 'media';
-          if (el.editorBadgeSize) el.editorBadgeSize.textContent = formatBytes(meta.size);
-          if (el.editorBadgeFormat) el.editorBadgeFormat.textContent = (meta.format || 'video').toUpperCase();
-          if (el.editorBadgeRes) {
-            el.editorBadgeRes.textContent = meta.videoStream ? `${meta.videoStream.width}x${meta.videoStream.height}` : 'Audio';
-          }
-          if (el.editorBadgeDuration) el.editorBadgeDuration.textContent = formatDurationSecs(meta.duration);
-          if (el.editorBadgeAudio) {
-            const aCount = meta.audioStreams?.length || 0;
-            el.editorBadgeAudio.textContent = `${aCount} Audio Track${aCount === 1 ? '' : 's'}`;
-          }
-          if (el.editorBadgeSub) {
-            const sCount = meta.subtitleStreams?.length || 0;
-            el.editorBadgeSub.textContent = `${sCount} Subtitle${sCount === 1 ? '' : 's'}`;
-          }
+          const fileName = meta.fileName || meta.filename || filePath.split(/[/\\]/).pop();
+          const fileSize = meta.sizeFormatted || formatBytes(meta.sizeBytes || meta.size);
+          const format = (meta.formatName || meta.format || 'video').toUpperCase();
+          const primaryVid = meta.video || meta.videoStream || {};
+          const res = primaryVid.resolution || (primaryVid.width ? `${primaryVid.width}x${primaryVid.height}` : 'Audio');
+          const fps = primaryVid.fps ? ` (${primaryVid.fps} fps)` : '';
+          const codec = primaryVid.codec && primaryVid.codec !== 'unknown' ? ` • ${primaryVid.codec.toUpperCase()}` : '';
+          const duration = meta.durationFormatted || formatDurationSecs(meta.durationSec || meta.duration);
 
-          // Auto-update suggested output path for converter
+          const aTracks = meta.audioTracks || meta.audioStreams || [];
+          const aCount = aTracks.length;
+          const aLang = aTracks[0]?.language || aTracks[0]?.tags?.language || '';
+          const audioLabel = aCount > 0 ? `${aCount} Audio (${aLang && aLang !== 'und' ? aLang.toUpperCase() : 'Track 1'})` : 'No Audio';
+
+          const sTracks = meta.subtitleTracks || meta.subtitleStreams || [];
+          const sCount = sTracks.length;
+          const subLabel = sCount > 0 ? `${sCount} Subtitle${sCount === 1 ? '' : 's'}` : 'No Subtitles';
+
+          // Update badge in File & Media Tools UI
+          if (el.editorFileBadge) el.editorFileBadge.style.display = 'block';
+          if (el.editorBadgeFilename) el.editorBadgeFilename.textContent = fileName;
+          if (el.editorBadgeSize) el.editorBadgeSize.textContent = fileSize;
+          if (el.editorBadgeFormat) el.editorBadgeFormat.textContent = format;
+          if (el.editorBadgeRes) el.editorBadgeRes.textContent = `${res}${fps}${codec}`;
+          if (el.editorBadgeDuration) el.editorBadgeDuration.textContent = duration;
+          if (el.editorBadgeAudio) el.editorBadgeAudio.textContent = audioLabel;
+          if (el.editorBadgeSub) el.editorBadgeSub.textContent = subLabel;
+
+          // 1. Auto-update suggested output path for converter
           updateSuggestedOutputPath();
 
-          // Extract metadata & verified series/episode
-          const extractedMeta = extractMetadataFromFilename(meta.filename, meta.tags || {});
+          // 2. Extract metadata & verified series/episode
+          const extractedMeta = extractMetadataFromFilename(fileName, meta.tags || {});
           populateMetadataFields(meta, extractedMeta);
 
-          // Auto-populate subtitle query with clean Show + Episode or clean title
+          // 3. Auto-populate subtitle query with clean Show + Episode or clean title
           if (el.subSearchQuery) {
             if (extractedMeta.show && extractedMeta.episode) {
               const epPadded = extractedMeta.episode.padStart(2, '0');
               el.subSearchQuery.value = extractedMeta.season && extractedMeta.season !== '1'
                 ? `${extractedMeta.show} S${extractedMeta.season.padStart(2, '0')}E${epPadded}`
-                : `${extractedMeta.show} E${epPadded}`;
+                : `${extractedMeta.show} ${extractedMeta.episode}`;
             } else if (extractedMeta.title) {
               el.subSearchQuery.value = extractedMeta.title;
             }
           }
 
-          // Trigger Auto Web Subtitle Ripper if series & episode are verified
+          // 4. Trigger Auto Web Subtitle Ripper if series & episode are verified
           if (extractedMeta.show && extractedMeta.episode) {
             triggerAutoWebSubtitleRipper(filePath, extractedMeta);
+          }
+
+          if (!opts.silent) {
+            showToast(`📊 Analyzed: ${fileName} • ${res} • ${duration} • Preloaded!`);
           }
         } catch (err) {
           console.error('inspectTargetFile error:', err);
@@ -10600,9 +10627,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             title = epTitlePart || (show ? `${show} - Episode ${episode.padStart(2, '0')}` : `Episode ${episode}`);
           }
         } else {
-          // Pattern B: Series - 01 - Episode Title or Series Episode 01
+          // Pattern B: Series - 01 - Episode Title or Series 001 or Series Ep 01
           const epMatch = base.match(/(.*?)(?:[._ -]+|\b)(?:ep|episode|[._ -])\s*(\d{1,4})(?:[._ -]+|\b)(.*)/i)
-            || base.match(/(.*?)(?:[._ -]+|\b)-[._ -]+(\d{1,4})(?:[._ -]+|\b)(.*)/i);
+            || base.match(/(.*?)(?:[._ -]+|\b)-[._ -]+(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+            || base.match(/(.*?)\s+(\d{1,4})\s*(.*)/i);
 
           if (epMatch) {
             if (!show) show = cleanToken(epMatch[1]);
@@ -10675,8 +10703,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
             const topSub = res.onlineResults[0];
             if (topSub.downloadUrl) {
               const dlRes = await api.downloadSubtitle(topSub.downloadUrl);
-              if (dlRes && dlRes.success) {
-                if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
+              const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
+              if (targetPath) {
+                if (el.subEmbedFile) el.subEmbedFile.value = targetPath;
                 if (el.subEmbedLang) el.subEmbedLang.value = topSub.lang || targetLang;
                 if (el.subEmbedTitle) el.subEmbedTitle.value = `${(topSub.lang || targetLang).toUpperCase()} Subtitles`;
                 showToast(`⚡ Auto-ripped web subtitle for ${extractedMeta.show} Ep ${extractedMeta.episode}!`);
@@ -10715,9 +10744,18 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
       }
 
       if (el.editorSourcePath) {
-        el.editorSourcePath.addEventListener('change', () => {
+        let inspectDebounceTimer = null;
+        const triggerInspect = () => {
           const val = el.editorSourcePath.value.trim();
-          if (val) inspectTargetFile(val);
+          if (val && val !== currentProbedMeta?.filePath) {
+            inspectTargetFile(val);
+          }
+        };
+        el.editorSourcePath.addEventListener('change', triggerInspect);
+        el.editorSourcePath.addEventListener('paste', () => setTimeout(triggerInspect, 60));
+        el.editorSourcePath.addEventListener('input', () => {
+          clearTimeout(inspectDebounceTimer);
+          inspectDebounceTimer = setTimeout(triggerInspect, 450);
         });
       }
 
@@ -10930,9 +10968,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
               if (!sub.downloadUrl || !api.downloadSubtitle) return;
               showToast('Downloading subtitle...');
               const dlRes = await api.downloadSubtitle(sub.downloadUrl);
-              if (dlRes && dlRes.success) {
-                showToast('Subtitle saved: ' + dlRes.targetPath);
-                if (api.revealInExplorer) api.revealInExplorer(dlRes.targetPath);
+              const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
+              if (targetPath) {
+                showToast('Subtitle saved: ' + targetPath);
+                if (api.revealInExplorer) api.revealInExplorer(targetPath);
               } else {
                 showToast('Failed to download subtitle');
               }
@@ -10943,8 +10982,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:4500/api/control" -Method Post -Content
               if (!sub.downloadUrl || !api.downloadSubtitle) return;
               showToast('Downloading subtitle for embedder...');
               const dlRes = await api.downloadSubtitle(sub.downloadUrl);
-              if (dlRes && dlRes.success) {
-                if (el.subEmbedFile) el.subEmbedFile.value = dlRes.targetPath;
+              const targetPath = (typeof dlRes === 'string') ? dlRes : (dlRes?.targetPath || dlRes?.outputPath || (dlRes?.success ? dlRes.targetPath : null));
+              if (targetPath) {
+                if (el.subEmbedFile) el.subEmbedFile.value = targetPath;
                 if (el.subEmbedLang) el.subEmbedLang.value = sub.lang || 'eng';
                 if (el.subEmbedTitle) el.subEmbedTitle.value = `${sub.lang?.toUpperCase() || 'Online'} Subtitles`;
                 showToast('Subtitle ready for embedding!');
@@ -12537,20 +12577,30 @@ window.VLC_ICONS = {
                   <button class="stream-probe-btn" id="btn-editor-use-current" type="button" title="Load currently playing video in CopyCat">Use Playing</button>
                 </div>
 
-                <!-- Probed File Details Badge -->
-                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:10px;">
-                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                <!-- Probed File Details & Auto-Preload Analysis Card -->
+                <div id="editor-file-badge" class="stream-probe-card" style="display:none;margin-top:10px;padding:10px 14px;border:1px solid rgba(var(--accent-rgb),0.3);background:rgba(var(--accent-rgb),0.03);border-radius:8px;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
                     <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--text-primary);">
-                      <span id="editor-badge-filename" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">video.mp4</span>
+                      <span style="color:var(--accent);display:inline-flex;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <circle cx="12" cy="12" r="10"></circle>
+                          <line x1="12" y1="16" x2="12" y2="12"></line>
+                          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                      </span>
+                      <span id="editor-badge-filename" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">video.mp4</span>
                       <span id="editor-badge-size" class="update-status-pill" style="font-size:10px;padding:2px 6px;">0 MB</span>
                     </div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="editor-badge-pills">
-                      <span id="editor-badge-format" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">MP4</span>
-                      <span id="editor-badge-res" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">1920x1080</span>
-                      <span id="editor-badge-duration" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">00:00</span>
-                      <span id="editor-badge-audio" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Audio</span>
-                      <span id="editor-badge-sub" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Subs</span>
-                    </div>
+                    <span id="editor-badge-preload-status" class="update-status-pill" style="font-size:10px;background:rgba(46,196,182,0.15);color:#2EC4B6;border:1px solid rgba(46,196,182,0.3);padding:2px 8px;">
+                      ✓ Auto-Preloaded
+                    </span>
+                  </div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;" id="editor-badge-pills">
+                    <span id="editor-badge-format" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">MP4</span>
+                    <span id="editor-badge-res" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">1920x1080</span>
+                    <span id="editor-badge-duration" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">00:00</span>
+                    <span id="editor-badge-audio" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Audio</span>
+                    <span id="editor-badge-sub" class="update-status-pill" style="font-size:10px;background:rgba(255,255,255,0.06);">Subs</span>
                   </div>
                 </div>
               </div>
@@ -17034,8 +17084,13 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Extract container metadata, audio/subtitle tracks and tags via FFprobe',
     validate: (filePath) => typeof filePath === 'string' && filePath.trim().length > 0,
-    handler: ({ mediaEditor }, _evt, filePath) => {
-      return mediaEditor.probeMetadata(filePath);
+    handler: async ({ mediaEditor }, _evt, filePath) => {
+      try {
+        const res = await mediaEditor.probeMetadata(filePath);
+        return { success: true, ok: true, ...res };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
   },
 
@@ -17074,8 +17129,16 @@ const IPC_HANDLERS = {
     type: 'handle',
     description: 'Download online subtitle file to local temp path',
     validate: (url) => typeof url === 'string' && url.startsWith('http'),
-    handler: ({ mediaEditor }, _evt, url, targetPath) => {
-      return mediaEditor.downloadSubtitle(url, targetPath);
+    handler: async ({ mediaEditor }, _evt, url, targetPath) => {
+      try {
+        const res = await mediaEditor.downloadSubtitle(url, targetPath);
+        if (typeof res === 'string') {
+          return { success: true, ok: true, targetPath: res, outPath: res };
+        }
+        return { success: true, ok: true, ...res };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
   },
 
@@ -17481,12 +17544,18 @@ class MediaEditor {
           const sizeBytes = parseInt(fmt.size || '0', 10) || (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
 
           const result = {
+            success: true,
+            ok: true,
             filePath,
             fileName: path.basename(filePath),
+            filename: path.basename(filePath),
             formatName: fmt.format_name || path.extname(filePath).replace('.', '').toLowerCase(),
+            format: fmt.format_name || path.extname(filePath).replace('.', '').toLowerCase(),
             durationSec: duration,
+            duration: duration,
             durationFormatted: formatDuration(duration),
             sizeBytes,
+            size: sizeBytes,
             sizeFormatted: formatBytes(sizeBytes),
             bitRate: parseInt(fmt.bit_rate || '0', 10),
             chaptersCount: (data.chapters || []).length,
@@ -17506,6 +17575,7 @@ class MediaEditor {
               resolution: primaryVideo.width ? `${primaryVideo.width}x${primaryVideo.height}` : 'Unknown',
               fps: primaryVideo.r_frame_rate ? Math.round(eval(primaryVideo.r_frame_rate) || 0) : 0
             },
+            videoStream: primaryVideo,
             audioTracks: audioStreams.map((a, i) => ({
               index: a.index,
               trackNumber: i + 1,
@@ -17515,7 +17585,24 @@ class MediaEditor {
               title: a.tags?.title || a.tags?.handler_name || `Audio Track ${i + 1}`,
               isDefault: Boolean(a.disposition?.default)
             })),
+            audioStreams: audioStreams.map((a, i) => ({
+              index: a.index,
+              trackNumber: i + 1,
+              codec: a.codec_name || 'unknown',
+              channels: a.channels || 2,
+              language: a.tags?.language || a.tags?.lang || 'und',
+              title: a.tags?.title || a.tags?.handler_name || `Audio Track ${i + 1}`,
+              isDefault: Boolean(a.disposition?.default)
+            })),
             subtitleTracks: subtitleStreams.map((s, i) => ({
+              index: s.index,
+              trackNumber: i + 1,
+              codec: s.codec_name || 'unknown',
+              language: s.tags?.language || s.tags?.lang || 'und',
+              title: s.tags?.title || s.tags?.handler_name || `Subtitle ${i + 1}`,
+              isDefault: Boolean(s.disposition?.default)
+            })),
+            subtitleStreams: subtitleStreams.map((s, i) => ({
               index: s.index,
               trackNumber: i + 1,
               codec: s.codec_name || 'unknown',
@@ -17593,7 +17680,7 @@ class MediaEditor {
       child.on('close', (code) => {
         this.activeJobs.delete(jobId);
         if (code === 0 && fs.existsSync(outPath)) {
-          resolve({ ok: true, outputPath: outPath });
+          resolve({ success: true, ok: true, outputPath: outPath });
         } else {
           reject(new Error(errText.trim() || `FFmpeg exited with code ${code}`));
         }
@@ -17714,7 +17801,7 @@ class MediaEditor {
           if (typeof onProgress === 'function') {
             onProgress({ jobId, percent: 100, status: 'completed' });
           }
-          resolve({ ok: true, jobId, outputPath: finalOut });
+          resolve({ success: true, ok: true, jobId, outputPath: finalOut });
         } else {
           reject(new Error(lastStderr.trim() || `Conversion process exited with code ${code}`));
         }
@@ -17860,11 +17947,11 @@ class MediaEditor {
             zlib.gunzip(buf, (err, unzipped) => {
               if (err) return reject(err);
               fs.writeFileSync(outPath, unzipped);
-              resolve(outPath);
+              resolve({ success: true, ok: true, targetPath: outPath, outPath });
             });
           } else {
             fs.writeFileSync(outPath, buf);
-            resolve(outPath);
+            resolve({ success: true, ok: true, targetPath: outPath, outPath });
           }
         });
       });
@@ -17949,7 +18036,7 @@ class MediaEditor {
       child.on('close', (code) => {
         this.activeJobs.delete(jobId);
         if (code === 0 && fs.existsSync(finalOut)) {
-          resolve({ ok: true, jobId, outputPath: finalOut });
+          resolve({ success: true, ok: true, jobId, outputPath: finalOut });
         } else {
           reject(new Error(lastStderr.trim() || `FFmpeg subtitle embed failed with code ${code}`));
         }
@@ -21173,6 +21260,7 @@ module.exports = {
 
 ``````css
 :root {
+  color-scheme: dark;
   --accent: #E07A16;
   --accent-hover: #F59223;
   --accent-rgb: 224, 122, 22;
@@ -21205,6 +21293,7 @@ module.exports = {
 /* Light Mode Theme */
 [data-theme="light"],
 #app[data-theme="light"] {
+  color-scheme: light;
   --bg-void: #F2F4F7;
   --bg-bar: #FFFFFF;
   --bg-panel: rgba(255, 255, 255, 0.96);
@@ -22692,6 +22781,68 @@ html, body {
   background-color: #161616;
   color: #EAEAEA;
   padding: 6px 10px;
+}
+
+/* Universal Form Control & Native Dropdown Theming */
+select {
+  color-scheme: dark;
+  background-color: #18181c;
+  color: #f1f5f9;
+  border: 1px solid var(--border-panel, #282828);
+}
+
+select option,
+select optgroup {
+  background-color: #18181c !important;
+  color: #f1f5f9 !important;
+  padding: 8px 12px;
+}
+
+select option:checked,
+select option:hover {
+  background-color: var(--accent, #e07a16) !important;
+  color: #ffffff !important;
+}
+
+select.stream-url-field {
+  background-color: #16161a !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 6px !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+select.stream-url-field:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent) !important;
+}
+
+select.stream-url-field option {
+  background-color: #18181c !important;
+  color: #f1f5f9 !important;
+  padding: 8px 12px;
+}
+
+[data-theme="light"] select {
+  color-scheme: light;
+  background-color: #ffffff;
+  color: #1f2937;
+}
+
+[data-theme="light"] select option {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+[data-theme="light"] select.stream-url-field {
+  background-color: #f9fafb !important;
+  color: #1f2937 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+[data-theme="light"] select.stream-url-field option {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
 }
 
 .jux-range {
@@ -25850,6 +26001,45 @@ async function runAll() {
   runTest('MediaEditor cancelJob safely handles unknown jobIds', () => {
     const res = editor.cancelJob('nonexistent_job_123');
     assert.strictEqual(res, false, 'Canceling nonexistent job returns false');
+  });
+
+  runTest('MediaEditor metadata parsing and filename extraction contracts', () => {
+    // Test filename metadata extraction patterns
+    const parse = (filename) => {
+      let base = filename.replace(/\.[^/.]+$/, '');
+      base = base.replace(/^\[[^\]]+\]\s*/, '').trim();
+      base = base.replace(/\s*\[[0-9a-fA-F]{8}\]$/, '').trim();
+      base = base.replace(/\s*\([^)]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^)]*?\)/gi, '').trim();
+      base = base.replace(/\s*\[[^\]]*?(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|web-?dl|aac|flac)[^\]]*?\]/gi, '').trim();
+      const techRegex = /\b(?:1080p|720p|480p|2160p|4k|x264|x265|hevc|av1|bluray|bdrip|web-?dl|webrip|hdtv|dvdrip|aac|flac|dual-?audio|multi-?audio|10-?bit)\b/gi;
+      base = base.replace(techRegex, '').replace(/\s+/g, ' ').trim();
+
+      const seMatch = base.match(/(.*?)(?:[._ -]+|\b)[sS](\d{1,2})[eE](\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)(?:[._ -]+|\b)(\d{1,2})x(\d{1,4})(?:[._ -]+|\b)(.*)/i);
+      if (seMatch) {
+        return { show: seMatch[1].trim(), season: seMatch[2], episode: parseInt(seMatch[3], 10).toString() };
+      }
+      const epMatch = base.match(/(.*?)(?:[._ -]+|\b)(?:ep|episode|[._ -])\s*(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)(?:[._ -]+|\b)-[._ -]+(\d{1,4})(?:[._ -]+|\b)(.*)/i)
+        || base.match(/(.*?)\s+(\d{1,4})\s*(.*)/i);
+      if (epMatch) {
+        return { show: epMatch[1].trim(), season: '1', episode: parseInt(epMatch[2], 10).toString() };
+      }
+      return { show: '', season: '', episode: '', title: base.trim() };
+    };
+
+    const res1 = parse('Bleach 001.mp4');
+    assert.strictEqual(res1.show, 'Bleach', 'Extracts show Bleach');
+    assert.strictEqual(res1.episode, '1', 'Extracts episode 1 from Bleach 001');
+
+    const res2 = parse('[SubsPlease] Bleach - 01 (1080p) [98A53B3C].mkv');
+    assert.strictEqual(res2.show, 'Bleach', 'Extracts show from release group tags');
+    assert.strictEqual(res2.episode, '1', 'Extracts episode 1');
+
+    const res3 = parse('Attack on Titan S04E28.mkv');
+    assert.strictEqual(res3.show, 'Attack on Titan', 'Extracts show Attack on Titan');
+    assert.strictEqual(res3.season, '04', 'Extracts season 04');
+    assert.strictEqual(res3.episode, '28', 'Extracts episode 28');
   });
 
   console.log('\n====================================================');

@@ -116,12 +116,18 @@ class MediaEditor {
           const sizeBytes = parseInt(fmt.size || '0', 10) || (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
 
           const result = {
+            success: true,
+            ok: true,
             filePath,
             fileName: path.basename(filePath),
+            filename: path.basename(filePath),
             formatName: fmt.format_name || path.extname(filePath).replace('.', '').toLowerCase(),
+            format: fmt.format_name || path.extname(filePath).replace('.', '').toLowerCase(),
             durationSec: duration,
+            duration: duration,
             durationFormatted: formatDuration(duration),
             sizeBytes,
+            size: sizeBytes,
             sizeFormatted: formatBytes(sizeBytes),
             bitRate: parseInt(fmt.bit_rate || '0', 10),
             chaptersCount: (data.chapters || []).length,
@@ -141,6 +147,7 @@ class MediaEditor {
               resolution: primaryVideo.width ? `${primaryVideo.width}x${primaryVideo.height}` : 'Unknown',
               fps: primaryVideo.r_frame_rate ? Math.round(eval(primaryVideo.r_frame_rate) || 0) : 0
             },
+            videoStream: primaryVideo,
             audioTracks: audioStreams.map((a, i) => ({
               index: a.index,
               trackNumber: i + 1,
@@ -150,7 +157,24 @@ class MediaEditor {
               title: a.tags?.title || a.tags?.handler_name || `Audio Track ${i + 1}`,
               isDefault: Boolean(a.disposition?.default)
             })),
+            audioStreams: audioStreams.map((a, i) => ({
+              index: a.index,
+              trackNumber: i + 1,
+              codec: a.codec_name || 'unknown',
+              channels: a.channels || 2,
+              language: a.tags?.language || a.tags?.lang || 'und',
+              title: a.tags?.title || a.tags?.handler_name || `Audio Track ${i + 1}`,
+              isDefault: Boolean(a.disposition?.default)
+            })),
             subtitleTracks: subtitleStreams.map((s, i) => ({
+              index: s.index,
+              trackNumber: i + 1,
+              codec: s.codec_name || 'unknown',
+              language: s.tags?.language || s.tags?.lang || 'und',
+              title: s.tags?.title || s.tags?.handler_name || `Subtitle ${i + 1}`,
+              isDefault: Boolean(s.disposition?.default)
+            })),
+            subtitleStreams: subtitleStreams.map((s, i) => ({
               index: s.index,
               trackNumber: i + 1,
               codec: s.codec_name || 'unknown',
@@ -228,7 +252,7 @@ class MediaEditor {
       child.on('close', (code) => {
         this.activeJobs.delete(jobId);
         if (code === 0 && fs.existsSync(outPath)) {
-          resolve({ ok: true, outputPath: outPath });
+          resolve({ success: true, ok: true, outputPath: outPath });
         } else {
           reject(new Error(errText.trim() || `FFmpeg exited with code ${code}`));
         }
@@ -349,7 +373,7 @@ class MediaEditor {
           if (typeof onProgress === 'function') {
             onProgress({ jobId, percent: 100, status: 'completed' });
           }
-          resolve({ ok: true, jobId, outputPath: finalOut });
+          resolve({ success: true, ok: true, jobId, outputPath: finalOut });
         } else {
           reject(new Error(lastStderr.trim() || `Conversion process exited with code ${code}`));
         }
@@ -495,11 +519,11 @@ class MediaEditor {
             zlib.gunzip(buf, (err, unzipped) => {
               if (err) return reject(err);
               fs.writeFileSync(outPath, unzipped);
-              resolve(outPath);
+              resolve({ success: true, ok: true, targetPath: outPath, outPath });
             });
           } else {
             fs.writeFileSync(outPath, buf);
-            resolve(outPath);
+            resolve({ success: true, ok: true, targetPath: outPath, outPath });
           }
         });
       });
@@ -584,7 +608,7 @@ class MediaEditor {
       child.on('close', (code) => {
         this.activeJobs.delete(jobId);
         if (code === 0 && fs.existsSync(finalOut)) {
-          resolve({ ok: true, jobId, outputPath: finalOut });
+          resolve({ success: true, ok: true, jobId, outputPath: finalOut });
         } else {
           reject(new Error(lastStderr.trim() || `FFmpeg subtitle embed failed with code ${code}`));
         }

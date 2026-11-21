@@ -4,9 +4,9 @@
 ================================================================================
 Projekt:            CopyCat Media Player (VLCopyCat)
 Konversations-ID:   fb4f3e06-9c9c-4258-8fbf-fedb3b540a07
-Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T08:05:21Z
-Gesamtanzahl Turns: 434 Dialogschritte
-Zuletzt aktualisiert: 2026-11-21 09:11:05
+Zeitraum:           2026-10-30T22:00:03Z bis 2026-11-21T08:32:07Z
+Gesamtanzahl Turns: 435 Dialogschritte
+Zuletzt aktualisiert: 2026-11-21 09:42:31
 ================================================================================
 
 --------------------------------------------------------------------------------
@@ -24475,7 +24475,106 @@ Die direkte Einbindung von Stream-URLs per **Drag & Drop** sowie per **Zwischena
 BENUTZER:
 fir the first screenshot, please explain what everything is. for the second screenshot, I'd also like to implement a dragn drop feature, when I'm on this window and dragn drop a file in it, it uses that file instead of start playin it, also please change the preset from hun to english also implement an auto web subtitle ripper when the serie and episode is verified. for the metadata please don't use examples and maybe optimize the metadata autofillin
 
-[Hintergrund-Aktionen: run_command (14), read_file (14), edit_file (8)]
+[Hintergrund-Aktionen: run_command (19), read_file (14), edit_file (8)]
+
+ANTIGRAVITY / ASSISTENT:
+Here is the detailed breakdown of the **Format Converter** and the implementations completed across the **File & Media Tools**:
+
+---
+
+### 1. Breakdown of Screenshot 1: Format Converter
+
+The **Format Converter** is an integrated FFmpeg audio/video processing suite designed to convert containers and extract audio losslessly or re-encode media on-the-fly.
+
+#### **Target Video File (Header Section)**
+* **Input Field (`Select or paste a video file path`)**: Shows the path of the active video file being inspected and modified. You can type or paste a Windows file path directly here.
+* **`Browse...` Button**: Opens the native Windows File Picker dialog allowing you to select any local video container (`.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.ts`, `.flv`, etc.).
+* **`Use Playing` Button**: Instantly grabs the file path of whatever media is currently playing in CopyCat without having to browse your file system manually.
+
+#### **Sub-Navigation Tabs**
+* **Format Converter**: Container remuxing, video transcoding, and audio stream extraction.
+* **Subtitle Embedder & Lookup**: Searching local/online subtitles and soft-muxing or burning subtitles into video containers.
+* **Metadata & Tags**: Inspecting, editing, and lossless writing of container-level tags (Title, Series, Episode, Season, Year, Artist, Synopsis, and Audio Language).
+
+#### **Video & Audio Container Converter Controls**
+* **Target Format / Container Dropdown**:
+  * **MP4 (`.mp4 - Universal Compatibility`)**: The industry-standard MPEG-4 container. Supported natively across virtually all smart TVs, web browsers, mobile devices, and gaming consoles.
+  * **MKV (`.mkv - Matroska Multimedia`)**: High-capability container supporting multiple audio streams, styled ASS/SSA subtitle tracks, chapter marks, and high-efficiency codecs.
+  * **WebM (`.webm - Web & VP9/AV1`)**: Lightweight open container format optimized for web streaming and Chromium playback.
+  * **Audio Extraction Modes (`MP3`, `AAC .m4a`, `FLAC`)**: Extracts the audio track directly from your video file into a standalone audio file.
+* **Conversion Engine Mode Dropdown**:
+  * **Fast Stream Remux (`Lossless, ~2 sec, 0 re-encode`)**: Uses FFmpeg stream copying (`-c copy`). It packages existing video and audio bitstreams into the new target container without touching a single pixel or audio sample. **Zero quality loss** and finishes in roughly 1–3 seconds.
+  * **High Quality H.264 Re-encode (`CRF 20, Preset Medium`)**: Full video transcode using standard x264. Ideal for fixing broken or corrupt source files or preparing video for legacy devices.
+  * **High Efficiency HEVC / H.265 Re-encode (`CRF 23`)**: Uses x265 compression to produce files roughly 50% smaller than H.264 at identical visual quality.
+  * **Ultra-Fast Draft Encode (`Fastest, CRF 26`)**: Rapid lower-bitrate encode when quick exports or previews are needed.
+* **Custom Destination File (Optional)**:
+  * Allows you to choose an explicit output directory and filename via the **`Choose...`** button.
+  * If left empty, CopyCat automatically generates the output file in the same directory as the source video with the new container extension (e.g. `movie.mkv` → `movie.mp4`).
+* **`Start Conversion` Button**:
+  * Spawns the background FFmpeg process, displaying a progress bar, elapsed time, and ETA. You can continue watching media or browsing while it converts.
+
+*(Note regarding the Main Home Screen: The mascot screen provides the central dropzone, quick buttons to **Open Media File** or **Open Folder**, and the top bar provides direct access to the stream sniffer/URL player via the **Stream** button.)*
+
+---
+
+### 2. Subtitle Embedder & Lookup: Drag & Drop + English Presets + Auto Web Ripper
+
+All requested features for the **Subtitle Embedder & Lookup** have been implemented:
+
+1. **Smart Context-Aware Drag-and-Drop**:
+   * When the **File & Media Tools** window is open, dragging and dropping a video file into the window now loads it into the editor (`Target Video File`) and inspects it **instead of starting playback**.
+   * If you drop a subtitle file (`.srt`, `.vtt`, `.ass`, `.ssa`, `.sub`), CopyCat loads it directly into **`Selected Subtitle File`** and switches automatically to the Subtitle Embedder tab.
+   * The drag overlay text dynamically updates to reflect this: *"Drop file here to load into File & Media Tools"*.
+2. **Default Language Preset Changed to English**:
+   * Subtitle search dropdown now defaults to **English (`eng`)**.
+   * Track Language Code input field defaults to **`eng`**.
+   * Track Display Title defaults to **`English Subtitles`**.
+3. **Auto Web Subtitle Ripper**:
+   * When an anime/series filename is parsed and the episode/series is verified (e.g., `Show S01E03` or `Show - 05`):
+     1. CopyCat checks the local folder for matching companion subtitle files.
+     2. It queries OpenSubtitles in English (`eng`) in the background.
+     3. If online English subtitles are found, the top result is automatically downloaded and staged into the **`Selected Subtitle File`** field ready for one-click embedding, with a toast notification: `⚡ Auto-ripped web subtitle for <Show> Ep <Ep>!`.
+
+---
+
+### 3. Metadata & Tags: Clean Placeholders & Optimized Autofill
+
+1. **Removed All Hardcoded Examples**:
+   * Removed anime/movie titles (`Bleach`, `The Day I Became a Shinigami`, `Studio Pierrot / Tite Kubo`, `2004`) from all inputs.
+   * Placeholders are now clean and generic:
+     * *Title / Episode Title*: `"Episode or media title"`
+     * *Series / Show Name*: `"Series or show name"`
+     * *Season Number*: `"Season number (e.g. 1)"`
+     * *Episode Number*: `"Episode number (e.g. 1)"`
+     * *Release Year / Date*: `"Release year (YYYY)"`
+     * *Artist / Author / Studio*: `"Studio, creator, or artist"`
+     * *Description / Synopsis*: `"Episode or movie synopsis..."`
+     * *Audio Stream 1 Language Tag*: `"eng, jpn, ger..."`
+2. **Optimized Metadata Autofill Engine (`extractMetadataFromFilename`)**:
+   * **Strips Release Groups**: Filters out release groups in brackets (e.g. `[SubsPlease]`, `[Erai-raws]`, `[HorribleSubs]`, `[Judas]`, etc.).
+   * **Strips CRC32 Checksums**: Automatically removes trailing hash blocks (e.g. `[98A53B3C]`).
+   * **Filters Codec & Resolution Clutter**: Removes tags like `1080p`, `720p`, `4k`, `x264`, `x265`, `HEVC`, `AAC`, `WEBRip`, `BluRay`, etc.
+   * **Season & Episode Recognition**: Accurately recognizes `S01E05`, `1x05`, `Show - 05`, or multi-part episode titles.
+   * **Release Year Extraction**: Extracts 4-digit release years (e.g., `(2023)`).
+   * **Audio Language Detection**: Probes the real primary audio stream language directly from FFprobe.
+
+---
+
+### Verification & Repository Status
+
+* **Automated Regression Suite**: All **70 / 70 tests passed** ([test-suite.js](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/tests/test-suite.js)).
+* **NotebookLM Sync**: [CopyCat-Gesamtprojekt.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Gesamtprojekt.txt) and [CopyCat-Konversationsprotokoll.txt](file:///C:/Users/Schual/Desktop/VLCopyCat-Master/CopyCat-Konversationsprotokoll.txt) have been regenerated.
+* **Master Repository**: Changes have been committed and pushed to `origin/master` (commit `f8d21b3`).
+* **Offline Backup**: `C:\Users\Schual\Desktop\VLCopyCat-Master-Backup` remains untouched.
+
+
+--------------------------------------------------------------------------------
+[DIALOG #435] | Schritt 24432 | Zeitstempel: 2026-11-21T08:32:07Z (Anhänge: 1)
+--------------------------------------------------------------------------------
+BENUTZER:
+let's change the color of the dropdown so I can see what it says. also when a file is droped in copycat should make a short analyzis of it and preload everything outomaticly
+
+[Hintergrund-Aktionen: read_file (44), run_command (20), edit_file (16)]
 
 ANTIGRAVITY / ASSISTENT:
 (Turn in Bearbeitung / Analyse aktiv)

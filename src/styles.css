@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --accent: #E07A16;
   --accent-hover: #F59223;
   --accent-rgb: 224, 122, 22;
@@ -31,6 +32,7 @@
 /* Light Mode Theme */
 [data-theme="light"],
 #app[data-theme="light"] {
+  color-scheme: light;
   --bg-void: #F2F4F7;
   --bg-bar: #FFFFFF;
   --bg-panel: rgba(255, 255, 255, 0.96);
@@ -1518,6 +1520,68 @@ html, body {
   background-color: #161616;
   color: #EAEAEA;
   padding: 6px 10px;
+}
+
+/* Universal Form Control & Native Dropdown Theming */
+select {
+  color-scheme: dark;
+  background-color: #18181c;
+  color: #f1f5f9;
+  border: 1px solid var(--border-panel, #282828);
+}
+
+select option,
+select optgroup {
+  background-color: #18181c !important;
+  color: #f1f5f9 !important;
+  padding: 8px 12px;
+}
+
+select option:checked,
+select option:hover {
+  background-color: var(--accent, #e07a16) !important;
+  color: #ffffff !important;
+}
+
+select.stream-url-field {
+  background-color: #16161a !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 6px !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+select.stream-url-field:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent) !important;
+}
+
+select.stream-url-field option {
+  background-color: #18181c !important;
+  color: #f1f5f9 !important;
+  padding: 8px 12px;
+}
+
+[data-theme="light"] select {
+  color-scheme: light;
+  background-color: #ffffff;
+  color: #1f2937;
+}
+
+[data-theme="light"] select option {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+[data-theme="light"] select.stream-url-field {
+  background-color: #f9fafb !important;
+  color: #1f2937 !important;
+  border: 1px solid #d1d5db !important;
+}
+
+[data-theme="light"] select.stream-url-field option {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
 }
 
 .jux-range {
